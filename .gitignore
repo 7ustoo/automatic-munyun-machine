@@ -11,6 +11,10 @@ cv.pdf
 data/
 !data/.gitkeep
 
+# Private context (personal info, locked policy values, live PIDs) — local only
+CONTEXT-PRIVATE.md
+*PRIVATE*.md
+
 # Node
 node_modules/
 npm-debug.log*
