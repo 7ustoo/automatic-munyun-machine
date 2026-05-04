@@ -22,8 +22,14 @@ const ROOT = path.join(__dirname, '..');
 const DATE = new Date().toISOString().slice(0, 10);
 
 // ---------- env ----------
+const ENV_PATH = path.join(ROOT, '.env');
+if (!fs.existsSync(ENV_PATH)) {
+  console.error('❌ Missing .env file at ' + ENV_PATH);
+  console.error('   Run: node scripts/setup-wizard.mjs');
+  process.exit(1);
+}
 const env = Object.fromEntries(
-  fs.readFileSync(path.join(ROOT, '.env'), 'utf8')
+  fs.readFileSync(ENV_PATH, 'utf8')
     .split('\n')
     .filter(l => l && !l.startsWith('#') && l.includes('='))
     .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
@@ -179,13 +185,20 @@ async function scrape() {
   log('✓ logged in');
   recordAuthOk();
   const results = {};
+  // Map config's applicationFormEase → hiring.cafe URL filter
+  const formEase = (CFG.filters?.applicationFormEase || 'all').toLowerCase();
+  const formEaseFilter = formEase === 'simple' ? ['Simple']
+                        : formEase === 'long'  ? ['TimeConsuming']
+                        : null; // 'all' or anything else → no filter
+
   for (const [key, query] of QUERIES) {
-    const url = 'https://hiring.cafe/?searchState='
-      + encodeURIComponent(JSON.stringify({
-          searchQuery: query,
-          workplaceTypes: ['Remote'],
-          hideJobTypes: ['Saved', 'Applied', 'Viewed']
-        }));
+    const searchState = {
+      searchQuery: query,
+      workplaceTypes: ['Remote'],
+      hideJobTypes: ['Saved', 'Applied', 'Viewed']
+    };
+    if (formEaseFilter) searchState.applicationFormEase = formEaseFilter;
+    const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
     let rows = [];
     for (let attempt = 1; attempt <= 3; attempt++) {
@@ -404,6 +417,26 @@ function writeBatchTsv(top, directUrls) {
   }).join('\n');
   fs.writeFileSync(path.join(dir, `today-batch-${DATE}.tsv`), tsv + '\n');
   fs.writeFileSync(path.join(dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
+
+  // Rich per-job match details, used by the bot's /why N command
+  const lastBatch = {
+    date: DATE,
+    generatedAt: new Date().toISOString(),
+    jobs: top.map((r, i) => ({
+      idx: i + 1,
+      id: r.href.split('/').pop(),
+      title: r.title,
+      company: r.company,
+      yoe: r.yoe,
+      q: r.q,
+      score: r.score ?? 0,
+      matchPct: r.matchPct ?? 0,
+      matched: r.matched || [],
+      directUrl: directUrls[i] || '',
+      viewjobUrl: r.href
+    }))
+  };
+  fs.writeFileSync(path.join(dir, 'last-batch.json'), JSON.stringify(lastBatch, null, 2));
 }
 
 (async () => {

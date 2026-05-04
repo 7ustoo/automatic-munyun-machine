@@ -2,8 +2,6 @@
 
 > Wake up to your morning coffee, the Miami weather, and 100 jobs sorted by how well they match your CV — delivered straight to Telegram every weekday at 7am. Apply, save, and track from your phone.
 
-![Telegram screenshot placeholder](docs/screenshot.png)
-
 ## What it does
 
 - **Daily 100-job batch.** Scrapes hiring.cafe across 15 search queries (IAM, Cloud Security, Cybersecurity, M365, Linux, etc.).
@@ -36,28 +34,60 @@ npx playwright install chromium
 node scripts/setup-wizard.mjs
 ```
 
-## Setup wizard — 5 steps, ~90 seconds
+## Setup wizard — 10 steps, ~3 minutes
 
 1. **Telegram bot.** Wizard walks you through @BotFather to create one, validates the token.
 2. **Chat ID.** Send any message to your bot, wizard auto-detects your chat ID.
 3. **hiring.cafe login.** Browser opens, you sign in with Google once. Session persists.
 4. **Resume.** Drop a path to your PDF / DOCX / MD resume. Wizard parses skills, certs, titles.
-5. **Schedule.** Pick time + days. Wizard registers Windows Task Scheduler.
+5. **Auto-suggested job titles.** Wizard reads your CV and proposes 10-12 search titles. Accept all, pick a subset, or keep defaults.
+6. **Years of experience.** Max YOE you'd accept on a job listing.
+7. **Salary floor.** Used for ranking (bonus above floor, penalty below).
+8. **Clearance filter.** Toggle on/off — drop or include gov clearance jobs.
+9. **Your city.** Auto-geocoded for the morning weather report.
+10. **Schedule.** Pick time + days. Wizard registers Windows Task Scheduler.
 
-After setup, the bot runs in the background and delivers a batch every weekday morning.
+After setup, the bot runs in the background and delivers a batch every weekday morning. Every wizard answer is later editable from your phone via Telegram commands.
 
 ## Telegram commands
 
+### Core actions
 | Command | Action |
 |---|---|
-| `/daily`, `gm`, `morning` | Run a fresh batch now (1-2 min) |
-| `/weather` | Just the weather |
+| `/scrape`, `/daily`, `gm`, `morning` | Run a fresh batch now (1-2 min). Run as often as you want. |
+| `/save N` | Bookmark job #N on hiring.cafe |
+| `/applied N` | Mark applied (also logs to applications.md) |
+| `/why N` | Explain why job #N got its match % |
+
+### Settings — edit from your phone (NEW in v0.3)
+| Command | Action |
+|---|---|
+| `/settings` | Show current config in one message |
+| `/resume` | Upload a new resume (PDF/DOCX/MD); bot re-parses skills |
+| `/jobs` | List current search titles |
+| `/jobs add "Title"` | Add a search title |
+| `/jobs remove "Title"` | Remove a search title |
+| `/jobs suggest` | Bot reads your CV and proposes new titles |
+| `/yoe N` | Set max years of experience |
+| `/salary N` | Set salary floor in $K (e.g. `/salary 120`) |
+| `/clearance on/off` | Toggle gov clearance filter |
+| `/forms all\|simple\|long` | Application form filter — `all` (default), `simple` (Easy Apply, no account needed), `long` (multi-step apps only) |
+| `/skip <company>` | Never show this company again |
+| `/unskip <company>` | Reverse it |
+| `/city <name>` | Change weather city (auto-geocoded) |
+| `/schedule HH:MM` | Change daily push time |
+
+### Maintenance
+| Command | Action |
+|---|---|
 | `/auth` | Verify hiring.cafe login |
 | `/reauth` | Trigger re-login on your computer |
-| `/save N` | Bookmark job #N from latest batch |
-| `/applied N` | Mark job #N applied (also logs to applications.md) |
 | `/pause` | Stop the daily 7am push |
 | `/resume-bot` | Re-enable the daily 7am push |
+| `/forget all` | Wipe seen-jobs memory |
+| `/forget last` | Un-memorize the most recent batch |
+| `/cancel` | Cancel a multi-step interaction |
+| `/weather` | Just the weather |
 | `/test`, `/ping` | Bot health check |
 | `/help` | Show this list |
 
@@ -139,10 +169,11 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 
 ## Roadmap
 
-- v0.2 (current): Setup wizard, install one-liner, configurable everything
-- v0.3: Inno Setup .exe installer, Mac/Linux support
-- v1.0: Tauri desktop GUI with dashboard, history calendar, application Kanban
-- v2.0: LLM rerank (opt-in, BYO Anthropic key), analytics, multi-resume profiles
+- ✅ **v0.2** — Setup wizard, install one-liner, configurable everything (shipped)
+- ✅ **v0.3** *(current)* — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms` filter, `/jobs suggest`, `/why N` (shipped on `v0.3` branch as pre-release)
+- **v0.4** — Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline button picker
+- **v1.0** — Tauri desktop GUI with dashboard, history calendar, application Kanban
+- **v2.0** — LLM rerank (opt-in, BYO Anthropic key), analytics, multi-resume profiles
 
 ## License
 

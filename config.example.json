@@ -27,6 +27,8 @@
 
   "filters": {
     "filterClearance": true,
+    "applicationFormEase": "all",
+    "_applicationFormEaseValues": "all (default) | simple (only Simple Apps - no account creation) | long (only Time Consuming Apps)",
     "skipCompanies": ["Alpha FMC", "ECS", "Experis", "Verinext", "First Citizens", "AMD"],
     "dropTitlePatterns": [
       "Manager", "Principal", "Director", "Head of", "VP", "Vice President", "Chief",

@@ -13,7 +13,20 @@
     "Linux Administrator", "Linux Sysadmin", "Linux System Administrator",
     "Systems Administrator", "M365 Engineer", "M365 Administrator", "Microsoft 365 Engineer",
     "Microsoft 365 Administrator", "Azure Administrator", "Azure Engineer", "Site Reliability Engineer",
-    "Platform Engineer", "Infrastructure Engineer", "DevOps Engineer", "GRC Analyst", "Compliance Analyst"
+    "Platform Engineer", "Infrastructure Engineer", "DevOps Engineer", "GRC Analyst", "Compliance Analyst",
+    "Software Engineer", "Senior Software Engineer", "Staff Engineer", "Principal Engineer",
+    "Backend Engineer", "Frontend Engineer", "Full Stack Engineer", "Full-Stack Engineer", "Mobile Engineer",
+    "iOS Engineer", "Android Engineer", "Embedded Engineer", "Firmware Engineer", "Game Developer",
+    "Data Engineer", "Senior Data Engineer", "Analytics Engineer", "Big Data Engineer", "Data Architect",
+    "Data Scientist", "Senior Data Scientist", "Machine Learning Engineer", "ML Engineer", "AI Engineer",
+    "Research Engineer", "Computer Vision Engineer", "NLP Engineer",
+    "Product Designer", "UX Designer", "UI Designer", "Visual Designer", "Design Engineer",
+    "Product Manager", "Senior Product Manager", "Technical Product Manager", "Product Marketing Manager",
+    "Engineering Manager", "Tech Lead", "Technical Lead",
+    "QA Engineer", "Test Automation Engineer", "SDET",
+    "Database Administrator", "DBA", "Database Engineer",
+    "Network Engineer", "Network Administrator", "Network Architect",
+    "Helpdesk Technician", "IT Support Specialist", "Field Engineer"
   ],
 
   "certs": [
@@ -98,7 +111,33 @@
     "EC2", "S3", "RDS", "DynamoDB", "Lambda", "ECS", "EKS", "Fargate",
     "CloudTrail", "CloudWatch", "VPC Flow Logs",
     "JSON", "YAML", "SQL", "T-SQL", "MySQL", "PostgreSQL", "MongoDB",
-    "Git", "GitHub", "GitLab", "Bitbucket"
+    "Git", "GitHub", "GitLab", "Bitbucket",
+
+    "JavaScript", "TypeScript", "Node.js", "Deno", "Bun", "Express", "Fastify", "NestJS",
+    "React", "Next.js", "Remix", "Svelte", "SvelteKit", "Vue", "Nuxt", "Angular", "Solid",
+    "Tailwind", "Tailwind CSS", "shadcn", "Radix UI", "MUI", "Material UI", "Chakra",
+    "Java", "Spring", "Spring Boot", "Kotlin",
+    "Go", "Golang", "Gin", "Echo", "Fiber",
+    "Rust", "Actix", "Axum", "Tokio",
+    "C", "C++", "C#", ".NET", "ASP.NET",
+    "Ruby", "Ruby on Rails", "Rails",
+    "PHP", "Laravel", "Symfony",
+    "Swift", "SwiftUI", "Objective-C", "Kotlin Multiplatform",
+    "Flutter", "React Native", "Expo",
+    "GraphQL", "Apollo", "tRPC", "gRPC", "Protocol Buffers",
+    "Redis", "Memcached", "Cassandra", "Neo4j",
+    "Apache Spark", "Spark", "Hadoop", "Apache Kafka", "Kafka", "Pulsar", "RabbitMQ",
+    "Apache Airflow", "Airflow", "Dagster", "Prefect",
+    "dbt", "Fivetran", "Stitch", "Matillion",
+    "Snowflake", "Redshift", "BigQuery", "Databricks", "Synapse",
+    "Tableau", "Looker", "Power BI", "Mode Analytics", "Hex",
+    "PyTorch", "TensorFlow", "JAX", "Keras", "Hugging Face", "Transformers",
+    "scikit-learn", "pandas", "numpy", "matplotlib", "Jupyter",
+    "OpenAI API", "Anthropic API", "LangChain", "LlamaIndex", "RAG", "Vector Database",
+    "Pinecone", "Weaviate", "Qdrant", "Chroma", "Milvus",
+    "Figma", "Sketch", "Adobe XD", "InVision", "Framer",
+    "Datadog", "New Relic", "Grafana", "Prometheus", "Sentry", "OpenTelemetry",
+    "Jest", "Mocha", "Chai", "Cypress", "Playwright", "Puppeteer", "Selenium", "Vitest"
   ],
 
   "compliance": [

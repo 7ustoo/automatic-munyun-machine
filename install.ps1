@@ -20,7 +20,7 @@ Write-Host $banner -ForegroundColor Cyan
 
 # 1. Pick install location
 $INSTALL_DIR = Join-Path $env:LOCALAPPDATA 'automatic-munyun-machine'
-$REPO_URL = 'https://github.com/7ustoo/automatic-munyun-machine.git'  # update before publishing
+$REPO_URL = 'https://github.com/7ustoo/automatic-munyun-machine.git'
 
 # 2. Node.js
 if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
