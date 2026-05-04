@@ -157,6 +157,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine</b>
 /yoe N               → set max years of experience
 /salary N            → set salary floor in $K (e.g. /salary 120)
 /clearance on/off    → toggle gov clearance filter
+/forms all/simple/long → application form filter (Easy Apply etc.)
 /skip &lt;company&gt;      → never show this company again
 /unskip &lt;company&gt;    → reverse it
 /city &lt;name&gt;         → change weather city
@@ -317,6 +318,7 @@ async function handleMessage(msg) {
         `<b>Years exp:</b>  max ${cfg.user?.maxYoeAcceptable ?? 5}`,
         `<b>Salary:</b>     floor $${(cfg.user?.salaryFloorUsd || 0).toLocaleString()}`,
         `<b>Clearance:</b>  ${cfg.filters?.filterClearance === false ? 'INCLUDED in results' : 'filtered OUT'}`,
+        `<b>Forms:</b>      ${{ all: 'all (default)', simple: 'Simple only (quick apps)', long: 'Time-consuming only' }[cfg.filters?.applicationFormEase || 'all']}`,
         `<b>Weather:</b>    ${cfg.weather?.city || '?'} (${cfg.weather?.lat}, ${cfg.weather?.lon})`,
         `<b>Schedule:</b>   ${cfg.schedule?.time || '?'} ${(cfg.schedule?.days || []).map(d => d.slice(0, 3)).join('/')}`,
         '',
@@ -326,7 +328,7 @@ async function handleMessage(msg) {
         skip.length ? `<b>Skip list (${skip.length}):</b> ${skip.join(', ')}` : '<b>Skip list:</b> empty',
         `<b>Memory:</b>     ${seen} jobs seen`,
         '',
-        '<i>Edit any: /yoe N · /salary N · /clearance on/off · /city &lt;name&gt; · /schedule HH:MM · /skip · /unskip · /jobs · /resume · /forget</i>'
+        '<i>Edit any: /yoe N · /salary N · /clearance on/off · /forms all|simple|long · /city &lt;name&gt; · /schedule HH:MM · /skip · /unskip · /jobs · /resume · /forget</i>'
       ];
       return reply(chatId, lines.join('\n'));
     } catch (e) {
@@ -358,6 +360,21 @@ async function handleMessage(msg) {
     return reply(chatId, filterOn
       ? '🛡️ Clearance filter <b>ON</b> — gov clearance jobs will be filtered OUT.'
       : '🛡️ Clearance filter <b>OFF</b> — gov clearance jobs will be INCLUDED.');
+  }
+
+  // /forms all|simple|long — hiring.cafe applicationFormEase toggle
+  const formsM = text.match(/^\/?forms\s+(all|simple|long|easy|time)\b/);
+  if (formsM) {
+    let v = formsM[1];
+    if (v === 'easy') v = 'simple';   // alias
+    if (v === 'time') v = 'long';     // alias
+    cfgRW.set('filters.applicationFormEase', v);
+    const labels = {
+      all:    'All Application Forms (no filter — both quick and long apps)',
+      simple: 'Simple Application Forms only (no account creation, fast apply)',
+      long:   'Time Consuming Application Forms only (longer/multi-step apps)'
+    };
+    return reply(chatId, `📝 Application form filter: <b>${labels[v]}</b>`);
   }
 
   // /skip <company>

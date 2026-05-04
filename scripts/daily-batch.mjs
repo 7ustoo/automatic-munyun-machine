@@ -179,13 +179,20 @@ async function scrape() {
   log('✓ logged in');
   recordAuthOk();
   const results = {};
+  // Map config's applicationFormEase → hiring.cafe URL filter
+  const formEase = (CFG.filters?.applicationFormEase || 'all').toLowerCase();
+  const formEaseFilter = formEase === 'simple' ? ['Simple']
+                        : formEase === 'long'  ? ['TimeConsuming']
+                        : null; // 'all' or anything else → no filter
+
   for (const [key, query] of QUERIES) {
-    const url = 'https://hiring.cafe/?searchState='
-      + encodeURIComponent(JSON.stringify({
-          searchQuery: query,
-          workplaceTypes: ['Remote'],
-          hideJobTypes: ['Saved', 'Applied', 'Viewed']
-        }));
+    const searchState = {
+      searchQuery: query,
+      workplaceTypes: ['Remote'],
+      hideJobTypes: ['Saved', 'Applied', 'Viewed']
+    };
+    if (formEaseFilter) searchState.applicationFormEase = formEaseFilter;
+    const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
     let rows = [];
     for (let attempt = 1; attempt <= 3; attempt++) {

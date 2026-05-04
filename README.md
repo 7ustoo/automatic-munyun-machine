@@ -73,6 +73,7 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/yoe N` | Set max years of experience |
 | `/salary N` | Set salary floor in $K (e.g. `/salary 120`) |
 | `/clearance on/off` | Toggle gov clearance filter |
+| `/forms all\|simple\|long` | Application form filter — `all` (default), `simple` (Easy Apply, no account needed), `long` (multi-step apps only) |
 | `/skip <company>` | Never show this company again |
 | `/unskip <company>` | Reverse it |
 | `/city <name>` | Change weather city (auto-geocoded) |
