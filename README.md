@@ -2,8 +2,6 @@
 
 > Wake up to your morning coffee, the Miami weather, and 100 jobs sorted by how well they match your CV — delivered straight to Telegram every weekday at 7am. Apply, save, and track from your phone.
 
-![Telegram screenshot placeholder](docs/screenshot.png)
-
 ## What it does
 
 - **Daily 100-job batch.** Scrapes hiring.cafe across 15 search queries (IAM, Cloud Security, Cybersecurity, M365, Linux, etc.).
@@ -171,10 +169,11 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 
 ## Roadmap
 
-- v0.2 (current): Setup wizard, install one-liner, configurable everything
-- v0.3: Inno Setup .exe installer, Mac/Linux support
-- v1.0: Tauri desktop GUI with dashboard, history calendar, application Kanban
-- v2.0: LLM rerank (opt-in, BYO Anthropic key), analytics, multi-resume profiles
+- ✅ **v0.2** — Setup wizard, install one-liner, configurable everything (shipped)
+- ✅ **v0.3** *(current)* — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms` filter, `/jobs suggest`, `/why N` (shipped on `v0.3` branch as pre-release)
+- **v0.4** — Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline button picker
+- **v1.0** — Tauri desktop GUI with dashboard, history calendar, application Kanban
+- **v2.0** — LLM rerank (opt-in, BYO Anthropic key), analytics, multi-resume profiles
 
 ## License
 

@@ -284,7 +284,7 @@ async function step9City() {
 }
 
 // ---- step 10: schedule + finalize ----
-async function step5Finalize(token, chatId) {
+async function step10Finalize(token, chatId) {
   step(10, 10, 'Schedule & finalize');
 
   // Load config (defaults from example) and let user tweak schedule
@@ -358,7 +358,7 @@ async function step5Finalize(token, chatId) {
     cfgRW.set('weather.lon', city.lon);
     cfgRW.set('weather.timezone', city.timezone);
 
-    await step5Finalize(token, chatId);
+    await step10Finalize(token, chatId);
 
     banner('🎉 ALL DONE — check Telegram for next steps');
     console.log(`${c.dim}Bot is now running in the background.${c.reset}`);

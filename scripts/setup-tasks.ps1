@@ -17,6 +17,9 @@ $cfg = $null
 $cfgPath = Join-Path $ROOT 'config.json'
 if (Test-Path $cfgPath) {
   $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
+} else {
+  Write-Host "[warn] config.json not found at $cfgPath — using defaults (07:00 Mon-Fri)." -ForegroundColor Yellow
+  Write-Host "[warn] Run: node scripts\setup-wizard.mjs to generate one." -ForegroundColor Yellow
 }
 $time = if ($cfg -and $cfg.schedule -and $cfg.schedule.time) { $cfg.schedule.time } else { '07:00' }
 $days = if ($cfg -and $cfg.schedule -and $cfg.schedule.days) { $cfg.schedule.days } else { @('Monday','Tuesday','Wednesday','Thursday','Friday') }

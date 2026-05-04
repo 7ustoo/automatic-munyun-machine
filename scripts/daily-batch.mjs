@@ -22,8 +22,14 @@ const ROOT = path.join(__dirname, '..');
 const DATE = new Date().toISOString().slice(0, 10);
 
 // ---------- env ----------
+const ENV_PATH = path.join(ROOT, '.env');
+if (!fs.existsSync(ENV_PATH)) {
+  console.error('❌ Missing .env file at ' + ENV_PATH);
+  console.error('   Run: node scripts/setup-wizard.mjs');
+  process.exit(1);
+}
 const env = Object.fromEntries(
-  fs.readFileSync(path.join(ROOT, '.env'), 'utf8')
+  fs.readFileSync(ENV_PATH, 'utf8')
     .split('\n')
     .filter(l => l && !l.startsWith('#') && l.includes('='))
     .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })

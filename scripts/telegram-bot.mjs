@@ -23,8 +23,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
 // ---------- env ----------
+const ENV_PATH = path.join(ROOT, '.env');
+if (!fs.existsSync(ENV_PATH)) {
+  console.error('❌ Missing .env file at ' + ENV_PATH);
+  console.error('   Run: node scripts/setup-wizard.mjs');
+  process.exit(1);
+}
 const env = Object.fromEntries(
-  fs.readFileSync(path.join(ROOT, '.env'), 'utf8')
+  fs.readFileSync(ENV_PATH, 'utf8')
     .split('\n')
     .filter(l => l && !l.startsWith('#') && l.includes('='))
     .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
@@ -32,8 +38,9 @@ const env = Object.fromEntries(
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT = String(env.TELEGRAM_CHAT_ID);
 
-if (!TG_TOKEN || !ALLOWED_CHAT) {
-  console.error('Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env');
+if (!TG_TOKEN || !ALLOWED_CHAT || ALLOWED_CHAT === 'undefined') {
+  console.error('❌ Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in ' + ENV_PATH);
+  console.error('   Re-run: node scripts/setup-wizard.mjs');
   process.exit(1);
 }
 
@@ -95,15 +102,32 @@ const WMO = { 0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast', 
 const WMO_EMOJI = { 0: '☀️', 1: '🌤', 2: '⛅', 3: '☁️', 45: '🌫', 48: '🌫', 51: '🌦', 53: '🌦', 55: '🌧', 61: '🌧', 63: '🌧', 65: '🌧', 71: '🌨', 73: '🌨', 75: '❄️', 80: '🌦', 81: '🌧', 82: '⛈', 95: '⛈', 96: '⛈', 99: '⛈' };
 
 async function getWeather() {
-  const url = 'https://api.open-meteo.com/v1/forecast?latitude=25.7617&longitude=-80.1918&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&temperature_unit=fahrenheit&timezone=America/New_York';
+  // Read weather config fresh on every call so /city updates take effect immediately
+  let w;
+  try { w = cfgRW.read().weather || {}; }
+  catch { w = { city: 'Miami', lat: 25.7617, lon: -80.1918, tempUnit: 'fahrenheit', timezone: 'America/New_York' }; }
+  const lat = w.lat ?? 25.7617;
+  const lon = w.lon ?? -80.1918;
+  const unit = w.tempUnit || 'fahrenheit';
+  const tz = w.timezone || 'auto';
+  const city = w.city || 'Local';
+  const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min&temperature_unit=${unit}&timezone=${encodeURIComponent(tz)}`;
   const r = await fetch(url, { signal: AbortSignal.timeout(10000) });
   const j = await r.json();
   const code = j.current.weather_code;
-  return `${WMO_EMOJI[code] || '🌤'} Miami: ${Math.round(j.current.temperature_2m)}°F, ${WMO[code] || 'unknown'}, high ${Math.round(j.daily.temperature_2m_max[0])}° / low ${Math.round(j.daily.temperature_2m_min[0])}°`;
+  const tempSuffix = unit === 'celsius' ? '°C' : '°F';
+  return `${WMO_EMOJI[code] || '🌤'} ${city}: ${Math.round(j.current.temperature_2m)}${tempSuffix}, ${WMO[code] || 'unknown'}, high ${Math.round(j.daily.temperature_2m_max[0])}° / low ${Math.round(j.daily.temperature_2m_min[0])}°`;
 }
 
 // ---------- run claude code ----------
 let runningJob = null;
+let runningJobTimeout = null;
+const SCRAPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — generous
+
+function clearRunningJob() {
+  runningJob = null;
+  if (runningJobTimeout) { clearTimeout(runningJobTimeout); runningJobTimeout = null; }
+}
 
 function runClaudeBatch(chatId) {
   if (runningJob) {
@@ -119,13 +143,46 @@ function runClaudeBatch(chatId) {
   runningJob = child;
   let stderr = '';
   child.stderr?.on('data', d => { stderr += d.toString(); });
+  child.on('error', (e) => {
+    log('run-daily-batch spawn error: ' + e.message);
+    clearRunningJob();
+    reply(chatId, `❌ Could not start batch: ${escHtml(e.message)}`);
+  });
   child.on('exit', (code) => {
     log(`run-daily-batch exit code=${code}`);
-    runningJob = null;
+    clearRunningJob();
     if (code !== 0) {
-      reply(chatId, `❌ Batch failed (exit ${code}). Check data/telegram-bot.log.\n<pre>${stderr.slice(-500)}</pre>`);
+      reply(chatId, `❌ Batch failed (exit ${code}). Check data/telegram-bot.log.\n<pre>${escHtml(stderr.slice(-500))}</pre>`);
     }
     // Success: the prompt itself sends the result to Telegram, no reply needed here.
+  });
+  // Self-clearing safety: if the process is killed externally and never emits exit/error,
+  // the lock would stick forever. Force-clear after 5 min.
+  runningJobTimeout = setTimeout(() => {
+    if (runningJob === child) {
+      log('runningJob timeout — force-clearing lock');
+      try { child.kill('SIGKILL'); } catch {}
+      clearRunningJob();
+      reply(chatId, '⏰ Scrape took longer than 5 min and was force-stopped. Try /scrape again.').catch(() => {});
+    }
+  }, SCRAPE_TIMEOUT_MS);
+}
+
+// Generic helper: spawn a process and return Promise<{code, stdout}> with a timeout
+function spawnWithTimeout(cmd, args, timeoutMs = 30000, opts = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(cmd, args, { cwd: ROOT, windowsHide: true, ...opts });
+    let out = '';
+    let timed = false;
+    const timer = setTimeout(() => {
+      timed = true;
+      try { child.kill('SIGKILL'); } catch {}
+      resolve({ code: -1, output: out + '\n[timed out after ' + (timeoutMs / 1000) + 's]', timeout: true });
+    }, timeoutMs);
+    child.stdout?.on('data', d => out += d.toString());
+    child.stderr?.on('data', d => out += d.toString());
+    child.on('error', (e) => { clearTimeout(timer); resolve({ code: -2, output: out + '\n' + e.message, error: true }); });
+    child.on('exit', code => { if (!timed) { clearTimeout(timer); resolve({ code, output: out }); } });
   });
 }
 
@@ -136,7 +193,26 @@ import { suggestRoles } from './role-suggester.mjs';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
 
 // Per-chat state for multi-step interactions (e.g. /resume waiting for attachment)
-const pendingState = new Map(); // chatId -> { kind: 'resume_upload' | 'jobs_suggest', data?: any }
+const pendingState = new Map(); // chatId -> { kind, startedAt, data? }
+const PENDING_TTL_MS = 10 * 60 * 1000; // 10 minutes — anything older is stale
+
+function getPendingState(chatId) {
+  const s = pendingState.get(chatId);
+  if (!s) return null;
+  if (Date.now() - s.startedAt > PENDING_TTL_MS) {
+    pendingState.delete(chatId);
+    return null;
+  }
+  return s;
+}
+
+// Periodically purge stale entries so the Map doesn't grow unbounded
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of pendingState) {
+    if (now - v.startedAt > PENDING_TTL_MS) pendingState.delete(k);
+  }
+}, 60 * 1000);
 
 // ---------- dispatch ----------
 const HELP_TEXT = `<b>🤖 Automatic Munyun Machine</b>
@@ -187,23 +263,18 @@ function loadLatestBatch() {
   return { file: latest, rows };
 }
 
-function spawnAction(action, jobUrl) {
-  return new Promise((resolve) => {
-    const child = spawn('node', [path.join(ROOT, 'scripts', 'job-action.mjs'), action, jobUrl], {
-      cwd: ROOT,
-      windowsHide: true
-    });
-    let stdout = '';
-    child.stdout.on('data', d => { stdout += d.toString(); });
-    child.stderr.on('data', d => { stdout += d.toString(); });
-    child.on('exit', code => resolve({ code, output: stdout.trim() }));
-  });
+async function spawnAction(action, jobUrl) {
+  const args = jobUrl ? [path.join(ROOT, 'scripts', 'job-action.mjs'), action, jobUrl]
+                       : [path.join(ROOT, 'scripts', 'job-action.mjs'), action];
+  const r = await spawnWithTimeout('node', args, 60000);
+  return { code: r.code, output: (r.output || '').trim(), timeout: r.timeout };
 }
 
 async function handleMessage(msg) {
   const chatId = String(msg.chat.id);
   if (chatId !== ALLOWED_CHAT) {
-    log(`Ignored message from non-allowed chat ${chatId}`);
+    // Don't echo the rejected chat ID — could enable enumeration via log scrape
+    log(`Ignored message from non-allowed chat`);
     return;
   }
   const text = (msg.text || '').trim().toLowerCase();
@@ -242,23 +313,15 @@ async function handleMessage(msg) {
 
   // /pause — disable 7am push
   if (/^\/?pause\b/.test(text)) {
-    return new Promise((resolve) => {
-      const c = spawn('powershell', ['-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], { windowsHide: true });
-      c.on('exit', code => {
-        reply(chatId, code === 0 ? '⏸ Daily 7am push paused. Use /resume-bot to re-enable.' : `❌ Could not pause (exit ${code}).`);
-        resolve();
-      });
-    });
+    const r = await spawnWithTimeout('powershell', ['-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
+    if (r.timeout) return reply(chatId, '⏰ Pause command timed out after 30s. Try again.');
+    return reply(chatId, r.code === 0 ? '⏸ Daily 7am push paused. Use /resume-bot to re-enable.' : `❌ Could not pause (exit ${r.code}).`);
   }
   // /resume-bot — re-enable 7am push
   if (/^\/?resume[-_\s]?bot\b/.test(text)) {
-    return new Promise((resolve) => {
-      const c = spawn('powershell', ['-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], { windowsHide: true });
-      c.on('exit', code => {
-        reply(chatId, code === 0 ? '▶️ Daily 7am push re-enabled.' : `❌ Could not resume (exit ${code}).`);
-        resolve();
-      });
-    });
+    const r = await spawnWithTimeout('powershell', ['-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
+    if (r.timeout) return reply(chatId, '⏰ Resume command timed out after 30s. Try again.');
+    return reply(chatId, r.code === 0 ? '▶️ Daily 7am push re-enabled.' : `❌ Could not resume (exit ${r.code}).`);
   }
   // /reauth — spawn login-once.mjs on the user's machine
   if (/^\/?reauth\b/.test(text)) {
@@ -420,19 +483,11 @@ async function handleMessage(msg) {
     if (hh > 23 || mm > 59) return reply(chatId, '❌ Invalid time. Use 24-hour HH:MM.');
     const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     cfgRW.set('schedule.time', time);
-    // Re-register Task Scheduler with new time
-    return new Promise((resolve) => {
-      const c = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], { cwd: ROOT, windowsHide: true });
-      let out = '';
-      c.stdout?.on('data', d => out += d.toString());
-      c.stderr?.on('data', d => out += d.toString());
-      c.on('exit', code => {
-        reply(chatId, code === 0
-          ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
-          : `❌ Schedule saved but task re-registration failed:\n<pre>${escHtml(out.slice(0, 300))}</pre>`);
-        resolve();
-      });
-    });
+    const r = await spawnWithTimeout('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    if (r.timeout) return reply(chatId, `⏰ Schedule saved but task re-registration timed out after 30s.`);
+    return reply(chatId, r.code === 0
+      ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
+      : `❌ Schedule saved but task re-registration failed:\n<pre>${escHtml((r.output || '').slice(0, 300))}</pre>`);
   }
 
   // /jobs — list / add / remove / suggest
@@ -568,9 +623,8 @@ async function handleMessage(msg) {
 async function handleAttachment(msg) {
   const chatId = String(msg.chat.id);
   if (chatId !== ALLOWED_CHAT) return;
-  const state = pendingState.get(chatId);
+  const state = getPendingState(chatId);
   if (!state || state.kind !== 'resume_upload') {
-    // No pending /resume — ignore the attachment
     return reply(chatId, '<i>I wasn\'t expecting an attachment. Use /resume to upload a new resume.</i>');
   }
   pendingState.delete(chatId);
@@ -584,18 +638,31 @@ async function handleAttachment(msg) {
   }
 
   reply(chatId, '🔄 Downloading + parsing…');
+  let downloadOk = false;
   try {
-    // Get file path from Telegram
     const fileInfo = await tgGet('getFile', { file_id: doc.file_id });
-    if (!fileInfo.ok) throw new Error('Telegram getFile failed');
+    if (!fileInfo.ok) throw new Error('Telegram getFile rejected the request');
+    // Build the download URL inline; never log or surface this string — it contains TG_TOKEN
     const downloadUrl = `https://api.telegram.org/file/bot${TG_TOKEN}/${fileInfo.result.file_path}`;
-    const r = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
+    let r;
+    try {
+      r = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
+    } catch (netErr) {
+      // Strip token from any thrown error message before re-raising
+      const safe = String(netErr.message || netErr).replace(TG_TOKEN, '<TOKEN>');
+      throw new Error('Network: ' + safe);
+    }
+    if (!r.ok) throw new Error(`Download HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
+    downloadOk = true;
 
     const localPath = path.join(ROOT, 'data', `cv-uploaded${ext}`);
     fs.writeFileSync(localPath, buf);
 
     const parsed = await parseResume(localPath);
+    if (!parsed || !Array.isArray(parsed.titles) || !Array.isArray(parsed.skills)) {
+      throw new Error('Parser returned invalid shape — file may be corrupted');
+    }
     writeParsedCV(parsed);
 
     return reply(chatId, [
@@ -608,7 +675,10 @@ async function handleAttachment(msg) {
       'Try <code>/jobs suggest</code> for new search title ideas, then /scrape for a fresh batch.'
     ].join('\n'));
   } catch (e) {
-    return reply(chatId, '❌ Resume upload failed: ' + e.message);
+    // Defense-in-depth: scrub any token that might have leaked into the error message
+    const safe = String(e.message || e).replace(TG_TOKEN, '<TOKEN>');
+    log('Resume upload failed: ' + safe);
+    return reply(chatId, '❌ Resume upload failed: ' + escHtml(safe));
   }
 }
 
@@ -616,7 +686,9 @@ function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt
 
 // ---------- main loop ----------
 let offset = loadOffset();
-log(`Bot starting. Offset=${offset}. Allowed chat=${ALLOWED_CHAT}.`);
+// Mask all but last 4 digits of chat ID in logs
+const maskedChat = ALLOWED_CHAT.length > 4 ? '***' + ALLOWED_CHAT.slice(-4) : '***';
+log(`Bot starting. Offset=${offset}. Allowed chat=${maskedChat}.`);
 reply(ALLOWED_CHAT, '🤖 <b>Automatic Munyun Machine</b> — online. /help for commands.').catch(e => log('Initial ping failed: ' + e.message));
 
 while (true) {
