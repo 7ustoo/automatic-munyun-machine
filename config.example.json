@@ -1,0 +1,67 @@
+{
+  "_comment": "Automatic Munyun Machine — user config. Copy to config.json (which is gitignored) and edit. Run /update on the bot to pick up changes without restart.",
+
+  "user": {
+    "name": "Justin",
+    "salaryFloorUsd": 90000,
+    "maxYoeAcceptable": 5
+  },
+
+  "queries": [
+    { "key": "IAM",          "term": "IAM Engineer" },
+    { "key": "CloudIAM",     "term": "Cloud IAM Engineer" },
+    { "key": "Identity",     "term": "Identity Engineer" },
+    { "key": "CloudSec",     "term": "Cloud Security Engineer" },
+    { "key": "Cyber",        "term": "Cybersecurity Engineer" },
+    { "key": "InfoSec",      "term": "Information Security Engineer" },
+    { "key": "M365",         "term": "Microsoft 365 Engineer" },
+    { "key": "M365Admin",    "term": "M365 Administrator" },
+    { "key": "Linux",        "term": "Linux Engineer" },
+    { "key": "LinuxAdmin",   "term": "Linux Administrator" },
+    { "key": "SysAdmin",     "term": "Systems Administrator" },
+    { "key": "CloudEng",     "term": "Cloud Engineer" },
+    { "key": "SOC",          "term": "SOC Analyst" },
+    { "key": "Detection",    "term": "Detection Engineer" },
+    { "key": "PAM",          "term": "PAM Engineer" }
+  ],
+
+  "filters": {
+    "filterClearance": true,
+    "skipCompanies": ["Alpha FMC", "ECS", "Experis", "Verinext", "First Citizens", "AMD"],
+    "dropTitlePatterns": [
+      "Manager", "Principal", "Director", "Head of", "VP", "Vice President", "Chief",
+      "Solutions Engineer", "Sales Engineer", "Forward Deployed", "Technical Account",
+      "Customer Success", "Solutions Architect", "Pre-Sales", "Sales Solution",
+      "Help Desk", "Desktop Support", "Service Desk", "Frontend", "UI Engineer",
+      "Recruiter", "Marketing"
+    ]
+  },
+
+  "scoring": {
+    "titleWeight": 10,
+    "certWeight": 5,
+    "skillWeight": 3,
+    "complianceWeight": 2,
+    "salaryBonus": 5,
+    "salaryPenalty": -10,
+    "_percentBands": "score 30+ → 90-100%; 20-29 → 75-89%; 10-19 → 50-74%; 5-9 → 30-49%; 0-4 → 0-29%"
+  },
+
+  "weather": {
+    "city": "Miami",
+    "lat": 25.7617,
+    "lon": -80.1918,
+    "tempUnit": "fahrenheit",
+    "timezone": "America/New_York"
+  },
+
+  "schedule": {
+    "time": "07:00",
+    "days": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+  },
+
+  "telegram": {
+    "messageHeader": "☀️ Good morning {NAME} — {DATE}",
+    "showAuthIndicator": true
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "name": "automatic-munyun-machine",
+  "version": "0.2.0",
+  "description": "Daily 100-job Telegram batch ranked by CV match. Local-first, free, Windows.",
+  "type": "module",
+  "main": "scripts/daily-batch.mjs",
+  "bin": {
+    "amm-setup": "./scripts/setup-wizard.mjs",
+    "amm-batch": "./scripts/daily-batch.mjs"
+  },
+  "scripts": {
+    "setup": "node scripts/setup-wizard.mjs",
+    "daily": "node scripts/daily-batch.mjs",
+    "bot": "node scripts/telegram-bot.mjs",
+    "login": "node scripts/login-once.mjs",
+    "parse-resume": "node scripts/resume-parser.mjs"
+  },
+  "keywords": [
+    "job-search",
+    "telegram-bot",
+    "playwright",
+    "automation",
+    "iam",
+    "cybersecurity",
+    "cloud-security",
+    "hiring-cafe",
+    "career-tools"
+  ],
+  "author": "Justin Williams",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "mammoth": "^1.7.0",
+    "pdf-parse": "^1.1.1",
+    "playwright-core": "^1.45.0"
+  },
+  "homepage": "https://github.com/7ustoo/automatic-munyun-machine#readme",
+  "bugs": {
+    "url": "https://github.com/7ustoo/automatic-munyun-machine/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/7ustoo/automatic-munyun-machine.git"
+  }
+}

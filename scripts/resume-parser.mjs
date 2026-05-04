@@ -1,0 +1,104 @@
+#!/usr/bin/env node
+/**
+ * Resume parser for Automatic Munyun Machine.
+ *
+ * Reads a resume file (PDF, DOCX, MD, or TXT), extracts skills/certs/titles/compliance
+ * by matching against scripts/cv-keywords.json, and writes structured output to
+ * data/cv-parsed.json.
+ *
+ * Used by:
+ *   - setup-wizard.mjs (Step 4: resume upload)
+ *   - daily-batch.mjs (loads parsed keywords for scoring)
+ *
+ * Usage:
+ *   node scripts/resume-parser.mjs <path-to-resume>
+ *   node scripts/resume-parser.mjs data/cv.md      ← re-parse stored CV
+ */
+
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, '..');
+
+function escRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+function findHits(text, dictionary) {
+  const seen = new Set();
+  const hits = [];
+  for (const term of dictionary) {
+    const key = term.toLowerCase();
+    if (seen.has(key)) continue;
+    if (new RegExp('\\b' + escRx(term) + '\\b', 'i').test(text)) {
+      hits.push(term);
+      seen.add(key);
+    }
+  }
+  return hits;
+}
+
+export async function readResumeText(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const buf = fs.readFileSync(filePath);
+
+  if (ext === '.pdf') {
+    const { default: pdfParse } = await import('pdf-parse');
+    const data = await pdfParse(buf);
+    return data.text;
+  }
+  if (ext === '.docx') {
+    const mammoth = await import('mammoth');
+    const result = await mammoth.extractRawText({ buffer: buf });
+    return result.value;
+  }
+  if (ext === '.md' || ext === '.txt' || ext === '.markdown') {
+    return buf.toString('utf8');
+  }
+  throw new Error(`Unsupported resume format: ${ext}. Use PDF, DOCX, MD, or TXT.`);
+}
+
+export async function parseResume(filePath) {
+  const dict = JSON.parse(fs.readFileSync(path.join(__dirname, 'cv-keywords.json'), 'utf8'));
+  const text = await readResumeText(filePath);
+  return {
+    sourceFile: path.resolve(filePath),
+    parsedAt: new Date().toISOString(),
+    titles: findHits(text, dict.titles),
+    certs: findHits(text, dict.certs),
+    skills: findHits(text, dict.skills),
+    compliance: findHits(text, dict.compliance),
+    raw: text.slice(0, 8000) // first 8KB of raw text for debugging / future use
+  };
+}
+
+export function writeParsedCV(parsed) {
+  const dir = path.join(ROOT, 'data');
+  fs.mkdirSync(dir, { recursive: true });
+  const outPath = path.join(dir, 'cv-parsed.json');
+  fs.writeFileSync(outPath, JSON.stringify(parsed, null, 2));
+  return outPath;
+}
+
+// CLI entrypoint — fileURLToPath handles Windows / Unix differences
+const thisFile = fileURLToPath(import.meta.url);
+const invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (path.resolve(thisFile) === invokedFile) {
+  const file = process.argv[2];
+  if (!file) {
+    console.error('Usage: node resume-parser.mjs <path-to-resume>');
+    process.exit(2);
+  }
+  if (!fs.existsSync(file)) {
+    console.error(`File not found: ${file}`);
+    process.exit(2);
+  }
+  const parsed = await parseResume(file);
+  const out = writeParsedCV(parsed);
+  console.log(`✓ Parsed ${file}`);
+  console.log(`  Titles:     ${parsed.titles.length}`);
+  console.log(`  Certs:      ${parsed.certs.length}`);
+  console.log(`  Skills:     ${parsed.skills.length}`);
+  console.log(`  Compliance: ${parsed.compliance.length}`);
+  console.log(`  Saved to:   ${out}`);
+}
