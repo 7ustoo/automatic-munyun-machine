@@ -404,6 +404,26 @@ function writeBatchTsv(top, directUrls) {
   }).join('\n');
   fs.writeFileSync(path.join(dir, `today-batch-${DATE}.tsv`), tsv + '\n');
   fs.writeFileSync(path.join(dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
+
+  // Rich per-job match details, used by the bot's /why N command
+  const lastBatch = {
+    date: DATE,
+    generatedAt: new Date().toISOString(),
+    jobs: top.map((r, i) => ({
+      idx: i + 1,
+      id: r.href.split('/').pop(),
+      title: r.title,
+      company: r.company,
+      yoe: r.yoe,
+      q: r.q,
+      score: r.score ?? 0,
+      matchPct: r.matchPct ?? 0,
+      matched: r.matched || [],
+      directUrl: directUrls[i] || '',
+      viewjobUrl: r.href
+    }))
+  };
+  fs.writeFileSync(path.join(dir, 'last-batch.json'), JSON.stringify(lastBatch, null, 2));
 }
 
 (async () => {

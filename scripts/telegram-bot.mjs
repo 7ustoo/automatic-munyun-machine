@@ -129,21 +129,48 @@ function runClaudeBatch(chatId) {
   });
 }
 
+// ---------- config helpers (config-rw.mjs) ----------
+import * as cfgRW from './config-rw.mjs';
+import { geocode } from './geocode.mjs';
+import { suggestRoles } from './role-suggester.mjs';
+import { parseResume, writeParsedCV } from './resume-parser.mjs';
+
+// Per-chat state for multi-step interactions (e.g. /resume waiting for attachment)
+const pendingState = new Map(); // chatId -> { kind: 'resume_upload' | 'jobs_suggest', data?: any }
+
 // ---------- dispatch ----------
 const HELP_TEXT = `<b>🤖 Automatic Munyun Machine</b>
 
-/daily, gm, morning  → weather + 100 jobs ranked by CV match
-/weather             → Miami weather
-/auth                → check hiring.cafe login state
-/reauth              → trigger a re-login on your computer
-/save N              → bookmark job #N from latest batch
-/applied N           → mark job #N as applied
-/pause               → stop the daily 7am push
-/resume-bot          → re-enable the daily 7am push
-/test, /ping         → bot health check
-/help                → this message
+<b>Core actions</b>
+/scrape, /daily, gm  → weather + 100 jobs ranked by CV match
+/save N              → bookmark job N on hiring.cafe
+/applied N           → mark job N applied
+/why N               → explain why job N got its match %
 
-Scrape takes 1-2 min.`;
+<b>Settings — view + edit from your phone</b>
+/settings            → current config in one message
+/resume              → upload a new resume (PDF/DOCX/MD)
+/jobs                → list current search titles
+/jobs add &lt;title&gt;    → add a search title
+/jobs remove &lt;title&gt; → remove a search title
+/jobs suggest        → bot reads your CV and proposes new titles
+/yoe N               → set max years of experience
+/salary N            → set salary floor in $K (e.g. /salary 120)
+/clearance on/off    → toggle gov clearance filter
+/skip &lt;company&gt;      → never show this company again
+/unskip &lt;company&gt;    → reverse it
+/city &lt;name&gt;         → change weather city
+/schedule HH:MM      → change daily push time
+
+<b>Maintenance</b>
+/auth                → check hiring.cafe login
+/reauth              → re-login on your computer
+/pause /resume-bot   → stop/start the 7am push
+/forget all          → wipe seen-jobs memory
+/forget last         → un-memorize most recent batch
+/weather             → Miami weather
+/test, /ping         → bot health check
+/help                → this message`;
 
 // Latest batch TSV → array of { idx, id, title, company, yoe, q, url }
 function loadLatestBatch() {
@@ -191,7 +218,8 @@ async function handleMessage(msg) {
     try { return reply(chatId, await getWeather()); }
     catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + e.message); }
   }
-  if (/^\/?(daily|jobs|gm|morning|update)\b/.test(text)) {
+  // /scrape (and aliases /daily, gm, morning, update) — run a fresh batch
+  if (/^\/?(scrape|daily|gm|morning|update)\b/.test(text) && !/^\/?jobs\b/.test(text)) {
     return runClaudeBatch(chatId);
   }
 
@@ -263,7 +291,308 @@ async function handleMessage(msg) {
     return reply(chatId, `❌ ${action} failed.\n<pre>${escHtml(output.slice(0, 400))}</pre>`);
   }
 
+  // ===== v0.3 commands =====
+
+  // Use raw message (preserves case for skip lists, jobs add, city names)
+  const rawText = (msg.text || '').trim();
+
+  // /settings — show current config
+  if (/^\/?settings\b/.test(text)) {
+    try {
+      const cfg = cfgRW.read();
+      const cv = (() => {
+        try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'cv-parsed.json'), 'utf8')); }
+        catch { return null; }
+      })();
+      const queries = cfg.queries || [];
+      const skip = cfg.filters?.skipCompanies || [];
+      const seen = (() => {
+        try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'seen-jobs.json'), 'utf8')).ids?.length || 0; }
+        catch { return 0; }
+      })();
+      const lines = [
+        '<b>⚙️ Current configuration</b>',
+        '',
+        `<b>Resume:</b>     ${cv ? `${cv.titles?.length || 0} titles · ${cv.certs?.length || 0} certs · ${cv.skills?.length || 0} skills` : 'not parsed'}`,
+        `<b>Years exp:</b>  max ${cfg.user?.maxYoeAcceptable ?? 5}`,
+        `<b>Salary:</b>     floor $${(cfg.user?.salaryFloorUsd || 0).toLocaleString()}`,
+        `<b>Clearance:</b>  ${cfg.filters?.filterClearance === false ? 'INCLUDED in results' : 'filtered OUT'}`,
+        `<b>Weather:</b>    ${cfg.weather?.city || '?'} (${cfg.weather?.lat}, ${cfg.weather?.lon})`,
+        `<b>Schedule:</b>   ${cfg.schedule?.time || '?'} ${(cfg.schedule?.days || []).map(d => d.slice(0, 3)).join('/')}`,
+        '',
+        `<b>Job titles (${queries.length}):</b>`,
+        '  ' + queries.map(q => q.term).join(', '),
+        '',
+        skip.length ? `<b>Skip list (${skip.length}):</b> ${skip.join(', ')}` : '<b>Skip list:</b> empty',
+        `<b>Memory:</b>     ${seen} jobs seen`,
+        '',
+        '<i>Edit any: /yoe N · /salary N · /clearance on/off · /city &lt;name&gt; · /schedule HH:MM · /skip · /unskip · /jobs · /resume · /forget</i>'
+      ];
+      return reply(chatId, lines.join('\n'));
+    } catch (e) {
+      return reply(chatId, '❌ Could not read settings: ' + e.message);
+    }
+  }
+
+  // /yoe N — set max years of experience
+  const yoeM = text.match(/^\/?yoe\s+(\d{1,2})\b/);
+  if (yoeM) {
+    const n = parseInt(yoeM[1]);
+    cfgRW.set('user.maxYoeAcceptable', n);
+    return reply(chatId, `✅ Max YOE set to <b>${n}</b>. Next /scrape will use this.`);
+  }
+
+  // /salary N — set salary floor in $K
+  const salM = text.match(/^\/?salary\s+(\d{2,4})\b/);
+  if (salM) {
+    const k = parseInt(salM[1]);
+    cfgRW.set('user.salaryFloorUsd', k * 1000);
+    return reply(chatId, `✅ Salary floor set to <b>$${k}k</b>.`);
+  }
+
+  // /clearance on/off
+  const clearM = text.match(/^\/?clearance\s+(on|off)\b/);
+  if (clearM) {
+    const filterOn = clearM[1] === 'on';
+    cfgRW.set('filters.filterClearance', filterOn);
+    return reply(chatId, filterOn
+      ? '🛡️ Clearance filter <b>ON</b> — gov clearance jobs will be filtered OUT.'
+      : '🛡️ Clearance filter <b>OFF</b> — gov clearance jobs will be INCLUDED.');
+  }
+
+  // /skip <company>
+  const skipM = rawText.match(/^\/?skip\s+(.+)$/i);
+  if (skipM) {
+    const company = skipM[1].trim();
+    const r = cfgRW.appendUnique('filters.skipCompanies', company);
+    return reply(chatId, r.added
+      ? `✅ Added <b>${escHtml(company)}</b> to skip list. ${r.list.length} companies blocked.`
+      : `<i>${escHtml(company)} was already in skip list.</i>`);
+  }
+
+  // /unskip <company>
+  const unskipM = rawText.match(/^\/?unskip\s+(.+)$/i);
+  if (unskipM) {
+    const company = unskipM[1].trim();
+    const r = cfgRW.removeFromArray('filters.skipCompanies', company);
+    return reply(chatId, r.removed
+      ? `✅ Removed <b>${escHtml(company)}</b> from skip list. ${r.list.length} remaining.`
+      : `<i>${escHtml(company)} wasn't in the skip list.</i>`);
+  }
+
+  // /city <name>
+  const cityM = rawText.match(/^\/?city\s+(.+)$/i);
+  if (cityM) {
+    const q = cityM[1].trim();
+    reply(chatId, `🌍 Looking up <b>${escHtml(q)}</b>…`);
+    try {
+      const r = await geocode(q);
+      if (!r) return reply(chatId, `❌ No match for "${escHtml(q)}". Try a more specific query.`);
+      cfgRW.set('weather.city', r.city);
+      cfgRW.set('weather.lat', r.lat);
+      cfgRW.set('weather.lon', r.lon);
+      cfgRW.set('weather.timezone', r.timezone);
+      return reply(chatId, `✅ Weather city: <b>${escHtml(r.city)}</b>${r.admin ? `, ${escHtml(r.admin)}` : ''} (${escHtml(r.country)})`);
+    } catch (e) { return reply(chatId, '❌ Geocoding failed: ' + e.message); }
+  }
+
+  // /schedule HH:MM
+  const schedM = text.match(/^\/?schedule\s+(\d{1,2}):(\d{2})\b/);
+  if (schedM) {
+    const hh = parseInt(schedM[1]), mm = parseInt(schedM[2]);
+    if (hh > 23 || mm > 59) return reply(chatId, '❌ Invalid time. Use 24-hour HH:MM.');
+    const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
+    cfgRW.set('schedule.time', time);
+    // Re-register Task Scheduler with new time
+    return new Promise((resolve) => {
+      const c = spawn('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], { cwd: ROOT, windowsHide: true });
+      let out = '';
+      c.stdout?.on('data', d => out += d.toString());
+      c.stderr?.on('data', d => out += d.toString());
+      c.on('exit', code => {
+        reply(chatId, code === 0
+          ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
+          : `❌ Schedule saved but task re-registration failed:\n<pre>${escHtml(out.slice(0, 300))}</pre>`);
+        resolve();
+      });
+    });
+  }
+
+  // /jobs — list / add / remove / suggest
+  if (/^\/?jobs\b/.test(text)) {
+    const cfg = cfgRW.read();
+    const queries = cfg.queries || [];
+
+    // /jobs add "Title"
+    const addM = rawText.match(/^\/?jobs\s+add\s+["']?(.+?)["']?$/i);
+    if (addM) {
+      const term = addM[1].trim();
+      const key = term.replace(/[^a-z0-9]/gi, '').slice(0, 20);
+      const r = cfgRW.appendUnique('queries', { key, term });
+      return reply(chatId, r.added
+        ? `✅ Added "<b>${escHtml(term)}</b>" — now searching ${r.list.length} job titles.`
+        : `<i>"${escHtml(term)}" was already in your search list.</i>`);
+    }
+
+    // /jobs remove "Title"
+    const rmM = rawText.match(/^\/?jobs\s+remove\s+["']?(.+?)["']?$/i);
+    if (rmM) {
+      const term = rmM[1].trim();
+      const r = cfgRW.removeFromArray('queries', term);
+      return reply(chatId, r.removed
+        ? `✅ Removed "<b>${escHtml(term)}</b>". ${r.list.length} titles remaining.`
+        : `<i>"${escHtml(term)}" wasn't in your search list.</i>`);
+    }
+
+    // /jobs suggest
+    if (/^\/?jobs\s+suggest\b/i.test(text)) {
+      try {
+        const cv = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'cv-parsed.json'), 'utf8'));
+        const suggestions = suggestRoles(cv, { max: 12 });
+        if (!suggestions.length) {
+          return reply(chatId, '❌ No suggestions. Your CV may be too sparse — try /resume to upload a fuller version.');
+        }
+        const existing = new Set(queries.map(q => q.term.toLowerCase()));
+        const fresh = suggestions.filter(s => !existing.has(s.title.toLowerCase()));
+        if (!fresh.length) {
+          return reply(chatId, '✅ Your search list already covers the strongest matches from your CV. Nothing new to suggest.');
+        }
+        const lines = [
+          '<b>💡 Suggested job titles based on your CV:</b>',
+          '',
+          ...fresh.map((s, i) => `${i + 1}. <b>${escHtml(s.title)}</b>\n   <i>${escHtml(s.cluster)} · ${s.signalsHit.slice(0, 4).map(escHtml).join(', ')}</i>`),
+          '',
+          'Add any with: <code>/jobs add Title Here</code>'
+        ];
+        return reply(chatId, lines.join('\n'));
+      } catch (e) {
+        return reply(chatId, '❌ Could not load CV. Try /resume to upload one first.');
+      }
+    }
+
+    // /jobs (list)
+    if (!queries.length) return reply(chatId, '<i>No search titles yet. Add some with /jobs add &lt;title&gt;.</i>');
+    const lines = [
+      `<b>🔎 Search titles (${queries.length}):</b>`,
+      '',
+      ...queries.map((q, i) => `${i + 1}. ${escHtml(q.term)}`),
+      '',
+      '<i>/jobs add "Title" · /jobs remove "Title" · /jobs suggest</i>'
+    ];
+    return reply(chatId, lines.join('\n'));
+  }
+
+  // /resume — start file upload flow
+  if (/^\/?resume\b/.test(text)) {
+    pendingState.set(chatId, { kind: 'resume_upload', startedAt: Date.now() });
+    return reply(chatId, '📎 Send me your resume as an attachment (PDF, DOCX, or MD).\nI\'ll parse it and update your skills/certs/titles. Cancel with /cancel.');
+  }
+
+  // /cancel — clear any pending state
+  if (/^\/?cancel\b/.test(text)) {
+    pendingState.delete(chatId);
+    return reply(chatId, '✅ Cancelled.');
+  }
+
+  // /why N — explain match
+  const whyM = text.match(/^\/?why\s+(\d{1,3})\b/);
+  if (whyM) {
+    const n = parseInt(whyM[1]);
+    try {
+      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const job = last.jobs.find(j => j.idx === n);
+      if (!job) return reply(chatId, `❌ Job #${n} not found in last batch (${last.jobs.length} jobs).`);
+      const lines = [
+        `<b>${job.matchPct}% match: ${escHtml(job.title)}</b>`,
+        `<i>${escHtml(job.company)}</i>`,
+        '',
+        `<b>Raw score:</b> ${job.score}`,
+        `<b>Search query that found it:</b> ${escHtml(job.q)}`,
+        job.matched.length ? `<b>Matched keywords (${job.matched.length}):</b>\n${job.matched.map(escHtml).join(' · ')}` : '<i>No CV keywords matched — score is from search relevance only.</i>',
+        '',
+        `<a href="${job.directUrl || job.viewjobUrl}">Open job →</a>`
+      ];
+      return reply(chatId, lines.join('\n'));
+    } catch {
+      return reply(chatId, '❌ No batch data on disk. Run /scrape first.');
+    }
+  }
+
+  // /forget all
+  if (/^\/?forget\s+all\b/.test(text)) {
+    try {
+      fs.unlinkSync(path.join(ROOT, 'data', 'seen-jobs.json'));
+      return reply(chatId, '🗑 Wiped seen-jobs memory. Next /scrape treats every job as fresh.');
+    } catch {
+      return reply(chatId, '<i>No memory to wipe — you\'re already at a clean slate.</i>');
+    }
+  }
+
+  // /forget last
+  if (/^\/?forget\s+last\b/.test(text)) {
+    try {
+      const seenPath = path.join(ROOT, 'data', 'seen-jobs.json');
+      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const seen = JSON.parse(fs.readFileSync(seenPath, 'utf8'));
+      const remove = new Set(last.jobs.map(j => j.viewjobUrl));
+      const before = seen.ids.length;
+      seen.ids = seen.ids.filter(id => !remove.has(id));
+      fs.writeFileSync(seenPath, JSON.stringify(seen, null, 2));
+      return reply(chatId, `✅ Forgot ${before - seen.ids.length} jobs from the last batch. They'll come back next /scrape.`);
+    } catch (e) {
+      return reply(chatId, '❌ ' + e.message);
+    }
+  }
+
   return reply(chatId, `Unknown command. Try /help.`);
+}
+
+// Handle file attachments (for /resume upload flow)
+async function handleAttachment(msg) {
+  const chatId = String(msg.chat.id);
+  if (chatId !== ALLOWED_CHAT) return;
+  const state = pendingState.get(chatId);
+  if (!state || state.kind !== 'resume_upload') {
+    // No pending /resume — ignore the attachment
+    return reply(chatId, '<i>I wasn\'t expecting an attachment. Use /resume to upload a new resume.</i>');
+  }
+  pendingState.delete(chatId);
+
+  const doc = msg.document;
+  if (!doc) return reply(chatId, '❌ Send a file as a Document attachment, not a photo.');
+
+  const ext = path.extname(doc.file_name || '').toLowerCase();
+  if (!['.pdf', '.docx', '.md', '.txt', '.markdown'].includes(ext)) {
+    return reply(chatId, `❌ Unsupported format: ${ext}. Use PDF, DOCX, or MD.`);
+  }
+
+  reply(chatId, '🔄 Downloading + parsing…');
+  try {
+    // Get file path from Telegram
+    const fileInfo = await tgGet('getFile', { file_id: doc.file_id });
+    if (!fileInfo.ok) throw new Error('Telegram getFile failed');
+    const downloadUrl = `https://api.telegram.org/file/bot${TG_TOKEN}/${fileInfo.result.file_path}`;
+    const r = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
+    const buf = Buffer.from(await r.arrayBuffer());
+
+    const localPath = path.join(ROOT, 'data', `cv-uploaded${ext}`);
+    fs.writeFileSync(localPath, buf);
+
+    const parsed = await parseResume(localPath);
+    writeParsedCV(parsed);
+
+    return reply(chatId, [
+      '✅ <b>Resume updated!</b>',
+      '',
+      `${parsed.titles.length} titles · ${parsed.certs.length} certs · ${parsed.skills.length} skills · ${parsed.compliance.length} compliance frameworks`,
+      '',
+      `<b>Top skills:</b> ${parsed.skills.slice(0, 8).map(escHtml).join(', ')}`,
+      '',
+      'Try <code>/jobs suggest</code> for new search title ideas, then /scrape for a fresh batch.'
+    ].join('\n'));
+  } catch (e) {
+    return reply(chatId, '❌ Resume upload failed: ' + e.message);
+  }
 }
 
 function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
@@ -279,8 +608,12 @@ while (true) {
     if (j.ok && j.result?.length) {
       for (const u of j.result) {
         if (u.message) {
-          // Don't await — let messages dispatch in parallel (most are quick)
-          handleMessage(u.message).catch(e => log('handleMessage error: ' + e.message));
+          if (u.message.document) {
+            // File attachment — route to attachment handler
+            handleAttachment(u.message).catch(e => log('handleAttachment error: ' + e.message));
+          } else {
+            handleMessage(u.message).catch(e => log('handleMessage error: ' + e.message));
+          }
         }
         offset = u.update_id + 1;
       }

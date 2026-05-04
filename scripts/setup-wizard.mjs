@@ -17,6 +17,9 @@ import { stdin as input, stdout as output } from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
+import { suggestRoles } from './role-suggester.mjs';
+import { geocode } from './geocode.mjs';
+import * as cfgRW from './config-rw.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -70,7 +73,7 @@ function writeEnv(vars) {
 
 // ---- step 1: Telegram bot token ----
 async function step1Token() {
-  step(1, 5, 'Telegram bot');
+  step(1, 10, 'Telegram bot');
   const env = readEnv();
   if (env.TELEGRAM_BOT_TOKEN && /^\d+:[\w-]+$/.test(env.TELEGRAM_BOT_TOKEN)) {
     const a = await ask(arrow(`Existing bot token detected. Reuse it? [Y/n] `));
@@ -101,7 +104,7 @@ async function step1Token() {
 
 // ---- step 2: chat ID auto-detection ----
 async function step2ChatId(token) {
-  step(2, 5, 'Connecting your chat');
+  step(2, 10, 'Connecting your chat');
   const env = readEnv();
   if (env.TELEGRAM_CHAT_ID && /^\d+$/.test(env.TELEGRAM_CHAT_ID)) {
     const a = await ask(arrow(`Existing chat ID ${env.TELEGRAM_CHAT_ID}. Reuse it? [Y/n] `));
@@ -142,7 +145,7 @@ async function step2ChatId(token) {
 
 // ---- step 3: hiring.cafe login ----
 async function step3Login() {
-  step(3, 5, 'hiring.cafe login');
+  step(3, 10, 'hiring.cafe login');
   console.log(`${c.dim}A Chromium window will open at hiring.cafe. Sign in with Google.${c.reset}`);
   console.log(`${c.dim}When you see your profile picture top-right, close the window.${c.reset}\n`);
   await ask(arrow('Press Enter to open the browser… '));
@@ -175,7 +178,7 @@ async function step3Login() {
 
 // ---- step 4: resume upload ----
 async function step4Resume() {
-  step(4, 5, 'Your resume');
+  step(4, 10, 'Your resume');
   console.log(`${c.dim}Drop a path to your resume (PDF, DOCX, or Markdown).${c.reset}\n`);
 
   while (true) {
@@ -186,7 +189,6 @@ async function step4Resume() {
     try {
       const parsed = await parseResume(raw);
       writeParsedCV(parsed);
-      // Also copy a markdown copy into data/cv.md for posterity (optional)
       try {
         if (path.extname(raw).toLowerCase() === '.md') {
           fs.copyFileSync(raw, path.join(ROOT, 'data', 'cv.md'));
@@ -201,9 +203,89 @@ async function step4Resume() {
   }
 }
 
-// ---- step 5: schedule + finalize ----
+// ---- step 5: auto-suggest job titles from resume ----
+async function step5JobsSuggest(parsed) {
+  step(5, 10, 'Job titles to search');
+  console.log(`${c.dim}Based on your resume, I'll suggest job titles to search hiring.cafe for.${c.reset}\n`);
+
+  const suggestions = suggestRoles(parsed, { max: 12 });
+  if (!suggestions.length) {
+    console.log(`${c.dim}Couldn't auto-suggest from your CV. We'll use sensible defaults from config.example.json.${c.reset}`);
+    return null;
+  }
+
+  console.log(`${c.bold}Suggested:${c.reset}`);
+  suggestions.forEach((s, i) => {
+    console.log(`  ${c.cyan}${(i + 1).toString().padStart(2)}.${c.reset} ${s.title}  ${c.dim}(${s.cluster})${c.reset}`);
+  });
+
+  console.log();
+  const a = await ask(arrow('Use all of these? [Y/n/pick] '));
+  if (a.match(/^n/i)) return null; // keep config defaults
+  if (a.match(/^p/i)) {
+    const picksRaw = await ask(arrow('Comma-separated numbers to keep (e.g. 1,3,5,8): '));
+    const picks = picksRaw.split(',').map(s => parseInt(s.trim())).filter(n => n > 0 && n <= suggestions.length);
+    return picks.map(n => ({ key: suggestions[n - 1].title.replace(/[^a-z0-9]/gi, '').slice(0, 20), term: suggestions[n - 1].title }));
+  }
+  return suggestions.map(s => ({ key: s.title.replace(/[^a-z0-9]/gi, '').slice(0, 20), term: s.title }));
+}
+
+// ---- step 6: years of experience ----
+async function step6YOE() {
+  step(6, 10, 'Years of experience');
+  console.log(`${c.dim}Maximum YOE you'd accept on a job listing. Higher = more results.${c.reset}\n`);
+  while (true) {
+    const a = (await ask(arrow('Max YOE? [default 5] '))).trim();
+    if (!a) return 5;
+    const n = parseInt(a);
+    if (n >= 0 && n <= 30) return n;
+    console.log(fail('Enter a number 0-30.'));
+  }
+}
+
+// ---- step 7: salary floor ----
+async function step7Salary() {
+  step(7, 10, 'Salary floor');
+  console.log(`${c.dim}Bot adds a small bonus to jobs at/above this floor, penalty below. Doesn't filter, just ranks.${c.reset}\n`);
+  while (true) {
+    const a = (await ask(arrow('Salary floor in $K? [default 90 = $90,000] '))).trim();
+    if (!a) return 90000;
+    const n = parseInt(a);
+    if (n >= 30 && n <= 500) return n * 1000;
+    console.log(fail('Enter a number 30-500 (in thousands).'));
+  }
+}
+
+// ---- step 8: clearance toggle ----
+async function step8Clearance() {
+  step(8, 10, 'Government clearance filter');
+  console.log(`${c.dim}If ON: bot drops jobs requiring TS/SCI, Public Trust, DoD, etc.${c.reset}`);
+  console.log(`${c.dim}If OFF: gov jobs are included (use this if you have a clearance and want gov work).${c.reset}\n`);
+  const a = await ask(arrow('Filter out gov clearance jobs? [Y/n] '));
+  return !a.match(/^n/i);
+}
+
+// ---- step 9: weather city ----
+async function step9City() {
+  step(9, 10, 'Your city for weather');
+  console.log(`${c.dim}The morning push includes a quick weather report. Where should we look up?${c.reset}\n`);
+  while (true) {
+    const a = (await ask(arrow('City name [default: Miami]: '))).trim();
+    const q = a || 'Miami';
+    process.stdout.write(arrow(`Geocoding "${q}"… `));
+    try {
+      const r = await geocode(q);
+      if (!r) { console.log(fail('No match. Try again.')); continue; }
+      console.log(ok(`${r.city}${r.admin ? ', ' + r.admin : ''} (${r.country})`));
+      const ok2 = await ask(arrow('Looks right? [Y/n] '));
+      if (!ok2.match(/^n/i)) return r;
+    } catch (e) { console.log(fail('Geocoding failed: ' + e.message)); }
+  }
+}
+
+// ---- step 10: schedule + finalize ----
 async function step5Finalize(token, chatId) {
-  step(5, 5, 'Schedule & finalize');
+  step(10, 10, 'Schedule & finalize');
 
   // Load config (defaults from example) and let user tweak schedule
   const cfg = JSON.parse(fs.readFileSync(fs.existsSync(CONFIG_PATH) ? CONFIG_PATH : CONFIG_EXAMPLE, 'utf8'));
@@ -259,7 +341,23 @@ async function step5Finalize(token, chatId) {
     const token = await step1Token();
     const chatId = await step2ChatId(token);
     await step3Login();
-    await step4Resume();
+    const parsed = await step4Resume();
+    const queries = await step5JobsSuggest(parsed);
+    const yoe = await step6YOE();
+    const salary = await step7Salary();
+    const clearanceOn = await step8Clearance();
+    const city = await step9City();
+
+    // Persist all collected settings into config.json before finalizing
+    if (queries && queries.length) cfgRW.set('queries', queries);
+    cfgRW.set('user.maxYoeAcceptable', yoe);
+    cfgRW.set('user.salaryFloorUsd', salary);
+    cfgRW.set('filters.filterClearance', clearanceOn);
+    cfgRW.set('weather.city', city.city);
+    cfgRW.set('weather.lat', city.lat);
+    cfgRW.set('weather.lon', city.lon);
+    cfgRW.set('weather.timezone', city.timezone);
+
     await step5Finalize(token, chatId);
 
     banner('🎉 ALL DONE — check Telegram for next steps');
