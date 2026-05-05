@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 ### Fixed — v0.4.1 (in progress)
 
 - **Wizard no longer crashes at Task Scheduler step on stripped-down Windows installs.** The wizard's call to `spawn('powershell', ...)` relied on `powershell.exe` being on `PATH`. Some user environments — notably one that surfaced this in the wild — don't include `C:\Windows\System32` in `PATH`, so spawn returned `ENOENT` and the wizard exited mid-setup. Now uses the absolute path `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`, with friendly fall-through error messaging if the spawn still fails.
+- **Wizard no longer prints `Assertion failed: !(handle->flags & UV_HANDLE_CLOSING)` on shutdown.** The bot-start spawn used `detached: true` with default piped stdio, so the parent process held references to the child's stdin/stdout/stderr pipes. Combined with an explicit `process.exit(0)` at the wizard's end, libuv (Node's async I/O layer) hit an internal assertion at `src/win/async.c:76` because the event loop tried to operate on handles that were already closing. Two-part fix: spawn now uses `stdio: 'ignore'` + explicit `child.unref()` so the parent never tracks the child's pipes, and the wizard no longer force-exits — Node drains the event loop naturally.
 
 ### Added — v0.4.1 (in progress)
 

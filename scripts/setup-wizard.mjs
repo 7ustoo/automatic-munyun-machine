@@ -375,10 +375,19 @@ async function step10Finalize(token, chatId, resumeSkipped) {
     console.log(`${c.dim}  ${POWERSHELL_EXE} -ExecutionPolicy Bypass -File "${path.join(__dirname, 'setup-tasks.ps1')}"${c.reset}`);
   }
 
-  // Start the bot
+  // Start the bot.
+  //
+  // Subtle: we MUST set `stdio: 'ignore'` here, not just `detached: true`.
+  // With default piped stdio, the parent holds references to the child's
+  // stdin/stdout/stderr pipes; combined with the wizard's later shutdown
+  // path, libuv hits an assertion in src/win/async.c:76 ("UV_HANDLE_CLOSING")
+  // because process exit races with handles still tracked in the event loop.
+  // `stdio: 'ignore'` drops those refs entirely; `.unref()` is belt-and-
+  // suspenders so the loop exits even if the child is still spawning.
   process.stdout.write(arrow('Starting bot… '));
-  spawn(POWERSHELL_EXE, ['-Command', "Start-ScheduledTask -TaskName 'munyun-bot'"],
-    { cwd: ROOT, windowsHide: true, detached: true });
+  const botProc = spawn(POWERSHELL_EXE, ['-Command', "Start-ScheduledTask -TaskName 'munyun-bot'"],
+    { cwd: ROOT, windowsHide: true, detached: true, stdio: 'ignore' });
+  botProc.unref();
   await new Promise(r2 => setTimeout(r2, 3000));
   console.log(ok('Bot started.'));
 
@@ -434,7 +443,10 @@ async function step10Finalize(token, chatId, resumeSkipped) {
     }
     console.log(`${c.dim}Edit config.json anytime to customize queries, filters, weather, schedule.${c.reset}\n`);
     rl.close();
-    process.exit(0);
+    // No process.exit(0) — let Node drain the event loop naturally so any
+    // in-flight handles (the unref'd bot-start child, the final fetch's
+    // keepalive socket) close cleanly. Force-exit was the second half of
+    // the libuv UV_HANDLE_CLOSING assertion bug.
   } catch (e) {
     console.log(`\n${fail(e.message)}`);
     rl.close();
