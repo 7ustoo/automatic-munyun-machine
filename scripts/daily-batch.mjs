@@ -74,6 +74,18 @@ async function tg(text) {
   return json.result.message_id;
 }
 
+async function tgDocument(filePath, caption) {
+  const buf = fs.readFileSync(filePath);
+  const fd = new FormData();
+  fd.append('chat_id', TG_CHAT);
+  if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
+  fd.append('document', new Blob([buf]), path.basename(filePath));
+  const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+  const json = await res.json();
+  if (!json.ok) throw new Error('Telegram sendDocument error: ' + JSON.stringify(json));
+  return json.result.message_id;
+}
+
 async function tgChunked(message) {
   const MAX = 3900;
   const blocks = message.split('\n\n');
@@ -404,6 +416,47 @@ function buildMessage(weather, top, directUrls, stats) {
   return lines.join('\n');
 }
 
+// Build the human-readable batch as a downloadable .txt — same data the
+// Telegram messages contain, but consolidated, scrollable, and Cmd+F-able.
+// Naming: data/jobs(YYYY-MM-DD).txt — preserved in chat history forever.
+function buildBatchTxt(top, directUrls, weather, stats) {
+  const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const lines = [];
+  lines.push('Automatic Munyun Machine — Job Batch');
+  lines.push(`Date: ${DATE} (${today})`);
+  lines.push(weather.replace(/[^\x20-\x7E°]/g, '').trim());
+  const filterBits = [];
+  if (stats.droppedClearance) filterBits.push(`${stats.droppedClearance} clearance`);
+  if (stats.skippedApplied)   filterBits.push(`${stats.skippedApplied} applied`);
+  if (stats.skippedSeen)      filterBits.push(`${stats.skippedSeen} previously seen`);
+  const tail = filterBits.length ? ` · filtered: ${filterBits.join(', ')}` : '';
+  lines.push(`${top.length} jobs · ${stats.raw} raw${tail} · sorted by CV match`);
+  lines.push('');
+  lines.push('================================================================');
+  lines.push('');
+  top.forEach((r, i) => {
+    const url = directUrls[i] || '';
+    const matched = (r.matched || []).join(', ') || '(no keyword matches — ranked on body context)';
+    lines.push(`[${i + 1}] ${r.matchPct ?? 0}% match — ${r.title || '(untitled)'}`);
+    if (r.company) lines.push(`    Company:  ${r.company}`);
+    if (r.yoe)     lines.push(`    YOE:      ${r.yoe}+`);
+    if (r.q)       lines.push(`    Search:   ${r.q}`);
+    lines.push(`    Matched:  ${matched}`);
+    if (url) lines.push(`    Apply:    ${url}`);
+    lines.push(`    View:     ${r.href}`);
+    lines.push('');
+  });
+  return lines.join('\n');
+}
+
+function writeBatchTxt(top, directUrls, weather, stats) {
+  const dir = path.join(ROOT, 'data');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `jobs(${DATE}).txt`);
+  fs.writeFileSync(file, buildBatchTxt(top, directUrls, weather, stats));
+  return file;
+}
+
 function writeBatchTsv(top, directUrls) {
   const dir = path.join(ROOT, 'data');
   fs.mkdirSync(dir, { recursive: true });
@@ -488,6 +541,22 @@ function writeBatchTsv(top, directUrls) {
     });
     const chunks = await tgChunked(message);
     log(`Telegram sent in ${chunks} chunk(s)`);
+
+    // Build + attach the downloadable .txt as the final message of the batch.
+    // Failure here is non-fatal — messages already went through.
+    const txtStats = {
+      raw: all.length,
+      droppedClearance,
+      skippedApplied: applied.size === 0 ? 0 : kept.filter(r => applied.has(r.href)).length,
+      skippedSeen: seen.size === 0 ? 0 : kept.filter(r => !applied.has(r.href) && seen.has(r.href)).length
+    };
+    try {
+      const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
+      await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
+      log(`Sent batch .txt: ${path.basename(txtPath)}`);
+    } catch (e) {
+      log(`Batch .txt attach failed (non-fatal): ${e.message}`);
+    }
 
     // Only persist seen IDs *after* successful Telegram delivery —
     // so a failed run doesn't burn jobs we never actually surfaced.

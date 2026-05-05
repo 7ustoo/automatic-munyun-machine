@@ -6,6 +6,7 @@
  * Dispatches commands:
  *   /daily, gm, morning   → run daily batch (weather + 100 jobs)
  *   /jobs                  → 100 jobs only, no weather
+ *   /export                → download today's batch as a .txt file
  *   /weather               → Miami weather only
  *   /test, /ping           → reply "alive"
  *   /help, /start          → list commands
@@ -84,6 +85,21 @@ async function tgPost(method, body) {
   }
   return j;
 }
+async function tgSendDocument(chatId, filePath, caption) {
+  const buf = fs.readFileSync(filePath);
+  const fd = new FormData();
+  fd.append('chat_id', String(chatId));
+  if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
+  fd.append('document', new Blob([buf]), path.basename(filePath));
+  const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+  const j = await r.json();
+  if (!j.ok) {
+    log(`TG sendDocument FAILED ${r.status}: ${JSON.stringify(j).slice(0, 300)}`);
+    throw new Error(`Telegram sendDocument failed: ${j.description || j.error_code}`);
+  }
+  return j;
+}
+
 async function reply(chatId, text, opts = {}) {
   // First try with HTML parse_mode; if Telegram rejects the markup, fall back to plain text.
   try {
@@ -222,6 +238,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine</b>
 /save N              → bookmark job N on hiring.cafe
 /applied N           → mark job N applied
 /why N               → explain why job N got its match %
+/export              → download today's batch as a .txt file
 
 <b>Settings — view + edit from your phone</b>
 /settings            → current config in one message
@@ -597,6 +614,30 @@ async function handleMessage(msg) {
       return reply(chatId, '🗑 Wiped seen-jobs memory. Next /scrape treats every job as fresh.');
     } catch {
       return reply(chatId, '<i>No memory to wipe — you\'re already at a clean slate.</i>');
+    }
+  }
+
+  // /export — send today's jobs(YYYY-MM-DD).txt as a downloadable attachment.
+  // Falls back to the most recent dated file if today's hasn't been generated yet.
+  if (/^\/?export\b/.test(text)) {
+    try {
+      const dir = path.join(ROOT, 'data');
+      const today = new Date().toISOString().slice(0, 10);
+      const todayFile = path.join(dir, `jobs(${today}).txt`);
+      if (fs.existsSync(todayFile)) {
+        await tgSendDocument(chatId, todayFile, `📄 jobs(${today}).txt — today's batch`);
+        return;
+      }
+      const files = fs.readdirSync(dir).filter(f => /^jobs\(\d{4}-\d{2}-\d{2}\)\.txt$/.test(f)).sort();
+      if (!files.length) {
+        return reply(chatId, '<i>No batches yet. Run /scrape to generate one.</i>');
+      }
+      const latest = files[files.length - 1];
+      const latestDate = latest.match(/\d{4}-\d{2}-\d{2}/)[0];
+      await tgSendDocument(chatId, path.join(dir, latest), `📄 ${latest} — most recent batch (no run yet today, last from ${latestDate})`);
+      return;
+    } catch (e) {
+      return reply(chatId, '❌ Export failed: ' + escHtml(e.message));
     }
   }
 

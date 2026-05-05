@@ -1,7 +1,7 @@
 # CONTEXT.md — Automatic Munyun Machine
 
 > **Purpose:** complete project state so a fresh contributor (or fresh Claude Code session) can resume work without re-explaining anything.
-> **Last updated:** 2026-05-04 (v0.3.0 + audit-patch shipped, commit `a044367` on v0.3 branch)
+> **Last updated:** 2026-05-04 (v0.3 merged into main as PR #1 / `03efcca`; v0.4 work started on `v0.4` branch)
 > **Update protocol:** update this file at the end of *any* code change (commit, command added, file moved, schema shift). Treat it like a CHANGELOG-of-state.
 
 ---
@@ -28,8 +28,9 @@
 
 | Branch | What | State |
 |---|---|---|
-| `main` | Production. v0.2 features only. Install one-liner clones this. | Last commit: `e589220` (v0.2 initial) |
-| `v0.3` | Feature branch with v0.3 work. Pre-release. | Tip: `a044367` (audit patch) |
+| `main` | Production. v0.3 features (merged 2026-05-04). Install one-liner clones this. | Last commit: `03efcca` (PR #1 merge of v0.3) |
+| `v0.3` | Historical feature branch. Kept for reference; do not push to it. | Tip: `5afae31` |
+| `v0.4` | Active feature branch. `.txt` export + `/export` command. | Forked from `main` |
 
 **Releases:** `v0.3.0` is a pre-release pointing at `v0.3` branch tag. Promote to main when proven (~1 week of stable real-world use).
 
@@ -85,6 +86,7 @@ node scripts/setup-wizard.mjs
 | `data/bot-offset.json` | Telegram poll cursor. |
 | `data/browser-profile/` | Playwright Chromium persistent profile with hiring.cafe session cookies. |
 | `data/today-batch-{date}.tsv` | Each day's batch as TSV. |
+| `data/jobs({date}).txt` | Each day's batch as a downloadable plain-text file — sent as Telegram document attachment at end of every batch and on `/export`. |
 | `data/daily-batch-{date}.log` | Per-run scraper log. |
 | `data/telegram-bot.log` | Bot poll + dispatch log. Chat ID masked. |
 | `install.ps1` | One-liner installer. Installs Node + Git via winget, clones repo, runs wizard. |
@@ -94,10 +96,10 @@ node scripts/setup-wizard.mjs
 | `package.json` | npm manifest. v0.3.0. Deps: `playwright-core`, `pdf-parse`, `mammoth`. |
 | `.gitignore` | Ignores `.env`, `config.json`, `data/`, `cv.md`, `node_modules/`, logs, `*PRIVATE*.md`. |
 
-## Telegram commands (28 total)
+## Telegram commands (29 total)
 
 ### Core
-`/scrape` (alias `/daily`, `gm`, `morning`) · `/save N` · `/applied N` · `/why N`
+`/scrape` (alias `/daily`, `gm`, `morning`) · `/save N` · `/applied N` · `/why N` · `/export`
 
 ### Settings (NEW in v0.3)
 `/settings` · `/resume` · `/jobs` (+ `add`/`remove`/`suggest`) · `/yoe N` · `/salary N` · `/clearance on/off` · `/forms all|simple|long` · `/skip <co>` · `/unskip <co>` · `/city <name>` · `/schedule HH:MM`
@@ -167,13 +169,15 @@ node scripts/telegram-send.mjs "<message>"
 
 - ✅ v0.1 — career-ops bot (Telegram + CDP-based scraper, local only)
 - ✅ v0.2 — Public AMM repo with 5-step wizard, install.ps1, branding rename
-- ✅ v0.3 (pre-release) — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms`, audit-patch
-- ⏭ v0.4 — Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline buttons
+- ✅ v0.3 — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms`, audit-patch. **Merged to main 2026-05-04.**
+- 🚧 v0.4 (in progress) — `.txt` batch export + `/export` command. Next: career-ops consolidation, Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline buttons.
 - ⏭ v1.0 — Tauri desktop GUI with dashboard, history calendar, application Kanban
 - ⏭ v2.0 — LLM rerank (BYO Anthropic key), analytics, multi-resume profiles
 
 ## Recent change history (newest first)
 
+- **2026-05-04** — v0.4 branch opened. Added `.txt` batch export: every morning push attaches `data/jobs(YYYY-MM-DD).txt` after the last message; new `/export` command pulls today's file (or most recent if today's hasn't run). Touches `daily-batch.mjs` and `telegram-bot.mjs`.
+- **2026-05-04** — v0.3 merged into `main` via PR #1 (commit `03efcca`). Install one-liner now serves v0.3 by default. Pre-release flag dropped.
 - **2026-05-04** — v0.3 audit patch (commit `a044367`): 6 ship-blockers + 4 majors + 6 polish fixes. `/weather` reads config; token scrubbed from logs; spawn timeouts; runningJob auto-clear; CHANGELOG added; window title rebranded; chat ID masked.
 - **2026-05-04** — `/forms all|simple|long` command added (commit `3653873`). Maps to hiring.cafe `applicationFormEase` URL filter.
 - **2026-05-04** — v0.3 branch shipped (commit `699f7bb`): 18 new bot commands, 10-step wizard, role-suggester, geocoder, config-rw, expanded keywords. Pre-release `v0.3.0` tagged.
@@ -184,8 +188,9 @@ node scripts/telegram-send.mjs "<message>"
 
 ## Pending decisions / open questions
 
-- When to merge `v0.3` → `main`? Policy: "version releases will be merged into the main branch when proven that it works fine." So after ~1 week of real use without bugs, merge + drop pre-release flag on `v0.3.0`.
-- Inno Setup `.exe` installer for v0.4 — postponed until v0.3 is proven.
+- **Career-ops consolidation** — currently the live bot runs from `<dev-machine>/career-ops/`, with AMM as a publish-target mirror. Pending plan: migrate `.env`, `config.json`, `data/` into AMM, re-register Task Scheduler against AMM paths, archive `career-ops/`. To be done before sharing AMM with team so dev path == user path. Detailed plan lives in chat history; not yet executed.
+- **Team rollout** — v0.3 ready to share. Each teammate creates their own bot via `@BotFather` (separate token, separate chat). Bot `@username` is per-person — no shared `@justinjobbot` lookup.
+- Inno Setup `.exe` installer for v0.4 — postponed until v0.3 is proven in real-world team use.
 - LLM rerank (Claude API) — NOT in current build. Would cost ~$6/mo. Decision deferred to v2.0.
 
 ---
