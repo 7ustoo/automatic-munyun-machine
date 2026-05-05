@@ -93,6 +93,11 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/forget last` | Un-memorize the most recent batch |
 | `/cancel` | Cancel a multi-step interaction |
 | `/weather` | Just the weather |
+| `/version` | Show running version + latest on GitHub |
+| `/update` | Pull latest from GitHub + restart bot |
+| `/update skip` | Don't notify about the current latest version |
+| `/update check` | Re-check GitHub for a newer version |
+| `/update notes` | Show release notes for the latest version |
 | `/test`, `/ping` | Bot health check |
 | `/help` | Show this list |
 
@@ -178,8 +183,9 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 - ✅ **v0.2** — Setup wizard, install one-liner, configurable everything
 - ✅ **v0.3** — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms` filter, `/jobs suggest`, `/why N`
 - ✅ **v0.4** — Downloadable `.txt` batch attachment + `/export` command
-- ✅ **v0.4.1** *(current)* — Native Windows file picker for resume step, Telegram-only setup path, fixed PowerShell PATH crash
-- **v0.5** — Mac + Linux support, plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby)
+- ✅ **v0.4.1** — Native Windows file picker for resume step, Telegram-only setup path, fixed PowerShell PATH crash, libuv assertion fix, transient-outage resilience
+- ✅ **v0.5** *(current)* — `/update` command, `/version` command, update notifications on startup + daily, version-aware bot startup ping
+- **v0.6** — Mac + Linux support, plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby)
 - **v1.0** — Tauri desktop GUI with dashboard, history calendar, application Kanban
 - **v2.0** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension
 

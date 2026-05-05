@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — v0.5 (in progress)
+
+- **Version everywhere.** The bot's startup ping now reads `🤖 Automatic Munyun Machine v0.5.0 — online`. Same for the `/help` header. Single source of truth: `package.json`'s `version` field.
+- **`/version` command.** Shows running version + latest version on GitHub. Hint to run `/update` if behind.
+- **`/update` command.** Pulls latest from `main` via `git pull`, runs `npm install` if deps changed, restarts the bot — all from Telegram. No more "open PowerShell, paste one-liner, walk wizard." Sub-commands: `/update` (run it), `/update skip` (don't notify me about this version again), `/update check` (re-check now), `/update notes` (show release notes).
+- **Update notification on bot startup + once per day.** Bot polls GitHub Releases API on startup (after a 5s delay) and every 24h. If a newer version exists and you haven't dismissed it, you get a Telegram message: `🆕 Update available: v0.4.1 → v0.5.0` with what's new + the install command. No telemetry — outbound only, no auth, no identifying info.
+- **Post-update confirmation.** After a successful `/update`, the new bot detects the upgrade and replies `✅ Updated to v0.5.0 (was v0.4.1)` instead of the generic startup ping. Clear signal that the upgrade worked.
+- New `scripts/update-checker.mjs` module — handles GitHub API polling, semver comparison, dismissed-version persistence in `data/update-state.json`, and the post-update flag (`data/.updating`).
+
 ### Fixed — v0.4.1 (in progress)
 
 - **Wizard no longer crashes at Task Scheduler step on stripped-down Windows installs.** The wizard's call to `spawn('powershell', ...)` relied on `powershell.exe` being on `PATH`. Some user environments — notably one that surfaced this in the wild — don't include `C:\Windows\System32` in `PATH`, so spawn returned `ENOENT` and the wizard exited mid-setup. Now uses the absolute path `%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe`, with friendly fall-through error messaging if the spawn still fails.
