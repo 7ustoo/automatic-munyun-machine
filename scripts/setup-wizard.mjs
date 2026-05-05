@@ -20,6 +20,15 @@ import { parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles } from './role-suggester.mjs';
 import { geocode } from './geocode.mjs';
 import * as cfgRW from './config-rw.mjs';
+import { pickResumeFile } from './file-picker.mjs';
+
+// Absolute path to powershell.exe so spawn() doesn't depend on PATH.
+// PATH lookup fails on stripped-down Windows installs (we hit ENOENT
+// crashing the wizard at task registration in v0.4).
+const POWERSHELL_EXE = path.join(
+  process.env.SystemRoot || 'C:\\Windows',
+  'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
+);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -177,12 +186,49 @@ async function step3Login() {
 }
 
 // ---- step 4: resume upload ----
+// Returns the parsed CV object, or null if the user chose to upload via
+// Telegram later. Step 5 (job-title suggestions) handles null gracefully.
 async function step4Resume() {
   step(4, 10, 'Your resume');
-  console.log(`${c.dim}Drop a path to your resume (PDF, DOCX, or Markdown).${c.reset}\n`);
+  console.log(`${c.dim}Three ways to add your resume:${c.reset}`);
+  console.log(`  ${c.cyan}1${c.reset}  Pick a file from this laptop now  ${c.dim}(file picker dialog)${c.reset}  ${c.green}[recommended]${c.reset}`);
+  console.log(`  ${c.cyan}2${c.reset}  Upload via Telegram later         ${c.dim}(skip for now, send /resume to bot when ready)${c.reset}`);
+  console.log(`  ${c.cyan}3${c.reset}  Type the file path manually       ${c.dim}(if the picker won't open)${c.reset}\n`);
+
+  const choice = (await ask(arrow('Choice [default 1]: '))).trim() || '1';
+
+  if (choice === '2') {
+    console.log(ok('Skipping resume for now. Send /resume to your bot once setup finishes.'));
+    return null;
+  }
 
   while (true) {
-    const raw = (await ask(arrow('Resume file path: '))).trim().replace(/^["']|["']$/g, '');
+    let raw = '';
+
+    if (choice === '1') {
+      console.log(arrow('Opening file picker…'));
+      try {
+        raw = await pickResumeFile();
+        if (!raw) {
+          console.log(`${c.dim}Picker closed without a selection.${c.reset}`);
+          const retry = await ask(arrow('Try again? [Y/n/skip] '));
+          if (retry.match(/^n/i)) continue;
+          if (retry.match(/^s/i)) {
+            console.log(ok('Skipping resume. Send /resume to your bot later.'));
+            return null;
+          }
+          continue;
+        }
+        console.log(ok(`Selected: ${path.basename(raw)}`));
+      } catch (e) {
+        console.log(fail('File picker failed: ' + e.message));
+        console.log(`${c.dim}Falling back to typed path.${c.reset}`);
+        raw = (await ask(arrow('Resume file path: '))).trim().replace(/^["']|["']$/g, '');
+      }
+    } else {
+      raw = (await ask(arrow('Resume file path: '))).trim().replace(/^["']|["']$/g, '');
+    }
+
     if (!raw) continue;
     if (!fs.existsSync(raw)) { console.log(fail(`File not found: ${raw}`)); continue; }
     process.stdout.write(arrow('Parsing… '));
@@ -206,6 +252,14 @@ async function step4Resume() {
 // ---- step 5: auto-suggest job titles from resume ----
 async function step5JobsSuggest(parsed) {
   step(5, 10, 'Job titles to search');
+
+  // No resume yet? Fall through to defaults; user can run /jobs suggest later.
+  if (!parsed) {
+    console.log(`${c.dim}Skipping suggestions — no resume yet. Defaults from config.example.json will be used.${c.reset}`);
+    console.log(`${c.dim}Once you upload a resume via /resume on Telegram, run /jobs suggest for tailored picks.${c.reset}`);
+    return null;
+  }
+
   console.log(`${c.dim}Based on your resume, I'll suggest job titles to search hiring.cafe for.${c.reset}\n`);
 
   const suggestions = suggestRoles(parsed, { max: 12 });
@@ -284,7 +338,7 @@ async function step9City() {
 }
 
 // ---- step 10: schedule + finalize ----
-async function step10Finalize(token, chatId) {
+async function step10Finalize(token, chatId, resumeSkipped) {
   step(10, 10, 'Schedule & finalize');
 
   // Load config (defaults from example) and let user tweak schedule
@@ -298,10 +352,13 @@ async function step10Finalize(token, chatId) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
   console.log(ok('Wrote config.json'));
 
-  // Register Task Scheduler entries
+  // Register Task Scheduler entries.
+  // POWERSHELL_EXE is the absolute path; falling back to PATH-lookup
+  // 'powershell' crashes the wizard on stripped-down Windows installs
+  // (we hit ENOENT in v0.4 — see scripts/file-picker.mjs comment).
   process.stdout.write(arrow('Registering Windows Task Scheduler… '));
   const r = await new Promise((resolve) => {
-    const child = spawn('powershell', [
+    const child = spawn(POWERSHELL_EXE, [
       '-NoProfile', '-ExecutionPolicy', 'Bypass',
       '-File', path.join(__dirname, 'setup-tasks.ps1')
     ], { cwd: ROOT, windowsHide: true });
@@ -309,23 +366,40 @@ async function step10Finalize(token, chatId) {
     child.stdout.on('data', d => { out += d.toString(); });
     child.stderr.on('data', d => { out += d.toString(); });
     child.on('exit', code => resolve({ code, out }));
+    child.on('error', e => resolve({ code: -1, out: 'spawn failed: ' + e.message }));
   });
   if (r.code === 0) console.log(ok('Tasks registered (daily 7am + bot autostart).'));
-  else { console.log(fail('Task registration failed:\n' + r.out)); }
+  else {
+    console.log(fail('Task registration failed:\n' + r.out));
+    console.log(`${c.dim}You can register manually later by running:${c.reset}`);
+    console.log(`${c.dim}  ${POWERSHELL_EXE} -ExecutionPolicy Bypass -File "${path.join(__dirname, 'setup-tasks.ps1')}"${c.reset}`);
+  }
 
-  // Start the bot
+  // Start the bot.
+  //
+  // Subtle: we MUST set `stdio: 'ignore'` here, not just `detached: true`.
+  // With default piped stdio, the parent holds references to the child's
+  // stdin/stdout/stderr pipes; combined with the wizard's later shutdown
+  // path, libuv hits an assertion in src/win/async.c:76 ("UV_HANDLE_CLOSING")
+  // because process exit races with handles still tracked in the event loop.
+  // `stdio: 'ignore'` drops those refs entirely; `.unref()` is belt-and-
+  // suspenders so the loop exits even if the child is still spawning.
   process.stdout.write(arrow('Starting bot… '));
-  spawn('powershell', ['-Command', "Start-ScheduledTask -TaskName 'munyun-bot'"],
-    { cwd: ROOT, windowsHide: true, detached: true });
+  const botProc = spawn(POWERSHELL_EXE, ['-Command', "Start-ScheduledTask -TaskName 'munyun-bot'"],
+    { cwd: ROOT, windowsHide: true, detached: true, stdio: 'ignore' });
+  botProc.unref();
   await new Promise(r2 => setTimeout(r2, 3000));
   console.log(ok('Bot started.'));
 
-  // Final Telegram ping
+  // Final Telegram ping. Tailor the message based on whether resume was uploaded.
+  const resumeNudge = resumeSkipped
+    ? "\n\n📄 <b>Don't forget your resume.</b> Send <code>/resume</code> to upload it — match quality is poor without one."
+    : '';
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: '🎉 <b>Automatic Munyun Machine — setup complete!</b>\n\nTry <code>/daily</code> to get your first batch of 100 ranked jobs.',
+      text: `🎉 <b>Automatic Munyun Machine — setup complete!</b>\n\nTry <code>/scrape</code> to get your first batch of 100 ranked jobs.${resumeNudge}`,
       parse_mode: 'HTML'
     })
   }).catch(() => {});
@@ -358,14 +432,21 @@ async function step10Finalize(token, chatId) {
     cfgRW.set('weather.lon', city.lon);
     cfgRW.set('weather.timezone', city.timezone);
 
-    await step10Finalize(token, chatId);
+    const resumeSkipped = parsed === null;
+    await step10Finalize(token, chatId, resumeSkipped);
 
     banner('🎉 ALL DONE — check Telegram for next steps');
     console.log(`${c.dim}Bot is now running in the background.${c.reset}`);
     console.log(`${c.dim}Daily push registered for ${JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')).schedule.time} Mon-Fri.${c.reset}`);
+    if (resumeSkipped) {
+      console.log(`${c.yellow}!${c.reset} Resume not uploaded yet. On Telegram, send ${c.bold}/resume${c.reset} and attach your CV.`);
+    }
     console.log(`${c.dim}Edit config.json anytime to customize queries, filters, weather, schedule.${c.reset}\n`);
     rl.close();
-    process.exit(0);
+    // No process.exit(0) — let Node drain the event loop naturally so any
+    // in-flight handles (the unref'd bot-start child, the final fetch's
+    // keepalive socket) close cleanly. Force-exit was the second half of
+    // the libuv UV_HANDLE_CLOSING assertion bug.
   } catch (e) {
     console.log(`\n${fail(e.message)}`);
     rl.close();

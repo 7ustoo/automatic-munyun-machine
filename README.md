@@ -7,7 +7,8 @@
 - **Daily 100-job batch.** Scrapes hiring.cafe across 15 search queries (IAM, Cloud Security, Cybersecurity, M365, Linux, etc.).
 - **CV-aware ranking.** Parses your resume, scores each job by keyword overlap, sorts top→bottom by match %.
 - **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
-- **Telegram-first.** Push at 7am Mon-Fri, on-demand `/daily`, plus `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
+- **Telegram-first.** Push at 7am Mon-Fri, on-demand `/scrape`, plus `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
+- **Downloadable .txt batch every morning.** `jobs(YYYY-MM-DD).txt` arrives as a Telegram attachment alongside the message stream — search-friendly, archivable, pull anytime via `/export`.
 - **Local-first.** Everything runs on your machine. Nothing leaves your computer except the actual Telegram messages.
 
 ## Install
@@ -39,13 +40,16 @@ node scripts/setup-wizard.mjs
 1. **Telegram bot.** Wizard walks you through @BotFather to create one, validates the token.
 2. **Chat ID.** Send any message to your bot, wizard auto-detects your chat ID.
 3. **hiring.cafe login.** Browser opens, you sign in with Google once. Session persists.
-4. **Resume.** Drop a path to your PDF / DOCX / MD resume. Wizard parses skills, certs, titles.
-5. **Auto-suggested job titles.** Wizard reads your CV and proposes 10-12 search titles. Accept all, pick a subset, or keep defaults.
+4. **Resume.** Three options:
+   - **Pick from disk** *(default)* — opens a Windows file picker dialog. Click your PDF / DOCX / MD resume.
+   - **Upload via Telegram later** — skip the wizard step, send `/resume` to the bot once setup finishes and attach your CV.
+   - **Type the path manually** — fallback for headless installs or weird environments.
+5. **Auto-suggested job titles.** Wizard reads your CV and proposes 10-12 search titles. Accept all, pick a subset, or keep defaults. (Skipped if you uploaded later — defaults apply until you run `/jobs suggest` post-upload.)
 6. **Years of experience.** Max YOE you'd accept on a job listing.
 7. **Salary floor.** Used for ranking (bonus above floor, penalty below).
 8. **Clearance filter.** Toggle on/off — drop or include gov clearance jobs.
 9. **Your city.** Auto-geocoded for the morning weather report.
-10. **Schedule.** Pick time + days. Wizard registers Windows Task Scheduler.
+10. **Schedule + finalize.** Pick time + days. Wizard registers Windows Task Scheduler, starts the bot, and sends a final ✅ ping to your Telegram so you know setup completed end-to-end.
 
 After setup, the bot runs in the background and delivers a batch every weekday morning. Every wizard answer is later editable from your phone via Telegram commands.
 
@@ -58,6 +62,7 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/save N` | Bookmark job #N on hiring.cafe |
 | `/applied N` | Mark applied (also logs to applications.md) |
 | `/why N` | Explain why job #N got its match % |
+| `/export` | Download today's batch as a `jobs(YYYY-MM-DD).txt` file. Falls back to the most recent dated file if today's batch hasn't run. |
 
 ### Settings — edit from your phone (NEW in v0.3)
 | Command | Action |
@@ -113,7 +118,8 @@ All settings live in `config.json` (created from `config.example.json` by the wi
 | `data/applications.md` | Application log (gitignored) |
 | `data/browser-profile/` | Playwright Chromium profile with hiring.cafe session (gitignored) |
 | `data/auth-state.json` | Last successful auth timestamp |
-| `data/today-batch-{date}.tsv` | Each day's batch as TSV |
+| `data/today-batch-{date}.tsv` | Each day's batch as TSV (machine-readable) |
+| `data/jobs({date}).txt` | Each day's batch as plain text (human-readable, sent as Telegram attachment) |
 | `data/daily-batch-{date}.log` | Per-run log |
 | `data/telegram-bot.log` | Bot poll log |
 
@@ -169,11 +175,13 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 
 ## Roadmap
 
-- ✅ **v0.2** — Setup wizard, install one-liner, configurable everything (shipped)
-- ✅ **v0.3** *(current)* — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms` filter, `/jobs suggest`, `/why N` (shipped on `v0.3` branch as pre-release)
-- **v0.4** — Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline button picker
+- ✅ **v0.2** — Setup wizard, install one-liner, configurable everything
+- ✅ **v0.3** — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms` filter, `/jobs suggest`, `/why N`
+- ✅ **v0.4** — Downloadable `.txt` batch attachment + `/export` command
+- ✅ **v0.4.1** *(current)* — Native Windows file picker for resume step, Telegram-only setup path, fixed PowerShell PATH crash
+- **v0.5** — Mac + Linux support, plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby)
 - **v1.0** — Tauri desktop GUI with dashboard, history calendar, application Kanban
-- **v2.0** — LLM rerank (opt-in, BYO Anthropic key), analytics, multi-resume profiles
+- **v2.0** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension
 
 ## License
 
@@ -188,10 +196,48 @@ Pull requests welcome. Likely-needed contributions:
 
 ## Troubleshooting
 
-**"Hiring.cafe session expired"** — Run `/reauth` on the bot. Pops a Chromium window on your PC; sign in, close window.
+### Wizard crashed with `spawn powershell ENOENT`
+Your `PATH` is missing `C:\Windows\System32`. Fixed in v0.4.1, but if you're on an older install or it still happens: run `setup-tasks.ps1` directly with the absolute path. In `cmd.exe`:
 
-**0 jobs scraped** — hiring.cafe may have changed their DOM. Check `data/daily-batch-*.log`. Open an issue with the log.
+```
+C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\automatic-munyun-machine\scripts\setup-tasks.ps1"
+```
 
-**Bot not responding** — Check `data/telegram-bot.log`. The bot may have crashed; restart with `Start-ScheduledTask -TaskName munyun-bot`.
+Then start the bot manually:
+```
+schtasks /run /tn munyun-bot
+```
 
-**Wrong jobs in the batch** — Edit `config.json` to add/remove search queries or filter rules, then run `/daily` again.
+### Bot doesn't reply on Telegram
+1. Verify it's running: `schtasks /query /tn munyun-bot` (look for State: Running).
+2. Restart: `schtasks /run /tn munyun-bot`.
+3. Check the log: `%LOCALAPPDATA%\automatic-munyun-machine\data\telegram-bot.log` (the last few lines tell you what crashed).
+4. Verify your token + chat ID in `.env` are correct — try sending a manual message via:
+   ```
+   node scripts\telegram-send.mjs "test"
+   ```
+
+### `/scrape` says "session expired"
+Run `/reauth` from your phone — the bot pops a Chromium window on your laptop, you sign in with Google, close the window. Session is saved automatically.
+
+### 0 jobs scraped or DOM-related crash
+hiring.cafe likely changed their HTML structure. Check `data/daily-batch-{date}.log` for the specific error and open an issue with the log attached.
+
+### Wrong jobs in the batch
+Edit your queries / filters from your phone — `/jobs add "Title"`, `/jobs remove "Title"`, `/skip <company>`, `/yoe N`, `/salary N`, `/clearance on/off`. Or edit `config.json` directly and re-run `/scrape`.
+
+### Want to start over from scratch
+1. Stop and unregister the bot:
+   ```
+   Get-Process node | Where-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine -match 'telegram-bot' } | Stop-Process -Force
+   Unregister-ScheduledTask -TaskName 'munyun-bot' -Confirm:$false
+   Unregister-ScheduledTask -TaskName 'munyun-daily-batch' -Confirm:$false
+   ```
+2. Delete the install dir:
+   ```
+   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\automatic-munyun-machine"
+   ```
+3. Re-run the install one-liner.
+
+### File picker doesn't open during the resume step
+You're either on a stripped Windows install without `System.Windows.Forms`, or running from a no-GUI session (e.g. SSH). The wizard auto-falls-back to typed-path input — paste the full path to your resume. Or pick option 2 ("upload via Telegram later") and send `/resume` to the bot once setup finishes.

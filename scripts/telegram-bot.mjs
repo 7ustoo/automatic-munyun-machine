@@ -52,8 +52,23 @@ function log(line) {
   const stamp = new Date().toISOString();
   const msg = `[${stamp}] ${line}`;
   console.log(msg);
-  fs.appendFileSync(LOG, msg + '\n');
+  try { fs.appendFileSync(LOG, msg + '\n'); } catch { /* never let log writes crash the bot */ }
 }
+
+// ---------- crash safety nets ----------
+// Bot died once during a transient `fetch failed` Telegram outage — the
+// suspected cause was an unhandled rejection or thrown error inside the
+// poll-loop's catch block (e.g., log() failing on a locked file). Catch
+// the kitchen sink so the bot never silently disappears. Token is scrubbed
+// from log lines defensively in case it leaks via a stack trace.
+process.on('unhandledRejection', (e) => {
+  const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
+  log('UNHANDLED REJECTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
+});
+process.on('uncaughtException', (e) => {
+  const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
+  log('UNCAUGHT EXCEPTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
+});
 
 // ---------- offset persistence ----------
 const OFFSET_FILE = path.join(ROOT, 'data', 'bot-offset.json');
@@ -732,9 +747,36 @@ const maskedChat = ALLOWED_CHAT.length > 4 ? '***' + ALLOWED_CHAT.slice(-4) : '*
 log(`Bot starting. Offset=${offset}. Allowed chat=${maskedChat}.`);
 reply(ALLOWED_CHAT, '🤖 <b>Automatic Munyun Machine</b> — online. /help for commands.').catch(e => log('Initial ping failed: ' + e.message));
 
+// Resilient poll loop with exponential backoff + recovery detection.
+// On Telegram outages we used to retry every 5s and silently die if anything
+// in the catch block threw. Now we:
+//   - Back off (5s -> 10s -> 20s -> 30s cap) so we don't hammer Telegram
+//     during sustained outages.
+//   - Track consecutive failures + outage start so we can log a clear
+//     "✓ recovered" line when polling succeeds again.
+//   - Send a Telegram ping if the outage lasted >= 60s so the user knows
+//     the bot was offline (vs. silent death they only notice when
+//     /scrape doesn't respond).
+const BACKOFF_MS = [5000, 10000, 20000, 30000];
+let consecutiveFailures = 0;
+let outageStartedAt = null;
+
 while (true) {
   try {
     const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message']) });
+
+    // Just recovered from a poll-failure streak — note it loudly.
+    if (consecutiveFailures > 0) {
+      const downSec = outageStartedAt ? Math.round((Date.now() - outageStartedAt) / 1000) : 0;
+      log(`Telegram reachable again — recovered after ${consecutiveFailures} failed polls (~${downSec}s)`);
+      if (downSec >= 60) {
+        const human = downSec >= 120 ? `${Math.round(downSec / 60)}m` : `${downSec}s`;
+        reply(ALLOWED_CHAT, `📶 Bot reconnected after ~${human} of poll failures.`).catch(e => log('Recovery ping failed: ' + e.message));
+      }
+      consecutiveFailures = 0;
+      outageStartedAt = null;
+    }
+
     if (j.ok && j.result?.length) {
       for (const u of j.result) {
         if (u.message) {
@@ -750,7 +792,12 @@ while (true) {
       saveOffset(offset);
     }
   } catch (e) {
-    log('poll error: ' + e.message);
-    await new Promise(r => setTimeout(r, 5000));
+    consecutiveFailures++;
+    if (consecutiveFailures === 1) outageStartedAt = Date.now();
+    const delay = BACKOFF_MS[Math.min(consecutiveFailures - 1, BACKOFF_MS.length - 1)];
+    log(`poll error #${consecutiveFailures}: ${e.message} — backing off ${delay / 1000}s`);
+    try {
+      await new Promise(r => setTimeout(r, delay));
+    } catch { /* setTimeout never rejects, but defensive */ }
   }
 }
