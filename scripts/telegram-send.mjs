@@ -18,7 +18,7 @@ const token = env.TELEGRAM_BOT_TOKEN;
 const chatId = env.TELEGRAM_CHAT_ID;
 if (!token || !chatId) { console.error('Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in .env'); process.exit(1); }
 
-const text = process.argv.slice(2).join(' ') || 'Test from career-ops daily batch.';
+const text = process.argv.slice(2).join(' ') || 'Test from Automatic Munyun Machine.';
 
 const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
   method: 'POST',

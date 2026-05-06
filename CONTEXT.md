@@ -1,7 +1,7 @@
 # CONTEXT.md — Automatic Munyun Machine
 
 > **Purpose:** complete project state so a fresh contributor (or fresh Claude Code session) can resume work without re-explaining anything.
-> **Last updated:** 2026-05-06 (v0.5 ready to merge: v0.4.1 + v0.5 both promoted in CHANGELOG, tagged, GitHub Releases created, PR open against main)
+> **Last updated:** 2026-05-06 (E1 of v1.0: career-ops consolidation. Live bot already runs from AMM repo; this commit drops the stale dual-directory docs + cosmetic comment references.)
 > **Update protocol:** update this file at the end of *any* code change (commit, command added, file moved, schema shift). Treat it like a CHANGELOG-of-state.
 
 ---
@@ -13,41 +13,40 @@
 - **Public repo:** https://github.com/7ustoo/automatic-munyun-machine
 - **License:** MIT
 
-## Two parallel directories on the developer's machine
+## Single working directory (post-consolidation)
 
-| Path | Role |
-|---|---|
-| `<dev-machine>/career-ops/` | **Live working directory.** Bot runs from here. Has personal `.env`, `config.json`, `data/cv-parsed.json`, `data/browser-profile/` (real hiring.cafe session). NOT a fork of AMM repo — it's the upstream `santifer/career-ops` project that AMM scripts were originally built on top of. Pushing FROM here pushes to santifer's repo (no perms). |
-| `<dev-machine>/automatic-munyun-machine/` | **Public repo working tree.** Clone of `7ustoo/automatic-munyun-machine`. Contains only AMM-specific files (no `.env`, no `data/*.json`, no resume). Push from here goes to the public GitHub. |
+The dev machine now has **one** directory: the AMM repo at `<dev-machine>/automatic-munyun-machine/`. The live bot runs from here directly. Personal `.env`, `config.json`, `data/cv-parsed.json`, `data/browser-profile/` all live here (gitignored). Task Scheduler entries (`munyun-bot`, `munyun-daily-batch`) point at AMM paths.
 
-**Workflow:** edit in `career-ops/scripts/`, smoke-test via the running bot, then `cp` updated files to `automatic-munyun-machine/scripts/` + commit + push to `v0.3` branch.
+Historical note: an earlier dual-directory workflow (`<dev-machine>/career-ops/` was the live bot, AMM was a publish-target mirror) was deprecated when E1 of v1.0 ran. The legacy `career-ops-*` Task Scheduler migration block in `scripts/setup-tasks.ps1` is preserved as defense-in-depth for any user upgrading from a v0.1-era install — it's a no-op on fresh installs.
 
-> **For non-developers cloning this repo:** you only have the second directory. Run `npm install` + `npx playwright install chromium` + `node scripts/setup-wizard.mjs`. The wizard creates everything else.
+> **For non-developers cloning this repo:** run `npm install` + `npx playwright install chromium` + `node scripts/setup-wizard.mjs`. The wizard creates everything else.
 
 ## GitHub branches & releases
 
 | Branch | What | State |
 |---|---|---|
-| `main` | Production. v0.4.0 features (merged via PR #2). Install one-liner clones this. | Last commit: `d5541fa` (PR #2 merge of v0.4) |
-| `v0.3` | Historical feature branch. Do not push. | Tagged `v0.3.0`. Tip: `5afae31` |
-| `v0.4` | Historical feature branch. Merged into main as v0.4.0. Do not push. | Tagged `v0.4.0` at `d5541fa` |
-| `v0.5` | Active feature branch carrying v0.4.1 fixes + v0.5 features. PR open against main. | Tagged `v0.5.0` at HEAD. Also tagged `v0.4.1` at `0e2655d` (mid-branch) |
+| `main` | Production. v0.5.0 (latest). Install one-liner clones this. | Last commit: `d288053` (PR #4 merge of v0.5 into main) |
+| `v0.3` | Historical. Do not push. | Tagged `v0.3.0`. Tip: `5afae31` |
+| `v0.4` | Historical. Merged via PR #2 as v0.4.0. Do not push. | Tagged `v0.4.0` at `d5541fa` |
+| `v0.5` | Historical. Merged via PR #4 carrying v0.4.1 fixes + v0.5 features. Do not push. | Tagged `v0.5.0`, `v0.4.1` at `0e2655d` mid-branch |
+| `v1.0-e1-consolidate` | Active. E1 of v1.0 — career-ops cleanup + docs. | First epic of the v1.0 plan |
 
-**Releases:** `v0.3.0` is a pre-release pointing at `v0.3` branch tag. Promote to main when proven (~1 week of stable real-world use).
+**v1.0 epic branches** (sequenced — each merges to main individually):
+1. `v1.0-e1-consolidate` (current) — career-ops consolidation + cleanup
+2. `v1.0-e2-reliability` — heartbeat, /status, /diagnose, watchdog, batch-missed
+3. `v1.0-e3-engine` — phrase-proximity, match floor, seen-jobs decay, role-cluster
+4. `v1.0-e4-inline-ui` — callback_query, inline keyboards, /batch, /history
+5. `v1.0-e5-profiles` — multi-profile architecture
+6. `v1.0-e6-distribution` — Inno Setup .exe + uninstall lifecycle
 
-**Install one-liner** (currently still pulls v0.2 from main — by design):
+**Releases:** v0.3.0 (pre-release), v0.4.0, v0.4.1, v0.5.0 (latest) — all live as GitHub Releases with notes synced from `CHANGELOG.md`.
+
+**Install one-liner** (pulls main HEAD, currently v0.5.0):
 ```powershell
 iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.ps1 | iex
 ```
 
-To install v0.3 pre-release manually:
-```bash
-git clone -b v0.3 https://github.com/7ustoo/automatic-munyun-machine.git
-cd automatic-munyun-machine
-npm install
-npx playwright install chromium
-node scripts/setup-wizard.mjs
-```
+**Upgrade path** for users on v0.4.x or earlier: send `/update` in Telegram. The bot does `git pull` + `npm install` + restart, all from the phone.
 
 ## File map
 
@@ -149,13 +148,6 @@ Start-ScheduledTask -TaskName 'munyun-bot'
 node scripts/daily-batch.mjs
 ```
 
-### Sync career-ops/ → public AMM repo, commit, push (developer workflow)
-```bash
-SRC=<career-ops>; DST=<automatic-munyun-machine>
-for f in <list of files>; do cp "$SRC/scripts/$f" "$DST/scripts/$f"; done
-cd $DST && git add -A && git -c commit.gpgsign=false commit -m "..." && git push
-```
-
 ### Verify GitHub-side state
 ```powershell
 gh api repos/7ustoo/automatic-munyun-machine/commits/v0.3 | ConvertFrom-Json | Select-Object @{n='sha';e={$_.sha.Substring(0,7)}},@{n='msg';e={$_.commit.message.Split([Environment]::NewLine)[0]}}
@@ -168,19 +160,27 @@ node scripts/telegram-send.mjs "<message>"
 
 ## Roadmap
 
-- ✅ v0.1 — career-ops bot (Telegram + CDP-based scraper, local only)
+- ✅ v0.1 — initial Telegram + CDP-based scraper, local only
 - ✅ v0.2 — Public AMM repo with 5-step wizard, install.ps1, branding rename
 - ✅ v0.3 — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms`, audit-patch. **Merged to main 2026-05-04.**
 - ✅ v0.4 — `.txt` batch export + `/export` command. **Merged to main 2026-05-04.**
-- ✅ v0.4.1 — Native file picker, transient-outage resilience, libuv assertion fix, wizard PATH crash. **Tagged 2026-05-05; ships to main as part of the v0.5 PR.**
-- ✅ v0.5 — `/update`, `/version`, update notifications, absolute-paths fix for bot commands. **Tagged 2026-05-06; PR open against main.**
-- 🚧 v0.6 (next) — career-ops consolidation, Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline buttons.
-- ⏭ v1.0 — Tauri desktop GUI with dashboard, history calendar, application Kanban
-- ⏭ v2.0 — LLM rerank (BYO Anthropic key), analytics, multi-resume profiles
+- ✅ v0.4.1 — Native file picker, transient-outage resilience, libuv assertion fix, wizard PATH crash. **Shipped via the v0.5 PR.**
+- ✅ v0.5 — `/update`, `/version`, update notifications, absolute-paths fix for bot commands. **Merged to main 2026-05-06 via PR #4.**
+- 🚧 v1.0 (active) — "Trustworthy and shareable on Windows." Six sequenced epics (E1–E6). Plan: `~/.claude/plans/wonderful-now-time-to-quirky-pizza.md`. Ships:
+  - E1: career-ops consolidation (current branch)
+  - E2: heartbeat + watchdog + `/status` + `/diagnose`
+  - E3: phrase-proximity scoring, match floor, seen-jobs decay, role-cluster auto-detection
+  - E4: inline-button Telegram UI (callback_query, paginated `/batch`, `/history`)
+  - E5: multi-profile support
+  - E6: Inno Setup `.exe` + uninstall lifecycle (`/uninstall`, `uninstall.ps1`)
+- ⏭ v1.1 — Mac + Linux support, code signing
+- ⏭ v1.2 — scam detection, per-query supply analytics
+- ⏭ v2.0 — embeddings + optional LLM rerank, salary database, browser extension. **Tauri desktop GUI cut from roadmap entirely** — Telegram-first inline UI replaces it.
 
 ## Recent change history (newest first)
 
-- **2026-05-06** — v0.5 ready to merge. Promoted v0.4.0, v0.4.1, v0.5.0 from `[Unreleased]` to dated CHANGELOG sections; added `CLAUDE.md` (Claude Code repo guide); committed `package-lock.json` for reproducible installs. Tagged `v0.4.0` (`d5541fa`), `v0.4.1` (`0e2655d`), `v0.5.0` (HEAD). Created GitHub Releases for all three so `update-checker.mjs` has something to detect. PR open against `main`.
+- **2026-05-06** — v1.0 planning + E1 kickoff. Two-agent audit identified engine ceiling (~75%, depth-blind keyword scoring), UX cliff (29 flat commands, number-typing on phone, no batch browser, no `/status`), single-user wall, Windows-only chains, and silent-death reliability gap. v1.0 plan written: 6 sequenced epics, Tauri GUI cut entirely (contradicts Telegram-first thesis), Mac/Linux deferred to v1.1. **E1 (current commit):** career-ops consolidation. Live state was already consolidated (Task Scheduler points at AMM, no `career-ops/` directory exists), so E1 collapsed to cleanup of stale `career-ops` references in `telegram-bot.mjs` (header comment + Task Scheduler entry name), `telegram-send.mjs` (default test message), and `CONTEXT.md` (dual-directory + workflow + roadmap sections rewritten). Latent path-bug audit clean: zero `process.cwd()` usage; every script uses `__dirname`-based ROOT.
+- **2026-05-06** — v0.5 merged to main via PR #4 (commit `d288053`). Carries v0.4.1 fixes + v0.5 features. Tagged `v0.4.0` at `d5541fa`, `v0.4.1` at `0e2655d`, `v0.5.0` at v0.5 branch HEAD. GitHub Releases created for all three so `update-checker.mjs` can detect them.
 - **2026-05-06** — v0.5 fix commit (`61bf88a`): replaced every bare `spawn('powershell'/'cmd.exe'/'schtasks', ...)` in `telegram-bot.mjs` with absolute paths resolved from `%SystemRoot%`. Same root cause as v0.4.1's wizard PATH bug — affected `/pause`, `/resume-bot`, `/schedule`, `/reauth`, `/scrape`, `/update` restarter. Also: `consumePostUpdateFlag` now verifies `flag.to === currentVersion()` to avoid false-positive "✅ Updated" replies; `checkForUpdate` results cached 5 min.
 - **2026-05-05** — v0.5 feature commit (`778e482`): `/version`, `/update`, update-on-startup-and-daily notifications, post-update confirmation. New `scripts/update-checker.mjs` polls GitHub Releases API. Single source of truth for version: `package.json#version`.
 - **2026-05-05** — v0.4.1 fixes landed (`3ee3fa6`, `5db8131`, `0e2655d`): wizard PATH crash → absolute `powershell.exe` path; libuv UV_HANDLE_CLOSING assertion at wizard shutdown → `stdio:'ignore'` + `child.unref()` + drop force-exit; bot survives transient Telegram outages → exponential backoff, unhandled-rejection/exception handlers, recovery detection ping. Also added native Windows file picker (`scripts/file-picker.mjs`) and Telegram-only setup path.
@@ -196,10 +196,10 @@ node scripts/telegram-send.mjs "<message>"
 
 ## Pending decisions / open questions
 
-- **Career-ops consolidation** — currently the live bot runs from `<dev-machine>/career-ops/`, with AMM as a publish-target mirror. Pending plan: migrate `.env`, `config.json`, `data/` into AMM, re-register Task Scheduler against AMM paths, archive `career-ops/`. To be done before sharing AMM with team so dev path == user path. Detailed plan lives in chat history; not yet executed.
-- **Team rollout** — v0.3 ready to share. Each teammate creates their own bot via `@BotFather` (separate token, separate chat). Bot `@username` is per-person — no shared `@justinjobbot` lookup.
-- Inno Setup `.exe` installer for v0.4 — postponed until v0.3 is proven in real-world team use.
-- LLM rerank (Claude API) — NOT in current build. Would cost ~$6/mo. Decision deferred to v2.0.
+- **Team rollout** — v0.5+ is ready to share. Each teammate creates their own bot via `@BotFather` (separate token, separate chat). Bot `@username` is per-person — no shared `@justinjobbot` lookup.
+- **Inno Setup `.exe` installer** — scheduled for v1.0 E6. Will ship with the uninstall lifecycle (`/uninstall`, `uninstall.ps1`).
+- **Code signing** — deferred to v1.1 alongside Mac/Linux. Cert-management is its own rabbit hole; v1.0 ships unsigned.
+- **LLM rerank (Claude API)** — NOT in current build. v1.0 E3 cheap-wins (phrase-proximity scoring, role-cluster auto-detection) close most of the ceiling without LLM cost. Re-evaluate after v1.0 ships.
 
 ---
 

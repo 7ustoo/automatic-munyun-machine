@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /**
- * Long-running Telegram bot for career-ops.
+ * Long-running Telegram bot for Automatic Munyun Machine.
  *
  * Polls Telegram getUpdates every 3 sec for new messages from your chat.
  * Dispatches commands:
- *   /daily, gm, morning   → run daily batch (weather + 100 jobs)
- *   /jobs                  → 100 jobs only, no weather
- *   /export                → download today's batch as a .txt file
- *   /weather               → Miami weather only
- *   /version               → show bot version + latest GitHub version
- *   /update                → pull latest code from GitHub + restart
- *   /test, /ping           → reply "alive"
- *   /help, /start          → list commands
+ *   /scrape, /daily, gm, morning  → run daily batch (weather + 100 jobs)
+ *   /export                       → download today's batch as a .txt file
+ *   /weather                      → weather only (city from config.json)
+ *   /version                      → show bot version + latest GitHub version
+ *   /update                       → pull latest code from GitHub + restart
+ *   /test, /ping                  → reply "alive"
+ *   /help, /start                 → list commands
+ *   (plus /save, /applied, /why, /resume, /jobs, /yoe, /salary,
+ *    /clearance, /forms, /skip, /city, /schedule, /pause, /resume-bot,
+ *    /forget, /settings, /auth, /reauth, /cancel — see /help in-bot)
  *
- * Started at logon by Task Scheduler entry `career-ops-bot`.
+ * Started at logon by Task Scheduler entry `munyun-bot`.
  * Logs to data/telegram-bot.log.
  */
 
