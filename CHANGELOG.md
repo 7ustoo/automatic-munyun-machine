@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — v1.0 E5 (in progress)
+
+- **Multi-profile support.** One install, multiple personas. Each profile has its own CV, queries, filters, scoring, schedule, and seen-jobs memory. Browser session (`data/browser-profile/`), bot heartbeat, and machine-level state stay shared. New `/profile list / add <slug> / switch <slug> / delete <slug>` Telegram commands.
+- **`config.json` schema migration.** v0.x flat shape (`{user, queries, filters, ...}`) auto-wrapped on first load into `{active_profile: "default", profiles: {default: {...}}}`. Migration is idempotent — safe to call from any script entry point. Existing per-profile data files (`cv-parsed.json`, `seen-jobs.json`, `last-batch.json`, `last-batch-callbacks.json`, `applications.md`, `query-stats.json`) relocated into `data/profiles/default/`.
+- **`scripts/profile-store.mjs`** — single module owning profile CRUD, migration, and path resolution. `paths(slug?)` returns the canonical per-profile file slots; `addProfile` clones the active profile's config so a new persona inherits queries/filters and just needs a fresh `/resume` upload.
+- **Profile-aware `config-rw.mjs`.** Existing dot-path setters (`set('user.salaryFloorUsd', X)`, `appendUnique('filters.skipCompanies', X)`) auto-route under `profiles[active].*` after migration. Existing `read()` returns a flattened view of the active profile so consumers like `daily-batch.mjs` keep working unchanged.
+- **Per-profile data layout.** `data/profiles/<slug>/{cv-parsed.json, seen-jobs.json, last-batch.json, last-batch-callbacks.json, applications.md, query-stats.json}` — `/profile switch` swaps the entire active state cleanly. Today's TSV (`today-batch-{date}.tsv`) and downloadable jobs txt also live under the active profile dir.
+- **Mid-batch switch handling.** If a user runs `/profile switch` while a batch is in flight, the switch is queued via the existing `runningJob` lock — surface message tells them to wait until the current scrape completes.
+- **5 new profile-store smoke tests** in `scripts/__tests__/profile-store.test.mjs`. Total test count: 24 (was 19).
+
+### Fixed — v1.0 E5 (in progress)
+
+- **`/forget last` and `/settings` count are now schema-aware** — work against both the v0.x `{ids: [...]}` shape and the v1.0 `{jobs: {url: {...}}}` shape so users mid-migration aren't broken.
+
 ### Added — v1.0 E4 (in progress)
 
 - **Inline-button paginated batch browser.** New `/batch [N]` command opens a tap-friendly job browser. Each page renders one job with action buttons `[💾 Save] [✅ Applied] [❓ Why] [🚫 Skip co]` and `[⬅️] [N/M] [➡️]` navigation. Replaces having to remember "save 42, applied 7" job numbers across a 100-message scroll-back.

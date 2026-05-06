@@ -36,6 +36,18 @@ import {
   makeNavCallback,
   readCallbackTable
 } from './callback-router.mjs';
+import {
+  migrateIfNeeded,
+  paths as profilePaths,
+  listProfiles,
+  addProfile,
+  setActiveProfile,
+  deleteProfile,
+  getActiveProfile
+} from './profile-store.mjs';
+
+// v1.0 E5: ensure migration ran before any path is resolved.
+migrateIfNeeded();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -356,6 +368,12 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /city &lt;name&gt;         → change weather city
 /schedule HH:MM      → change daily push time
 
+<b>Profiles</b>
+/profile list        → list profiles, mark active
+/profile add &lt;slug&gt;  → new profile (clones active config)
+/profile switch &lt;slug&gt; → switch active profile
+/profile delete &lt;slug&gt; → remove (not active, not last)
+
 <b>Maintenance</b>
 /status              → bot uptime, last batch, last poll, version, task state
 /diagnose            → why am I getting only N jobs? per-query supply + funnel
@@ -373,7 +391,8 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 
 // Latest batch TSV → array of { idx, id, title, company, yoe, q, url }
 function loadLatestBatch() {
-  const dir = path.join(ROOT, 'data');
+  const dir = profilePaths().dir;
+  if (!fs.existsSync(dir)) return null;
   const files = fs.readdirSync(dir).filter(f => /^today-batch-\d{4}-\d{2}-\d{2}\.tsv$/.test(f)).sort();
   if (!files.length) return null;
   const latest = files[files.length - 1];
@@ -429,7 +448,7 @@ async function buildStatusMessage() {
 
   // Last successful batch
   let lastBatch = null;
-  try { lastBatch = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8')); } catch {}
+  try { lastBatch = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Last batch</b>`);
   if (lastBatch) {
@@ -481,7 +500,7 @@ function buildDiagnoseMessage() {
 
   // Funnel from last batch
   let lastBatch = null;
-  try { lastBatch = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8')); } catch {}
+  try { lastBatch = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')); } catch {}
   lines.push(`<b>Last batch funnel</b>`);
   if (lastBatch?.funnel) {
     const f = lastBatch.funnel;
@@ -502,7 +521,7 @@ function buildDiagnoseMessage() {
 
   // Seen-jobs size
   let seen = null;
-  try { seen = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'seen-jobs.json'), 'utf8')); } catch {}
+  try { seen = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Seen-jobs memory</b>`);
   if (seen?.ids) {
@@ -515,7 +534,7 @@ function buildDiagnoseMessage() {
 
   // Per-query 7-day averages
   let stats = null;
-  try { stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'query-stats.json'), 'utf8')); } catch {}
+  try { stats = JSON.parse(fs.readFileSync(profilePaths().queryStats, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Per-query supply (7-day avg)</b>`);
   if (stats?.queries && Object.keys(stats.queries).length) {
@@ -589,6 +608,62 @@ async function handleMessage(msg) {
     return showHistory(chatId, page);
   }
 
+  // /profile  /profile list  /profile add <slug>  /profile switch <slug>  /profile delete <slug>
+  // v1.0 E5: multi-profile support. One install, multiple personas. Each
+  // profile has its own CV, queries, filters, and seen-jobs memory. Browser
+  // session is shared (one hiring.cafe account).
+  if (/^\/?profile\b/.test(text)) {
+    const sub = text.match(/^\/?profile(?:\s+(list|add|switch|delete|rm)(?:\s+(\S+))?)?/i);
+    const action = sub?.[1]?.toLowerCase();
+    const slug = sub?.[2];
+
+    if (!action || action === 'list') {
+      const all = listProfiles();
+      const active = getActiveProfile();
+      const lines = [
+        '<b>👤 Profiles</b>',
+        '',
+        ...all.map(s => `${s === active ? '✅' : '  '} <code>${escHtml(s)}</code>${s === active ? ' (active)' : ''}`),
+        '',
+        '<i>/profile add &lt;slug&gt; — add a new profile (clones active config)</i>',
+        '<i>/profile switch &lt;slug&gt; — switch active</i>',
+        '<i>/profile delete &lt;slug&gt; — remove (cannot delete active or only profile)</i>'
+      ];
+      return reply(chatId, lines.join('\n'));
+    }
+    if (action === 'add') {
+      if (!slug) return reply(chatId, '<i>Usage: /profile add &lt;slug&gt;</i>');
+      try {
+        const r = addProfile(slug);
+        return reply(chatId, `✅ Profile <code>${escHtml(r.slug)}</code> created (cloned from <code>${escHtml(r.clonedFrom)}</code>).\n<i>Run /profile switch ${escHtml(r.slug)} then /resume to upload a CV for this persona.</i>`);
+      } catch (e) {
+        return reply(chatId, '❌ ' + escHtml(e.message));
+      }
+    }
+    if (action === 'switch') {
+      if (!slug) return reply(chatId, '<i>Usage: /profile switch &lt;slug&gt;</i>');
+      try {
+        if (runningJob) {
+          return reply(chatId, `⚠️ Batch in progress — switch will apply at next /scrape after this one finishes.`);
+        }
+        setActiveProfile(slug);
+        return reply(chatId, `✅ Switched active profile to <code>${escHtml(slug)}</code>. Next /scrape uses this profile's CV + queries + filters.`);
+      } catch (e) {
+        return reply(chatId, '❌ ' + escHtml(e.message));
+      }
+    }
+    if (action === 'delete' || action === 'rm') {
+      if (!slug) return reply(chatId, '<i>Usage: /profile delete &lt;slug&gt;</i>');
+      try {
+        const r = deleteProfile(slug);
+        return reply(chatId, `🗑️ Deleted profile <code>${escHtml(r.deleted)}</code>. Data dir kept for safety — wipe with <code>Remove-Item</code> if desired.`);
+      } catch (e) {
+        return reply(chatId, '❌ ' + escHtml(e.message));
+      }
+    }
+    return reply(chatId, '<i>Unknown /profile action. Try /profile list.</i>');
+  }
+
   if (/^\/?weather\b/.test(text)) {
     try { return reply(chatId, await getWeather()); }
     catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + e.message); }
@@ -652,7 +727,7 @@ async function handleMessage(msg) {
       if (action === 'applied') {
         try {
           const line = `\n| - | ${new Date().toISOString().slice(0, 10)} | ${job.company} | ${job.title} | - | APPLIED | - | - | via /applied | ${job.viewjobUrl} |`;
-          fs.appendFileSync(path.join(ROOT, 'data', 'applications.md'), line);
+          fs.appendFileSync(profilePaths().applications, line);
         } catch (e) { log('applications.md append failed: ' + e.message); }
       }
       return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Applied'} on hiring.cafe.${action === 'applied' ? '\nAlso logged to applications.md.' : ''}`);
@@ -670,14 +745,19 @@ async function handleMessage(msg) {
     try {
       const cfg = cfgRW.read();
       const cv = (() => {
-        try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'cv-parsed.json'), 'utf8')); }
+        try { return JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8')); }
         catch { return null; }
       })();
       const queries = cfg.queries || [];
       const skip = cfg.filters?.skipCompanies || [];
       const seen = (() => {
-        try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'seen-jobs.json'), 'utf8')).ids?.length || 0; }
-        catch { return 0; }
+        try {
+          const sj = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8'));
+          // v1.0 E3 schema: { jobs: { url: {...} } }; v0.x: { ids: [...] }
+          if (sj.jobs) return Object.keys(sj.jobs).length;
+          if (Array.isArray(sj.ids)) return sj.ids.length;
+          return 0;
+        } catch { return 0; }
       })();
       const lines = [
         '<b>⚙️ Current configuration</b>',
@@ -836,7 +916,7 @@ async function handleMessage(msg) {
     // /jobs suggest
     if (/^\/?jobs\s+suggest\b/i.test(text)) {
       try {
-        const cv = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'cv-parsed.json'), 'utf8'));
+        const cv = JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8'));
         const suggestions = suggestRoles(cv, { max: 12 });
         if (!suggestions.length) {
           return reply(chatId, '❌ No suggestions. Your CV may be too sparse — try /resume to upload a fuller version.');
@@ -888,7 +968,7 @@ async function handleMessage(msg) {
   if (whyM) {
     const n = parseInt(whyM[1]);
     try {
-      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const last = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
       const job = last.jobs.find(j => j.idx === n);
       if (!job) return reply(chatId, `❌ Job #${n} not found in last batch (${last.jobs.length} jobs).`);
       const lines = [
@@ -910,7 +990,7 @@ async function handleMessage(msg) {
   // /forget all
   if (/^\/?forget\s+all\b/.test(text)) {
     try {
-      fs.unlinkSync(path.join(ROOT, 'data', 'seen-jobs.json'));
+      fs.unlinkSync(profilePaths().seenJobs);
       return reply(chatId, '🗑 Wiped seen-jobs memory. Next /scrape treats every job as fresh.');
     } catch {
       return reply(chatId, '<i>No memory to wipe — you\'re already at a clean slate.</i>');
@@ -1031,17 +1111,25 @@ async function handleMessage(msg) {
     }
   }
 
-  // /forget last
+  // /forget last — schema-aware (v1.0 E3 jobs map vs v0.x ids array)
   if (/^\/?forget\s+last\b/.test(text)) {
     try {
-      const seenPath = path.join(ROOT, 'data', 'seen-jobs.json');
-      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const seenPath = profilePaths().seenJobs;
+      const last = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
       const seen = JSON.parse(fs.readFileSync(seenPath, 'utf8'));
-      const remove = new Set(last.jobs.map(j => j.viewjobUrl));
-      const before = seen.ids.length;
-      seen.ids = seen.ids.filter(id => !remove.has(id));
+      const remove = new Set((last.jobs || []).map(j => j.viewjobUrl));
+      let before = 0, after = 0;
+      if (seen.jobs) {
+        before = Object.keys(seen.jobs).length;
+        for (const url of remove) delete seen.jobs[url];
+        after = Object.keys(seen.jobs).length;
+      } else if (Array.isArray(seen.ids)) {
+        before = seen.ids.length;
+        seen.ids = seen.ids.filter(id => !remove.has(id));
+        after = seen.ids.length;
+      }
       fs.writeFileSync(seenPath, JSON.stringify(seen, null, 2));
-      return reply(chatId, `✅ Forgot ${before - seen.ids.length} jobs from the last batch. They'll come back next /scrape.`);
+      return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.`);
     } catch (e) {
       return reply(chatId, '❌ ' + e.message);
     }
@@ -1112,7 +1200,7 @@ async function showHistory(chatId, page = 1) {
   const PAGE_SIZE = 5;
   let entries = [];
   try {
-    const md = fs.readFileSync(path.join(ROOT, 'data', 'applications.md'), 'utf8');
+    const md = fs.readFileSync(profilePaths().applications, 'utf8');
     // Extract every viewjob URL + the line above it (assume some metadata)
     const lines = md.split('\n');
     for (let i = 0; i < lines.length; i++) {
@@ -1205,7 +1293,7 @@ async function handleCallback(cq) {
       // but we double-write with metadata for cleaner history rendering.
       try {
         const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
-        fs.appendFileSync(path.join(ROOT, 'data', 'applications.md'), line);
+        fs.appendFileSync(profilePaths().applications, line);
       } catch {}
       return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')}.`);
     }
@@ -1216,7 +1304,7 @@ async function handleCallback(cq) {
     await tgAnswerCallback(cq.id);
     // Reuse the existing /why N path by reading last-batch.json directly.
     try {
-      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const last = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
       const job = (last.jobs || []).find(j => j.idx === idx);
       if (!job) return reply(chatId, `<i>Couldn't find job #${idx} in last-batch.json. /scrape may have rotated.</i>`);
       const matched = (job.matched || []).slice(0, 30).map(escHtml).join(', ') || '<i>(no keyword matches)</i>';

@@ -17,6 +17,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
+import { migrateIfNeeded, paths as profilePaths } from './profile-store.mjs';
+
+// v1.0 E5: ensure config + data layout are profile-aware before we read anything.
+migrateIfNeeded();
+const PP = profilePaths(); // resolved once at startup; switching profiles requires bot/batch restart
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -57,9 +62,9 @@ function loadConfig() {
 }
 const CFG = loadConfig();
 
-// ---------- parsed CV (data/cv-parsed.json, written by resume-parser.mjs) ----------
+// ---------- parsed CV (per-profile, written by resume-parser.mjs) ----------
 function loadParsedCV() {
-  const p = path.join(ROOT, 'data', 'cv-parsed.json');
+  const p = PP.cvParsed;
   if (!fs.existsSync(p)) return { titles: [], certs: [], skills: [], compliance: [] };
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
@@ -279,8 +284,8 @@ async function scrape() {
   return results;
 }
 
-// Per-query rolling 7-day card-count history. Read by /diagnose.
-const QUERY_STATS_PATH = path.join(ROOT, 'data', 'query-stats.json');
+// Per-query rolling 7-day card-count history. Read by /diagnose. Per-profile.
+const QUERY_STATS_PATH = PP.queryStats;
 function recordQueryStats(byQuery) {
   let store = { lastUpdated: null, queries: {} };
   try { store = JSON.parse(fs.readFileSync(QUERY_STATS_PATH, 'utf8')); } catch {}
@@ -466,7 +471,7 @@ function filterAndDedupe(byQuery) {
 
 function loadAppliedHrefs() {
   try {
-    const apps = fs.readFileSync(path.join(ROOT, 'data', 'applications.md'), 'utf8');
+    const apps = fs.readFileSync(PP.applications, 'utf8');
     return new Set([...apps.matchAll(/hiring\.cafe\/viewjob\/([a-z0-9]+)/g)].map(m => 'https://hiring.cafe/viewjob/' + m[1]));
   } catch { return new Set(); }
 }
@@ -480,7 +485,7 @@ function loadAppliedHrefs() {
 // first load. Decay rule: drop entries with `lastSeenAt > N days ago` so
 // jobs that didn't get applied to come back into rotation after the window
 // (default 60 days). Applied jobs are blocked separately via applications.md.
-const SEEN_PATH = path.join(ROOT, 'data', 'seen-jobs.json');
+const SEEN_PATH = PP.seenJobs;
 const SEEN_FRESHNESS_DAYS = SCORING.seenJobsFreshnessDays ?? 60;
 
 function loadSeenStore() {
@@ -680,16 +685,15 @@ function buildBatchTxt(top, directUrls, weather, stats) {
 }
 
 function writeBatchTxt(top, directUrls, weather, stats) {
-  const dir = path.join(ROOT, 'data');
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `jobs(${DATE}).txt`);
+  // Per-profile location so /profile switch doesn't show another persona's batch.
+  fs.mkdirSync(PP.dir, { recursive: true });
+  const file = path.join(PP.dir, `jobs(${DATE}).txt`);
   fs.writeFileSync(file, buildBatchTxt(top, directUrls, weather, stats));
   return file;
 }
 
 function writeBatchTsv(top, directUrls, funnel) {
-  const dir = path.join(ROOT, 'data');
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(PP.dir, { recursive: true });
   const tsv = top.map((r, i) => {
     const id = r.href.split('/').pop();
     const url = directUrls[i] || '';
@@ -698,13 +702,14 @@ function writeBatchTsv(top, directUrls, funnel) {
     const yoe = r.yoe ?? '';
     return `${i + 1}\t${id}\t${title}\t${co}\t${yoe}\t${r.q}\t${url}`;
   }).join('\n');
-  fs.writeFileSync(path.join(dir, `today-batch-${DATE}.tsv`), tsv + '\n');
-  fs.writeFileSync(path.join(dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
+  fs.writeFileSync(path.join(PP.dir, `today-batch-${DATE}.tsv`), tsv + '\n');
+  fs.writeFileSync(path.join(PP.dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
 
   // Rich per-job match details, used by the bot's /why N command.
   // Funnel data is read by /diagnose to show the supply pipeline.
   const lastBatch = {
     date: DATE,
+    profile: PP.dir.split(/[/\\]/).pop(),
     generatedAt: new Date().toISOString(),
     funnel: funnel || null,
     jobs: top.map((r, i) => ({
@@ -721,7 +726,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       viewjobUrl: r.href
     }))
   };
-  fs.writeFileSync(path.join(dir, 'last-batch.json'), JSON.stringify(lastBatch, null, 2));
+  fs.writeFileSync(PP.lastBatch, JSON.stringify(lastBatch, null, 2));
 }
 
 // Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation

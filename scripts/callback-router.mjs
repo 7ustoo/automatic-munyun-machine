@@ -29,10 +29,13 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { paths } from './profile-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const CALLBACKS_PATH = path.join(ROOT, 'data', 'last-batch-callbacks.json');
+// v1.0 E5: callbacks live per-profile so a /profile switch picks up the
+// right table. paths() resolves to data/profiles/<active>/last-batch-callbacks.json.
+const callbacksPath = () => paths().lastBatchCallbacks;
 const CALLBACK_TTL_DAYS = 7;
 
 // Sign + format a callback_data string. Stable across the bot's lifetime
@@ -79,7 +82,7 @@ export function parseAndVerify(callbackData, token) {
 
 function lookupItem(idx) {
   try {
-    const tbl = JSON.parse(fs.readFileSync(CALLBACKS_PATH, 'utf8'));
+    const tbl = JSON.parse(fs.readFileSync(callbacksPath(), 'utf8'));
     if (tbl.expiresAt && new Date(tbl.expiresAt).getTime() < Date.now()) return null;
     return (tbl.items || []).find(i => i.idx === idx) || null;
   } catch {
@@ -106,12 +109,12 @@ export function writeCallbackTable(items) {
       q: i.q || ''
     }))
   };
-  fs.mkdirSync(path.dirname(CALLBACKS_PATH), { recursive: true });
-  fs.writeFileSync(CALLBACKS_PATH, JSON.stringify(tbl, null, 2));
-  return CALLBACKS_PATH;
+  fs.mkdirSync(path.dirname(callbacksPath()), { recursive: true });
+  fs.writeFileSync(callbacksPath(), JSON.stringify(tbl, null, 2));
+  return callbacksPath();
 }
 
 export function readCallbackTable() {
-  try { return JSON.parse(fs.readFileSync(CALLBACKS_PATH, 'utf8')); }
+  try { return JSON.parse(fs.readFileSync(callbacksPath(), 'utf8')); }
   catch { return null; }
 }

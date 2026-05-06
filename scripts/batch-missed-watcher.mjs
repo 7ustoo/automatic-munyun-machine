@@ -19,12 +19,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { migrateIfNeeded, paths as profilePaths } from './profile-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
+migrateIfNeeded();
 const DATA_DIR        = path.join(ROOT, 'data');
-const STATE_FILE      = path.join(DATA_DIR, 'batch-missed-state.json');
+const STATE_FILE      = path.join(DATA_DIR, 'batch-missed-state.json'); // shared (one machine)
 const TELEGRAM_SEND   = path.join(__dirname, 'telegram-send.mjs');
 
 function loadConfig() {
@@ -61,7 +63,8 @@ if (!scheduledDays.includes(dayName)) {
   process.exit(0);
 }
 
-const tsv = path.join(DATA_DIR, `today-batch-${today}.tsv`);
+// v1.0 E5: TSV lives in the active profile's dir.
+const tsv = path.join(profilePaths().dir, `today-batch-${today}.tsv`);
 if (fs.existsSync(tsv)) {
   // Batch ran. Nothing to do.
   process.exit(0);
