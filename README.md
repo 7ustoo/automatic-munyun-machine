@@ -13,7 +13,13 @@
 
 ## Install
 
-### One-line install (recommended)
+### Option 1 — `.exe` installer (recommended for non-developers)
+
+Grab `amm-setup-vX.Y.Z.exe` from the [latest GitHub release](https://github.com/7ustoo/automatic-munyun-machine/releases/latest), double-click, follow the wizard. The installer bundles npm install + `npx playwright install chromium` + the setup wizard. Standard Add/Remove Programs uninstaller works.
+
+> The installer is unsigned for v1.0 — Windows SmartScreen will warn "Unknown Publisher." Click *More info* → *Run anyway*. Code signing arrives in v1.1.
+
+### Option 2 — One-line install (for developers / power users)
 
 ```powershell
 iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.ps1 | iex
@@ -25,7 +31,7 @@ This:
 3. Installs npm deps + Chromium (for Playwright)
 4. Launches the interactive setup wizard
 
-### Manual install (developers)
+### Option 3 — Manual install
 
 ```bash
 git clone https://github.com/7ustoo/automatic-munyun-machine.git
@@ -232,18 +238,20 @@ hiring.cafe likely changed their HTML structure. Check `data/daily-batch-{date}.
 ### Wrong jobs in the batch
 Edit your queries / filters from your phone — `/jobs add "Title"`, `/jobs remove "Title"`, `/skip <company>`, `/yoe N`, `/salary N`, `/clearance on/off`. Or edit `config.json` directly and re-run `/scrape`.
 
-### Want to start over from scratch
-1. Stop and unregister the bot:
-   ```
-   Get-Process node | Where-Object { (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)").CommandLine -match 'telegram-bot' } | Stop-Process -Force
-   Unregister-ScheduledTask -TaskName 'munyun-bot' -Confirm:$false
-   Unregister-ScheduledTask -TaskName 'munyun-daily-batch' -Confirm:$false
-   ```
-2. Delete the install dir:
-   ```
-   Remove-Item -Recurse -Force "$env:LOCALAPPDATA\automatic-munyun-machine"
-   ```
-3. Re-run the install one-liner.
+### Want to pause or uninstall
+Three symmetric paths — pick whichever matches how you installed:
+
+**From Telegram** *(easiest, works regardless of install method)*:
+- Send `/uninstall` to the bot. Tap `[⚠️ Pause only]` to keep your data, or `[☠️ Wipe everything]` to clear it. Bot stops itself, unregisters all four scheduled tasks, optionally wipes `data/` + `config.json` + `.env`. Install dir is left for you to delete by hand if you want the code gone too.
+
+**From Add/Remove Programs** *(if you used the `.exe` installer)*:
+- Settings → Apps → Automatic Munyun Machine → Uninstall. Runs `uninstall.mjs --mode=wipe` automatically and removes the install dir.
+
+**From PowerShell** *(if you used the one-liner)*:
+```powershell
+iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/scripts/uninstall.ps1 | iex
+```
+Pick `1` for pause or `2` for wipe.
 
 ### File picker doesn't open during the resume step
 You're either on a stripped Windows install without `System.Windows.Forms`, or running from a no-GUI session (e.g. SSH). The wizard auto-falls-back to typed-path input — paste the full path to your resume. Or pick option 2 ("upload via Telegram later") and send `/resume` to the bot once setup finishes.

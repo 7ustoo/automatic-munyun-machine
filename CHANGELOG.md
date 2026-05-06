@@ -8,7 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Added — v1.0 E5 (in progress)
+### Added
+
+### Changed
+
+### Fixed
+
+---
+
+## [1.0.0] — 2026-05-06
+
+> **"Trustworthy and shareable on Windows."** Six sequenced epics (E1–E6) closing the foundational gaps the v0.5 audit surfaced: silent-death reliability, depth-blind scoring, IAM-bias, supply that decayed to nothing, single-user wall, and the install/uninstall lifecycle. Telegram-first remains the thesis; the planned-then-cut Tauri GUI does not return.
+
+### Added — v1.0 E6 (Distribution + uninstall lifecycle)
+
+- **Inno Setup `.exe` installer.** New `installer/amm.iss` builds an `amm-setup-vX.Y.Z.exe` that bundles `npm install` + `npx playwright install chromium` + the setup wizard. Standard Add/Remove Programs uninstaller works. Unsigned for v1.0 (signing arrives in v1.1).
+- **`/uninstall` Telegram command** with inline confirmation buttons. `[⚠️ Pause only]` stops the bot + unregisters all four scheduled tasks but preserves data. `[☠️ Wipe everything]` does pause steps + deletes `data/`, `config.json`, `.env`, browser session. Bot can't delete its own dir; final message tells the user to remove the install dir by hand if they want the code gone.
+- **`scripts/uninstall.mjs`** — orchestrator with `--mode=pause|wipe`. Idempotent — safe to re-run on partial state. Kills the bot via PID match (cleanest) + cmdline-match cleanup. Unregisters all four `munyun-*` Task Scheduler entries. Wipe mode also wipes data + secrets.
+- **`scripts/uninstall.ps1`** — PowerShell wrapper for `iwr | iex` users. Symmetric to the install one-liner.
+- **README rewrite** — `.exe` installer leads as the recommended path; one-liner kept as Option 2 for developers; manual install as Option 3. Old "Want to start over from scratch" troubleshooting section replaced with three uninstall paths (Telegram, Add/Remove, PowerShell).
+
+### Added — v1.0 E5 (Multi-profile)
 
 - **Multi-profile support.** One install, multiple personas. Each profile has its own CV, queries, filters, scoring, schedule, and seen-jobs memory. Browser session (`data/browser-profile/`), bot heartbeat, and machine-level state stay shared. New `/profile list / add <slug> / switch <slug> / delete <slug>` Telegram commands.
 - **`config.json` schema migration.** v0.x flat shape (`{user, queries, filters, ...}`) auto-wrapped on first load into `{active_profile: "default", profiles: {default: {...}}}`. Migration is idempotent — safe to call from any script entry point. Existing per-profile data files (`cv-parsed.json`, `seen-jobs.json`, `last-batch.json`, `last-batch-callbacks.json`, `applications.md`, `query-stats.json`) relocated into `data/profiles/default/`.
@@ -18,12 +38,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Mid-batch switch handling.** If a user runs `/profile switch` while a batch is in flight, the switch is queued via the existing `runningJob` lock — surface message tells them to wait until the current scrape completes.
 - **5 new profile-store smoke tests** in `scripts/__tests__/profile-store.test.mjs`. Total test count: 24 (was 19).
 
-### Fixed — v1.0 E5 (in progress)
-
+### Fixed — v1.0 E5
 - **`/forget last` and `/settings` count are now schema-aware** — work against both the v0.x `{ids: [...]}` shape and the v1.0 `{jobs: {url: {...}}}` shape so users mid-migration aren't broken.
 
-### Added — v1.0 E4 (in progress)
-
+### Added — v1.0 E4
 - **Inline-button paginated batch browser.** New `/batch [N]` command opens a tap-friendly job browser. Each page renders one job with action buttons `[💾 Save] [✅ Applied] [❓ Why] [🚫 Skip co]` and `[⬅️] [N/M] [➡️]` navigation. Replaces having to remember "save 42, applied 7" job numbers across a 100-message scroll-back.
 - **Per-batch CTA after morning push.** Daily batch ends with a `🎯 Tap to act` message carrying `[📋 Open batch browser] [📊 Diagnose supply]` buttons — opens the new browser without typing.
 - **`/history [N]` command.** Paginated past-application list read from `data/applications.md`, 5 entries/page. Inline `⬅️/➡️` nav.
@@ -32,8 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **`data/last-batch-callbacks.json`** — per-batch callback table (idx → {url, company, title, directUrl, matchPct, score, yoe, q}). 7-day TTL. Written at end of each batch, read on every callback dispatch.
 - **`tgEditMessage` + `tgAnswerCallback` helpers** — pagination edits the bubble in place rather than piling up new messages; callback acks turn off the loading spinner with optional toast text.
 
-### Added — v1.0 E3 (in progress)
-
+### Added — v1.0 E3
 - **Match floor (FIXES "0% jobs in batch").** Default 25%; jobs below the threshold are dropped *before* the top-100 cut, so the bot never ships filler when supply is short. New `config.scoring.matchFloorPercent` field. New `/floor N` Telegram command (`/floor 0` to disable, `/floor 50` to be picky).
 - **Seen-jobs freshness window (FIXES "only 7 jobs after a few weeks").** Schema upgraded from `{ids: string[]}` (boolean has-seen, grew forever) to `{jobs: {url: {firstSeenAt, lastSeenAt}}}`. Default 60-day decay: unapplied previously-seen jobs roll back into the supply pool. Applied jobs (read from `applications.md`) are always blocked. Old schema auto-migrates on first load. New `config.scoring.seenJobsFreshnessDays` field.
 - **Phrase-proximity scoring + term-frequency cap.** Multi-token CV phrases that don't match exactly now get half-credit if all tokens appear anywhere in the JD ("AWS … 50 words … RDS" no longer scores zero). Matches are counted up to 3 occurrences (TF cap) so a JD mentioning "AWS" 8 times no longer ties one mentioning it once.
@@ -44,13 +61,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **First test suite.** `scripts/__tests__/salary.test.mjs`, `phrase-proximity.test.mjs`, `role-cluster.test.mjs` — 19 tests using built-in `node:test` runner. New `npm test` script.
 - **Title heuristic hardened.** Card extraction now validates candidate titles against a non-title blacklist (`/^(full[- ]?time|part[- ]?time|remote|hybrid|onsite|contract|w2|c2c|us only|usa)$/i`) and falls through to the next candidate if the primary line is metadata bleed. Prevents `(untitled)` and "Full Time" / "Remote, US" titles in batches.
 
-### Fixed — v1.0 E3 (in progress)
-
+### Fixed — v1.0 E3
 - **Seen-jobs persistence race.** `seen-jobs.json` was previously written at the top of the post-Telegram block but the variable mutation happened separately. The new write happens *only* after Telegram chunked-message delivery succeeded for the batch and only stamps the surfaced jobs.
 - **`scoreJob` and `parseSalaryK` are now safe to import** — `daily-batch.mjs` gates its top-level pipeline IIFE behind a CLI-vs-imported check (`IS_CLI`) so test files can pull engine functions without triggering a real scrape + Telegram push at module load. `.env` validation also gated on CLI invocation.
 
-### Added — v1.0 E2 (in progress)
-
+### Added — v1.0 E2
 - **Heartbeat + out-of-process watchdog.** Bot writes `data/heartbeat.json` every poll iteration with `{ts, pid, version, lastPollOk, consecutiveFailures}`. New `scripts/watchdog.mjs` runs every 5 minutes via Task Scheduler entry `munyun-watchdog` — if the heartbeat is stale > 10 min, it kills the bot, restarts the `munyun-bot` task, and pings Telegram via `scripts/telegram-send.mjs` (independent process, so a corrupt bot module can't take the alerter down). Throttled to 3 restart attempts per hour; after the limit, sends a single "give up — human needed" alert and stops trying. Solves the silent-death failure mode (we hit it during v0.5 release work — bot died without surfacing).
 - **`/status` command.** One-screen bot health snapshot: process uptime, last heartbeat, last batch (date + count + funnel + score band), last auth-OK, batch-in-progress lock state, scheduled-task state. Read by user; structured similarly by the watchdog.
 - **`/diagnose` command.** Answers "why am I getting only N jobs?" directly. Surfaces the last batch's funnel (raw → keptAfterFilter → afterDedup → sent), seen-jobs total, and per-query 7-day average card count with low-supply queries flagged. If the batch was below typical supply (< 30 fresh jobs), `/diagnose` includes hint actions (`/forget last`, `/jobs add`).
@@ -59,12 +74,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Batch-missed watcher.** New `scripts/batch-missed-watcher.mjs` + Task Scheduler entry `munyun-batch-missed`. Runs 1 hour after configured batch time on configured days. If today's `data/today-batch-{date}.tsv` is missing, pings Telegram. Idempotent — won't re-alert for the same date. File-existence check is the truth; doesn't parse logs.
 - **Initial heartbeat at bot startup** so the watchdog sees a fresh boot as alive within seconds, not after the first 30s long-poll round-trip.
 
-### Fixed — v1.0 E2 (in progress)
-
+### Fixed — v1.0 E2
 - **`recordAuthOk()` no longer lies on a failed scrape.** Was previously called immediately after `/saved` loaded successfully, even if the subsequent scrape loop returned zero cards across all 15 queries. Now deferred to after the loop completes AND at least one card was extracted. `/status` and `/diagnose` no longer show "auth OK" when the user is effectively broken.
 
-### Changed — v1.0 E2 (in progress)
-
+### Changed — v1.0 E2
 - `setup-tasks.ps1` now registers four Task Scheduler entries instead of two: `munyun-bot`, `munyun-daily-batch`, `munyun-watchdog`, `munyun-batch-missed`. The watchdog runs every 5 min; the batch-missed watcher runs at scheduled-time + 1 hour on scheduled days.
 - `scripts/telegram-bot.mjs` header comment refreshed in v1.0 E1 was missing 20+ commands shipped after v0.2; now lists the full set.
 
@@ -210,7 +223,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.3.0...v0.4.0

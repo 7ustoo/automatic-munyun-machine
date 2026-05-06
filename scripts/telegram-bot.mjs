@@ -387,6 +387,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /update              → pull latest from GitHub + restart
 /update skip         → skip notifications about the latest version
 /test, /ping         → bot health check
+/uninstall           → pause or wipe — confirmation via inline buttons
 /help                → this message`;
 
 // Latest batch TSV → array of { idx, id, title, company, yoe, q, url }
@@ -606,6 +607,29 @@ async function handleMessage(msg) {
   if (histM) {
     const page = histM[1] ? parseInt(histM[1], 10) : 1;
     return showHistory(chatId, page);
+  }
+
+  // /uninstall — v1.0 E6. Two modes (pause / wipe) selected via inline buttons.
+  // Bot can't delete its own dir; for wipe mode, we send the final message,
+  // spawn uninstall.mjs detached, then exit. The detached process does the
+  // actual work after we're gone.
+  if (/^\/?uninstall\b/.test(text)) {
+    const reply_markup = {
+      inline_keyboard: [
+        [{ text: '⚠️ Pause only',     callback_data: makeNavCallback('uni', 1, TG_TOKEN) }],
+        [{ text: '☠️ Wipe everything', callback_data: makeNavCallback('uni', 2, TG_TOKEN) }],
+        [{ text: '✋ Cancel',          callback_data: makeNavCallback('uni', 0, TG_TOKEN) }]
+      ]
+    };
+    return reply(chatId, [
+      '<b>⚠️ Uninstall Automatic Munyun Machine</b>',
+      '',
+      '<b>Pause only</b> — stops the bot and unregisters scheduled tasks. Preserves <code>data/</code>, <code>config.json</code>, <code>.env</code>, browser session. Re-running setup brings everything back.',
+      '',
+      '<b>Wipe everything</b> — pause steps + delete <code>data/</code>, <code>config.json</code>, <code>.env</code>, browser session. Bot token is gone with .env; reinstalling means a fresh wizard run.',
+      '',
+      '<i>Install dir itself is not deleted — remove it by hand if you want the code gone too.</i>'
+    ].join('\n'), { reply_markup });
   }
 
   // /profile  /profile list  /profile add <slug>  /profile switch <slug>  /profile delete <slug>
@@ -1271,6 +1295,30 @@ async function handleCallback(cq) {
   if (action === 'diag') {
     await tgAnswerCallback(cq.id);
     return reply(chatId, buildDiagnoseMessage());
+  }
+
+  // /uninstall confirmation buttons (idx: 0=cancel, 1=pause, 2=wipe)
+  if (action === 'uni') {
+    if (idx === 0) {
+      await tgAnswerCallback(cq.id, 'Cancelled');
+      return reply(chatId, '✋ Uninstall cancelled. No changes made.');
+    }
+    const mode = idx === 1 ? 'pause' : 'wipe';
+    await tgAnswerCallback(cq.id, mode === 'pause' ? 'Pausing…' : 'Wiping everything…');
+    const finalMsg = mode === 'pause'
+      ? `🛑 <b>Pausing.</b>\nBot exiting; scheduled tasks unregistering. Preserved: data/, config.json, .env. Re-run <code>scripts\\setup-tasks.ps1</code> to bring it back.`
+      : `☠️ <b>Wiping everything.</b>\nBot exiting. data/, config.json, .env, browser session will be deleted by the uninstall process.\n\n<i>Install dir at <code>${escHtml(ROOT)}</code> remains — delete by hand if you want the code gone.</i>`;
+    await reply(chatId, finalMsg);
+    // Spawn uninstall.mjs detached so it survives our exit
+    const uninstallScript = path.join(ROOT, 'scripts', 'uninstall.mjs');
+    const child = spawn('node', [uninstallScript, `--mode=${mode}`], {
+      detached: true, stdio: 'ignore', windowsHide: true, cwd: ROOT
+    });
+    child.unref();
+    log(`Uninstall (${mode}) spawned PID=${child.pid}; bot exiting.`);
+    // Give Telegram time to deliver the final message before we exit
+    await new Promise(r => setTimeout(r, 1500));
+    process.exit(0);
   }
 
   // Save / Applied / Why / Skip-company — all require resolved item
