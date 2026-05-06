@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -72,11 +73,13 @@ function log(line) {
   fs.appendFileSync(path.join(ROOT, 'data', `daily-batch-${DATE}.log`), msg + '\n');
 }
 
-async function tg(text) {
+async function tg(text, opts = {}) {
+  const body = { chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true };
+  if (opts.reply_markup) body.reply_markup = opts.reply_markup;
   const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true })
+    body: JSON.stringify(body)
   });
   const json = await res.json();
   if (!json.ok) throw new Error('Telegram error: ' + JSON.stringify(json));
@@ -808,6 +811,34 @@ if (IS_CLI) (async () => {
     // so a failed run doesn't burn jobs we never actually surfaced.
     saveSeenStore(blockedSeen, top);
     log(`Persisted seen-jobs.json (${top.length} new, freshness=${SEEN_FRESHNESS_DAYS}d)`);
+
+    // v1.0 E4: write per-batch callback table + send a final "Open batch
+    // browser" CTA. The callback table maps idx → {url, company, ...} so
+    // the bot can resolve inline-button taps for the next 7 days.
+    try {
+      const items = top.map((r, i) => ({
+        idx: i + 1,
+        viewjobUrl: r.href,
+        title: r.title,
+        company: r.company,
+        directUrl: directUrls[i] || '',
+        matchPct: r.matchPct,
+        score: r.score,
+        yoe: r.yoe,
+        q: r.q
+      }));
+      writeCallbackTable(items);
+      const reply_markup = {
+        inline_keyboard: [[
+          { text: '📋 Open batch browser', callback_data: makeNavCallback('b', 1, TG_TOKEN) },
+          { text: '📊 Diagnose supply',     callback_data: makeNavCallback('diag', 0, TG_TOKEN) }
+        ]]
+      };
+      await tg('🎯 <b>Tap to act on this batch.</b>\n<i>Each job in the browser has Save / Applied / Why / Skip-company buttons. Browser stays usable for 7 days.</i>', { reply_markup });
+      log('Sent batch CTA + wrote callback table');
+    } catch (e) {
+      log(`CTA / callback table write failed (non-fatal): ${e.message}`);
+    }
 
     log('=== done ===');
   } catch (e) {

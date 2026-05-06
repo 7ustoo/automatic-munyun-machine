@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added — v1.0 E4 (in progress)
+
+- **Inline-button paginated batch browser.** New `/batch [N]` command opens a tap-friendly job browser. Each page renders one job with action buttons `[💾 Save] [✅ Applied] [❓ Why] [🚫 Skip co]` and `[⬅️] [N/M] [➡️]` navigation. Replaces having to remember "save 42, applied 7" job numbers across a 100-message scroll-back.
+- **Per-batch CTA after morning push.** Daily batch ends with a `🎯 Tap to act` message carrying `[📋 Open batch browser] [📊 Diagnose supply]` buttons — opens the new browser without typing.
+- **`/history [N]` command.** Paginated past-application list read from `data/applications.md`, 5 entries/page. Inline `⬅️/➡️` nav.
+- **Inline-keyboard inline-button-tap actions** for save/applied/why/skip-company. Tapping `[💾 Save]` runs the same `job-action.mjs save <url>` path that `/save N` uses; tapping `[🚫 Skip co]` adds the company to `filters.skipCompanies`.
+- **Telegram `callback_query` handling.** Bot now subscribes to `callback_query` updates and dispatches via the new `scripts/callback-router.mjs` module. Each callback is HMAC-signed at mint time (`<action>:<idx>:<sig>` where sig = first 8 hex of HMAC-SHA256(token, action+idx+url)) so stale callbacks from rotated batches are rejected with "this batch has expired" rather than silently acting on the wrong job.
+- **`data/last-batch-callbacks.json`** — per-batch callback table (idx → {url, company, title, directUrl, matchPct, score, yoe, q}). 7-day TTL. Written at end of each batch, read on every callback dispatch.
+- **`tgEditMessage` + `tgAnswerCallback` helpers** — pagination edits the bubble in place rather than piling up new messages; callback acks turn off the loading spinner with optional toast text.
+
 ### Added — v1.0 E3 (in progress)
 
 - **Match floor (FIXES "0% jobs in batch").** Default 25%; jobs below the threshold are dropped *before* the top-100 cut, so the bot never ships filler when supply is short. New `config.scoring.matchFloorPercent` field. New `/floor N` Telegram command (`/floor 0` to disable, `/floor 50` to be picky).

@@ -30,6 +30,12 @@ import {
   markUpdating,
   consumePostUpdateFlag
 } from './update-checker.mjs';
+import {
+  parseAndVerify,
+  makeCallback,
+  makeNavCallback,
+  readCallbackTable
+} from './callback-router.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -169,6 +175,41 @@ async function reply(chatId, text, opts = {}) {
   }
 }
 
+// v1.0 E4: ack a callback so Telegram stops showing the loading spinner on
+// the user's button. `text` shows as a brief toast; alert=true shows as a
+// modal popup instead. Both optional.
+async function tgAnswerCallback(callbackQueryId, text = '', alert = false) {
+  try {
+    await tgPost('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text, show_alert: alert } : {})
+    });
+  } catch (e) {
+    log('answerCallbackQuery failed: ' + e.message);
+  }
+}
+
+// Edit a message in place (used by the paginated browser to re-render the
+// same bubble on prev/next instead of piling up new messages). Returns the
+// API response or throws.
+async function tgEditMessage(chatId, messageId, text, opts = {}) {
+  try {
+    return await tgPost('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...opts
+    });
+  } catch (e) {
+    // Telegram throws "message is not modified" when the new text === old text.
+    // That's not really an error from our perspective.
+    if (/not modified/i.test(e.message)) return null;
+    throw e;
+  }
+}
+
 // ---------- weather ----------
 const WMO = { 0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast', 45: 'foggy', 48: 'foggy', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle', 61: 'light rain', 63: 'rain', 65: 'heavy rain', 71: 'light snow', 73: 'snow', 75: 'heavy snow', 80: 'showers', 81: 'showers', 82: 'heavy showers', 95: 'thunderstorm', 96: 'thunderstorm', 99: 'thunderstorm' };
 const WMO_EMOJI = { 0: '☀️', 1: '🌤', 2: '⛅', 3: '☁️', 45: '🌫', 48: '🌫', 51: '🌦', 53: '🌦', 55: '🌧', 61: '🌧', 63: '🌧', 65: '🌧', 71: '🌨', 73: '🌨', 75: '❄️', 80: '🌦', 81: '🌧', 82: '⛈', 95: '⛈', 96: '⛈', 99: '⛈' };
@@ -291,9 +332,11 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 
 <b>Core actions</b>
 /scrape, /daily, gm  → weather + 100 jobs ranked by CV match
-/save N              → bookmark job N on hiring.cafe
-/applied N           → mark job N applied
+/batch [N]           → tap-friendly browser with Save/Applied/Why buttons
+/save N              → bookmark job N on hiring.cafe (text fallback)
+/applied N           → mark job N applied (text fallback)
 /why N               → explain why job N got its match %
+/history [N]         → past applications (paginated)
 /export              → download today's batch as a .txt file
 
 <b>Settings — view + edit from your phone</b>
@@ -528,6 +571,22 @@ async function handleMessage(msg) {
   // "why am I getting only N jobs?" directly.
   if (/^\/?diagnose\b/.test(text)) {
     return reply(chatId, buildDiagnoseMessage());
+  }
+
+  // /batch [N] — open the inline-button paginated browser for the latest batch.
+  // v1.0 E4. Each page renders one job with [💾 Save] [✅ Applied] [❓ Why]
+  // [🚫 Skip co] action buttons + ⬅️/➡️ navigation.
+  const batchM = text.match(/^\/?batch(?:\s+(\d{1,3}))?\b/);
+  if (batchM) {
+    const page = batchM[1] ? parseInt(batchM[1], 10) : 1;
+    return openBatchBrowser(chatId, page);
+  }
+
+  // /history [N] — paginated application history from data/applications.md.
+  const histM = text.match(/^\/?history(?:\s+(\d{1,3}))?\b/);
+  if (histM) {
+    const page = histM[1] ? parseInt(histM[1], 10) : 1;
+    return showHistory(chatId, page);
   }
 
   if (/^\/?weather\b/.test(text)) {
@@ -991,6 +1050,199 @@ async function handleMessage(msg) {
   return reply(chatId, `Unknown command. Try /help.`);
 }
 
+// =====================================================================
+//  v1.0 E4 — Inline callback handling, paginated batch browser, /history
+// =====================================================================
+
+// Render one job page from the callbacks table. Returns {text, reply_markup}
+// suitable for sendMessage or editMessageText.
+function renderJobPage(idx, total, item, opts = {}) {
+  const filter = opts.filter || 'all';
+  const co = item.company || '<i>(no company)</i>';
+  const yoe = (item.yoe !== null && item.yoe !== undefined) ? `${item.yoe}+ YOE · ` : '';
+  const q = item.q ? `[${escHtml(item.q)}]` : '';
+  const lines = [
+    `<b>Job ${idx} / ${total}</b>${filter !== 'all' ? `  <i>(filter: ${filter})</i>` : ''}`,
+    '',
+    `<b>${escHtml(item.title || '(untitled)')}</b>`,
+    `${escHtml(co)}  ·  ${item.matchPct}% match  ·  ${yoe}${q}`,
+    '',
+    item.directUrl ? `🔗 <a href="${escHtml(item.directUrl)}">Apply directly</a>` : '',
+    `🔍 <a href="${escHtml(item.url)}">View on hiring.cafe</a>`
+  ].filter(Boolean);
+
+  // Action row
+  const actionRow = [
+    { text: '💾 Save',     callback_data: makeCallback('s', idx, item.url, TG_TOKEN) },
+    { text: '✅ Applied',  callback_data: makeCallback('a', idx, item.url, TG_TOKEN) },
+    { text: '❓ Why',      callback_data: makeCallback('w', idx, item.url, TG_TOKEN) },
+    { text: '🚫 Skip co',  callback_data: makeCallback('k', idx, item.url, TG_TOKEN) }
+  ];
+  // Nav row
+  const prevIdx = Math.max(1, idx - 1);
+  const nextIdx = Math.min(total, idx + 1);
+  const navRow = [
+    { text: '⬅️',                 callback_data: makeNavCallback('b', prevIdx, TG_TOKEN) },
+    { text: `${idx} / ${total}`,  callback_data: makeNavCallback('noop', 0, TG_TOKEN) },
+    { text: '➡️',                 callback_data: makeNavCallback('b', nextIdx, TG_TOKEN) }
+  ];
+
+  return {
+    text: lines.join('\n'),
+    reply_markup: { inline_keyboard: [actionRow, navRow] }
+  };
+}
+
+async function openBatchBrowser(chatId, page = 1) {
+  const tbl = readCallbackTable();
+  if (!tbl || !tbl.items?.length) {
+    return reply(chatId, '<i>No batch loaded. Run /scrape first.</i>');
+  }
+  if (tbl.expiresAt && new Date(tbl.expiresAt).getTime() < Date.now()) {
+    return reply(chatId, '<i>Last batch expired (>7 days). Run /scrape for a fresh one.</i>');
+  }
+  const idx = Math.min(Math.max(1, page), tbl.items.length);
+  const item = tbl.items.find(i => i.idx === idx) || tbl.items[0];
+  const view = renderJobPage(item.idx, tbl.items.length, item);
+  return reply(chatId, view.text, { reply_markup: view.reply_markup });
+}
+
+// Show /history — paginated list of jobs from applications.md, 5 per page
+async function showHistory(chatId, page = 1) {
+  const PAGE_SIZE = 5;
+  let entries = [];
+  try {
+    const md = fs.readFileSync(path.join(ROOT, 'data', 'applications.md'), 'utf8');
+    // Extract every viewjob URL + the line above it (assume some metadata)
+    const lines = md.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/hiring\.cafe\/viewjob\/[a-z0-9]+/);
+      if (m) entries.push({ url: 'https://' + m[0], context: lines.slice(Math.max(0, i - 1), i + 2).join(' · ').slice(0, 200) });
+    }
+  } catch {
+    return reply(chatId, '<i>No applications.md yet. Use /applied N to start logging.</i>');
+  }
+  if (!entries.length) return reply(chatId, '<i>No applications logged yet.</i>');
+  entries.reverse(); // newest first
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const slice = entries.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const lines = [`<b>📋 Application history</b>  (page ${p}/${totalPages}, ${entries.length} total)`, ''];
+  for (const [i, e] of slice.entries()) {
+    const num = (p - 1) * PAGE_SIZE + i + 1;
+    lines.push(`<b>${num}.</b> <a href="${escHtml(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
+    if (e.context) lines.push(`<i>${escHtml(e.context.slice(0, 120))}</i>`);
+    lines.push('');
+  }
+  const navRow = [];
+  if (p > 1)            navRow.push({ text: '⬅️',  callback_data: makeNavCallback('h', p - 1, TG_TOKEN) });
+  navRow.push({ text: `${p}/${totalPages}`, callback_data: makeNavCallback('noop', 0, TG_TOKEN) });
+  if (p < totalPages)   navRow.push({ text: '➡️',  callback_data: makeNavCallback('h', p + 1, TG_TOKEN) });
+  return reply(chatId, lines.join('\n'), { reply_markup: { inline_keyboard: [navRow] } });
+}
+
+// Central callback dispatcher. Telegram fires this for every inline-button tap.
+async function handleCallback(cq) {
+  const chatId = String(cq.message?.chat?.id || cq.from?.id);
+  if (chatId !== ALLOWED_CHAT) {
+    return tgAnswerCallback(cq.id, 'Not authorized', true);
+  }
+  log(`< callback ${cq.data}`);
+
+  const verified = parseAndVerify(cq.data, TG_TOKEN);
+  if (!verified.ok) {
+    if (verified.expired) {
+      return tgAnswerCallback(cq.id, 'This batch has expired — run /scrape', true);
+    }
+    return tgAnswerCallback(cq.id, 'Invalid or stale button', true);
+  }
+
+  const { action, idx, item } = verified;
+
+  // No-op (counter button)
+  if (action === 'noop') return tgAnswerCallback(cq.id);
+
+  // Batch browser navigation — edit the bubble in place
+  if (action === 'b') {
+    const tbl = readCallbackTable();
+    if (!tbl) return tgAnswerCallback(cq.id, 'Batch not loaded', true);
+    const target = tbl.items.find(i => i.idx === idx);
+    if (!target) return tgAnswerCallback(cq.id, 'Job not found', true);
+    const view = renderJobPage(idx, tbl.items.length, target);
+    await tgEditMessage(chatId, cq.message.message_id, view.text, { reply_markup: view.reply_markup });
+    return tgAnswerCallback(cq.id);
+  }
+
+  // History pagination
+  if (action === 'h') {
+    await tgAnswerCallback(cq.id);
+    return showHistory(chatId, idx);
+  }
+
+  // Diagnose shortcut
+  if (action === 'diag') {
+    await tgAnswerCallback(cq.id);
+    return reply(chatId, buildDiagnoseMessage());
+  }
+
+  // Save / Applied / Why / Skip-company — all require resolved item
+  if (!item) return tgAnswerCallback(cq.id, 'Job context missing — re-run /scrape', true);
+
+  if (action === 's') {
+    await tgAnswerCallback(cq.id, 'Saving on hiring.cafe…');
+    const { code, output, timeout } = await spawnAction('save', item.url);
+    if (timeout) return reply(chatId, `❌ Save timed out for #${idx}.`);
+    if (code === 0) return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> on hiring.cafe.`);
+    return reply(chatId, `❌ Save failed (exit ${code}):\n<pre>${escHtml((output || '').slice(0, 400))}</pre>`);
+  }
+
+  if (action === 'a') {
+    await tgAnswerCallback(cq.id, 'Marking applied…');
+    const { code, output, timeout } = await spawnAction('applied', item.url);
+    if (timeout) return reply(chatId, `❌ Applied timed out for #${idx}.`);
+    if (code === 0) {
+      // Append to applications.md so /history sees it. job-action.mjs already does this,
+      // but we double-write with metadata for cleaner history rendering.
+      try {
+        const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
+        fs.appendFileSync(path.join(ROOT, 'data', 'applications.md'), line);
+      } catch {}
+      return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')}.`);
+    }
+    return reply(chatId, `❌ Applied failed (exit ${code}):\n<pre>${escHtml((output || '').slice(0, 400))}</pre>`);
+  }
+
+  if (action === 'w') {
+    await tgAnswerCallback(cq.id);
+    // Reuse the existing /why N path by reading last-batch.json directly.
+    try {
+      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const job = (last.jobs || []).find(j => j.idx === idx);
+      if (!job) return reply(chatId, `<i>Couldn't find job #${idx} in last-batch.json. /scrape may have rotated.</i>`);
+      const matched = (job.matched || []).slice(0, 30).map(escHtml).join(', ') || '<i>(no keyword matches)</i>';
+      return reply(chatId, [
+        `<b>Why job #${idx} matched ${job.matchPct}%</b>`,
+        '',
+        `<b>${escHtml(job.title || '')}</b> @ ${escHtml(job.company || '')}`,
+        '',
+        `<b>Matched terms:</b> ${matched}`,
+        `<b>Raw score:</b> ${job.score}`
+      ].join('\n'));
+    } catch (e) {
+      return reply(chatId, `❌ ${escHtml(e.message)}`);
+    }
+  }
+
+  if (action === 'k') {
+    if (!item.company) return tgAnswerCallback(cq.id, 'No company recorded for this job', true);
+    await tgAnswerCallback(cq.id, `Skipping ${item.company}…`);
+    cfgRW.appendUnique('filters.skipCompanies', item.company);
+    return reply(chatId, `🚫 Added <b>${escHtml(item.company)}</b> to skip list. Future scrapes will ignore them.`);
+  }
+
+  return tgAnswerCallback(cq.id, `Unknown action: ${action}`, true);
+}
+
 // Handle file attachments (for /resume upload flow)
 async function handleAttachment(msg) {
   const chatId = String(msg.chat.id);
@@ -1120,7 +1372,7 @@ let outageStartedAt = null;
 
 while (true) {
   try {
-    const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message']) });
+    const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message', 'callback_query']) });
 
     // Heartbeat: tell the watchdog we're alive and Telegram-reachable.
     writeHeartbeat({ lastPollOk: true, consecutiveFailures: 0 });
@@ -1146,6 +1398,8 @@ while (true) {
           } else {
             handleMessage(u.message).catch(e => log('handleMessage error: ' + e.message));
           }
+        } else if (u.callback_query) {
+          handleCallback(u.callback_query).catch(e => log('handleCallback error: ' + e.message));
         }
         offset = u.update_id + 1;
       }
