@@ -25,7 +25,6 @@ import {
   currentVersion,
   checkForUpdate,
   dismissVersion,
-  getDismissed,
   markUpdating,
   consumePostUpdateFlag
 } from './update-checker.mjs';
@@ -33,6 +32,16 @@ import {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const VERSION = currentVersion();
+
+// Absolute paths to Windows system binaries. spawn('powershell', ...) and
+// spawn('cmd.exe', ...) rely on PATH lookup, which fails on the
+// stripped-PATH installs we've seen in the wild (Daniel hit this in v0.4
+// during wizard task registration; another tester hit it in v0.5 trying
+// to /pause). Resolving via %SystemRoot% always works on a sane Windows.
+const SYS32      = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+const POWERSHELL = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const CMD_EXE    = path.join(SYS32, 'cmd.exe');
+const SCHTASKS   = path.join(SYS32, 'schtasks.exe');
 
 // ---------- env ----------
 const ENV_PATH = path.join(ROOT, '.env');
@@ -177,7 +186,7 @@ function runClaudeBatch(chatId) {
   }
   reply(chatId, '🔄 Scraping hiring.cafe… this takes 1–2 min. You\'ll get the batch when it\'s done.');
   log('Starting daily batch via run-daily-batch.cmd');
-  const child = spawn('cmd.exe', ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
+  const child = spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
     cwd: ROOT,
     detached: false,
     windowsHide: true
@@ -359,20 +368,22 @@ async function handleMessage(msg) {
 
   // /pause — disable 7am push
   if (/^\/?pause\b/.test(text)) {
-    const r = await spawnWithTimeout('powershell', ['-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
+    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
     if (r.timeout) return reply(chatId, '⏰ Pause command timed out after 30s. Try again.');
-    return reply(chatId, r.code === 0 ? '⏸ Daily 7am push paused. Use /resume-bot to re-enable.' : `❌ Could not pause (exit ${r.code}).`);
+    if (r.code === 0) return reply(chatId, '⏸ Daily 7am push paused. Use /resume-bot to re-enable.');
+    return reply(chatId, `❌ Could not pause (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
   }
   // /resume-bot — re-enable 7am push
   if (/^\/?resume[-_\s]?bot\b/.test(text)) {
-    const r = await spawnWithTimeout('powershell', ['-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
+    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
     if (r.timeout) return reply(chatId, '⏰ Resume command timed out after 30s. Try again.');
-    return reply(chatId, r.code === 0 ? '▶️ Daily 7am push re-enabled.' : `❌ Could not resume (exit ${r.code}).`);
+    if (r.code === 0) return reply(chatId, '▶️ Daily 7am push re-enabled.');
+    return reply(chatId, `❌ Could not resume (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
   }
   // /reauth — spawn login-once.mjs on the user's machine
   if (/^\/?reauth\b/.test(text)) {
     reply(chatId, '🔓 Opening login window on your computer. Sign into hiring.cafe with Google, then close the window.');
-    spawn('cmd.exe', ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
+    spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
       cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
     }).unref();
     return;
@@ -529,7 +540,7 @@ async function handleMessage(msg) {
     if (hh > 23 || mm > 59) return reply(chatId, '❌ Invalid time. Use 24-hour HH:MM.');
     const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     cfgRW.set('schedule.time', time);
-    const r = await spawnWithTimeout('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
     if (r.timeout) return reply(chatId, `⏰ Schedule saved but task re-registration timed out after 30s.`);
     return reply(chatId, r.code === 0
       ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
@@ -672,7 +683,8 @@ async function handleMessage(msg) {
     }
 
     if (sub.startsWith('check')) {
-      const info = await checkForUpdate();
+      // Force-refresh: user explicitly asked, bypass the 5-min cache.
+      const info = await checkForUpdate({ force: true });
       if (!info) return reply(chatId, '⚠️ Could not reach GitHub. Try again later.');
       if (!info.hasUpdate) return reply(chatId, `✅ You're on the latest: v${info.current}.`);
       const notes = info.releaseNotes ? info.releaseNotes.slice(0, 500) : '';
@@ -720,8 +732,11 @@ async function handleMessage(msg) {
 
     // Detached restarter: waits 4s for this bot to exit, then runs schtasks
     // to start a fresh bot from the (now updated) code on disk.
-    const restartCmd = `timeout /t 4 /nobreak >nul && schtasks /run /tn munyun-bot`;
-    const restarter = spawn('cmd.exe', ['/c', restartCmd], {
+    // Absolute paths used everywhere — if PATH is stripped (which is exactly
+    // the kind of environment that needs auto-update most), this still works.
+    const TIMEOUT = path.join(SYS32, 'timeout.exe');
+    const restartCmd = `"${TIMEOUT}" /t 4 /nobreak >nul && "${SCHTASKS}" /run /tn munyun-bot`;
+    const restarter = spawn(CMD_EXE, ['/c', restartCmd], {
       detached: true, stdio: 'ignore', windowsHide: true
     });
     restarter.unref();

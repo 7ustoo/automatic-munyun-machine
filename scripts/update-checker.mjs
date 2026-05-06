@@ -87,7 +87,17 @@ async function ghJson(pathSuffix, current) {
   return r.json();
 }
 
-export async function checkForUpdate() {
+// 5-minute in-memory cache so a user spamming /version, /update check,
+// /update notes etc. doesn't burn through GitHub rate limit. Force-refresh
+// is available via checkForUpdate({ force: true }) for /update check.
+let _cached = null;
+let _cachedAt = 0;
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
+export async function checkForUpdate({ force = false } = {}) {
+  if (!force && _cached && (Date.now() - _cachedAt) < CACHE_TTL_MS) {
+    return _cached;
+  }
   const current = currentVersion();
   try {
     // Try /releases first — gets pre-releases too. Take the newest.
@@ -121,7 +131,7 @@ export async function checkForUpdate() {
     state.lastSeenLatest = latest;
     writeState(state);
 
-    return {
+    const result = {
       current,
       latest,
       hasUpdate: semverGt(latest, current),
@@ -130,6 +140,9 @@ export async function checkForUpdate() {
       releaseUrl: releaseUrl || `https://github.com/${REPO}/releases`,
       publishedAt
     };
+    _cached = result;
+    _cachedAt = Date.now();
+    return result;
   } catch {
     return null;
   }
@@ -150,12 +163,23 @@ export function markUpdating(fromVersion, toVersion) {
 // Read + clear the post-update flag. Called by bot at startup. Returns the
 // flag contents (or null if not present). Caller uses this to send the
 // "✅ Updated to vX.Y.Z" confirmation.
+//
+// Guard against false positives: if the flag claims we updated TO version X
+// but the running bot is NOT version X, the upgrade didn't actually take —
+// markUpdating ran but git pull/npm install failed before exit, or restart
+// happened from a stale code path. Silently consume the flag without
+// notifying so the user doesn't see a confusing "Updated to vX.Y.Z" when
+// they're actually still on the old version.
 export function consumePostUpdateFlag() {
   const flag = path.join(ROOT, 'data', '.updating');
   if (!fs.existsSync(flag)) return null;
   try {
     const data = JSON.parse(fs.readFileSync(flag, 'utf8'));
     fs.unlinkSync(flag);
+    if (data && data.to && data.to !== currentVersion()) {
+      // Claimed upgrade didn't actually land. Don't lie to the user.
+      return null;
+    }
     return data;
   } catch {
     try { fs.unlinkSync(flag); } catch {}

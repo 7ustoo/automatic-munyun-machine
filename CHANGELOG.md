@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed — v0.5 (in progress)
+
+- **Bot commands that spawn Windows tools no longer fail with `exit -2` on stripped PATH.** Surfaced when a tester ran `/pause` and got `❌ Could not pause (exit -2)`. Same root cause as the v0.4.1 wizard PATH bug: `spawn('powershell', ...)` and `spawn('cmd.exe', ...)` rely on `PATH` lookup, which is missing `C:\Windows\System32` on some Windows installs we're seeing in the wild. Replaced every bare-binary spawn in `telegram-bot.mjs` with absolute paths resolved from `%SystemRoot%`. Affects `/pause`, `/resume-bot`, `/schedule`, `/reauth`, `/scrape`, and the `/update` restarter. Also surfaces spawn-error details to Telegram (e.g. `<i>spawn error: ENOENT</i>`) instead of just `exit -2` so the cause is visible.
+- **`consumePostUpdateFlag` guards against false-positive "✅ Updated to vX.Y.Z" messages.** If `markUpdating` wrote the flag but the actual upgrade never landed (git pull/npm install failed before `process.exit`, or the bot restarted from stale code), the next bot boot would have lied about the upgrade succeeding. Now verifies `flag.to === currentVersion()` before reporting success — if mismatched, silently consumes the flag.
+
+### Changed — v0.5 (in progress)
+
+- **`checkForUpdate` results cached for 5 minutes** to avoid hammering the GitHub API when a user spams `/version`, `/update check`, etc. `/update check` passes `{ force: true }` to bypass the cache when the user explicitly asks for a fresh check.
+- Removed unused `getDismissed` import in `telegram-bot.mjs` (the `dismissed` field on `checkForUpdate`'s return value is what's actually used).
+
 ### Added — v0.5 (in progress)
 
 - **Version everywhere.** The bot's startup ping now reads `🤖 Automatic Munyun Machine v0.5.0 — online`. Same for the `/help` header. Single source of truth: `package.json`'s `version` field.
