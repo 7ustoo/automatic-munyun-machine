@@ -1,7 +1,7 @@
 # CONTEXT.md — Automatic Munyun Machine
 
 > **Purpose:** complete project state so a fresh contributor (or fresh Claude Code session) can resume work without re-explaining anything.
-> **Last updated:** 2026-05-04 (v0.3 merged into main as PR #1 / `03efcca`; v0.4 work started on `v0.4` branch)
+> **Last updated:** 2026-05-06 (v0.5 ready to merge: v0.4.1 + v0.5 both promoted in CHANGELOG, tagged, GitHub Releases created, PR open against main)
 > **Update protocol:** update this file at the end of *any* code change (commit, command added, file moved, schema shift). Treat it like a CHANGELOG-of-state.
 
 ---
@@ -28,9 +28,10 @@
 
 | Branch | What | State |
 |---|---|---|
-| `main` | Production. v0.3 features (merged 2026-05-04). Install one-liner clones this. | Last commit: `03efcca` (PR #1 merge of v0.3) |
-| `v0.3` | Historical feature branch. Kept for reference; do not push to it. | Tip: `5afae31` |
-| `v0.4` | Active feature branch. `.txt` export + `/export` command. | Forked from `main` |
+| `main` | Production. v0.4.0 features (merged via PR #2). Install one-liner clones this. | Last commit: `d5541fa` (PR #2 merge of v0.4) |
+| `v0.3` | Historical feature branch. Do not push. | Tagged `v0.3.0`. Tip: `5afae31` |
+| `v0.4` | Historical feature branch. Merged into main as v0.4.0. Do not push. | Tagged `v0.4.0` at `d5541fa` |
+| `v0.5` | Active feature branch carrying v0.4.1 fixes + v0.5 features. PR open against main. | Tagged `v0.5.0` at HEAD. Also tagged `v0.4.1` at `0e2655d` (mid-branch) |
 
 **Releases:** `v0.3.0` is a pre-release pointing at `v0.3` branch tag. Promote to main when proven (~1 week of stable real-world use).
 
@@ -170,13 +171,20 @@ node scripts/telegram-send.mjs "<message>"
 - ✅ v0.1 — career-ops bot (Telegram + CDP-based scraper, local only)
 - ✅ v0.2 — Public AMM repo with 5-step wizard, install.ps1, branding rename
 - ✅ v0.3 — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms`, audit-patch. **Merged to main 2026-05-04.**
-- 🚧 v0.4 (in progress) — `.txt` batch export + `/export` command. Next: career-ops consolidation, Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline buttons.
+- ✅ v0.4 — `.txt` batch export + `/export` command. **Merged to main 2026-05-04.**
+- ✅ v0.4.1 — Native file picker, transient-outage resilience, libuv assertion fix, wizard PATH crash. **Tagged 2026-05-05; ships to main as part of the v0.5 PR.**
+- ✅ v0.5 — `/update`, `/version`, update notifications, absolute-paths fix for bot commands. **Tagged 2026-05-06; PR open against main.**
+- 🚧 v0.6 (next) — career-ops consolidation, Inno Setup `.exe` installer, Mac/Linux support, `/jobs suggest` inline buttons.
 - ⏭ v1.0 — Tauri desktop GUI with dashboard, history calendar, application Kanban
 - ⏭ v2.0 — LLM rerank (BYO Anthropic key), analytics, multi-resume profiles
 
 ## Recent change history (newest first)
 
-- **2026-05-04** — v0.4 branch opened. Added `.txt` batch export: every morning push attaches `data/jobs(YYYY-MM-DD).txt` after the last message; new `/export` command pulls today's file (or most recent if today's hasn't run). Touches `daily-batch.mjs` and `telegram-bot.mjs`.
+- **2026-05-06** — v0.5 ready to merge. Promoted v0.4.0, v0.4.1, v0.5.0 from `[Unreleased]` to dated CHANGELOG sections; added `CLAUDE.md` (Claude Code repo guide); committed `package-lock.json` for reproducible installs. Tagged `v0.4.0` (`d5541fa`), `v0.4.1` (`0e2655d`), `v0.5.0` (HEAD). Created GitHub Releases for all three so `update-checker.mjs` has something to detect. PR open against `main`.
+- **2026-05-06** — v0.5 fix commit (`61bf88a`): replaced every bare `spawn('powershell'/'cmd.exe'/'schtasks', ...)` in `telegram-bot.mjs` with absolute paths resolved from `%SystemRoot%`. Same root cause as v0.4.1's wizard PATH bug — affected `/pause`, `/resume-bot`, `/schedule`, `/reauth`, `/scrape`, `/update` restarter. Also: `consumePostUpdateFlag` now verifies `flag.to === currentVersion()` to avoid false-positive "✅ Updated" replies; `checkForUpdate` results cached 5 min.
+- **2026-05-05** — v0.5 feature commit (`778e482`): `/version`, `/update`, update-on-startup-and-daily notifications, post-update confirmation. New `scripts/update-checker.mjs` polls GitHub Releases API. Single source of truth for version: `package.json#version`.
+- **2026-05-05** — v0.4.1 fixes landed (`3ee3fa6`, `5db8131`, `0e2655d`): wizard PATH crash → absolute `powershell.exe` path; libuv UV_HANDLE_CLOSING assertion at wizard shutdown → `stdio:'ignore'` + `child.unref()` + drop force-exit; bot survives transient Telegram outages → exponential backoff, unhandled-rejection/exception handlers, recovery detection ping. Also added native Windows file picker (`scripts/file-picker.mjs`) and Telegram-only setup path.
+- **2026-05-04** — v0.4 merged into `main` via PR #2 (commit `d5541fa`). Adds `.txt` batch export + `/export` command. Plus a tiny follow-up (`71bc67a`) replacing UTF-8 em-dashes in `setup-tasks.ps1` with ASCII hyphens.
 - **2026-05-04** — v0.3 merged into `main` via PR #1 (commit `03efcca`). Install one-liner now serves v0.3 by default. Pre-release flag dropped.
 - **2026-05-04** — v0.3 audit patch (commit `a044367`): 6 ship-blockers + 4 majors + 6 polish fixes. `/weather` reads config; token scrubbed from logs; spawn timeouts; runningJob auto-clear; CHANGELOG added; window title rebranded; chat ID masked.
 - **2026-05-04** — `/forms all|simple|long` command added (commit `3653873`). Maps to hiring.cafe `applicationFormEase` URL filter.
