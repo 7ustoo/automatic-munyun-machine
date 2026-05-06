@@ -29,17 +29,17 @@ Historical note: an earlier dual-directory workflow (`<dev-machine>/career-ops/`
 | `v0.3` | Historical. Do not push. | Tagged `v0.3.0`. Tip: `5afae31` |
 | `v0.4` | Historical. Merged via PR #2 as v0.4.0. Do not push. | Tagged `v0.4.0` at `d5541fa` |
 | `v0.5` | Historical. Merged via PR #4 carrying v0.4.1 fixes + v0.5 features. Do not push. | Tagged `v0.5.0`, `v0.4.1` at `0e2655d` mid-branch |
-| `v1.0-e1-consolidate` | Active. E1 of v1.0 — career-ops cleanup + docs. | First epic of the v1.0 plan |
+| `v1.0` | Active. **Single branch carrying all E1–E6 work.** One PR to main when v1.0 ships. | First commit (E1): `87d1094` |
 
-**v1.0 epic branches** (sequenced — each merges to main individually):
-1. `v1.0-e1-consolidate` (current) — career-ops consolidation + cleanup
-2. `v1.0-e2-reliability` — heartbeat, /status, /diagnose, watchdog, batch-missed
-3. `v1.0-e3-engine` — phrase-proximity, match floor, seen-jobs decay, role-cluster
-4. `v1.0-e4-inline-ui` — callback_query, inline keyboards, /batch, /history
-5. `v1.0-e5-profiles` — multi-profile architecture
-6. `v1.0-e6-distribution` — Inno Setup .exe + uninstall lifecycle
+**v1.0 epic sequence** (all commit to the single `v1.0` branch — no per-epic branches, one PR at the end):
+1. E1 — career-ops consolidation + cleanup (commit `87d1094`, done)
+2. E2 — heartbeat, /status, /diagnose, watchdog, batch-missed
+3. E3 — phrase-proximity, match floor, seen-jobs decay, role-cluster
+4. E4 — callback_query, inline keyboards, /batch, /history
+5. E5 — multi-profile architecture
+6. E6 — Inno Setup .exe + uninstall lifecycle
 
-**Releases:** v0.3.0 (pre-release), v0.4.0, v0.4.1, v0.5.0 (latest) — all live as GitHub Releases with notes synced from `CHANGELOG.md`.
+**Releases:** v0.3.0 (pre-release), v0.4.0, v0.4.1, v0.5.0 (latest) — all live as GitHub Releases with notes synced from `CHANGELOG.md`. v1.0.0 will be tagged at v1.0 branch HEAD before the final PR opens.
 
 **Install one-liner** (pulls main HEAD, currently v0.5.0):
 ```powershell
@@ -166,8 +166,8 @@ node scripts/telegram-send.mjs "<message>"
 - ✅ v0.4 — `.txt` batch export + `/export` command. **Merged to main 2026-05-04.**
 - ✅ v0.4.1 — Native file picker, transient-outage resilience, libuv assertion fix, wizard PATH crash. **Shipped via the v0.5 PR.**
 - ✅ v0.5 — `/update`, `/version`, update notifications, absolute-paths fix for bot commands. **Merged to main 2026-05-06 via PR #4.**
-- 🚧 v1.0 (active) — "Trustworthy and shareable on Windows." Six sequenced epics (E1–E6). Plan: `~/.claude/plans/wonderful-now-time-to-quirky-pizza.md`. Ships:
-  - E1: career-ops consolidation (current branch)
+- 🚧 v1.0 (active) — "Trustworthy and shareable on Windows." Six sequenced epics (E1–E6) on a single `v1.0` branch with one PR to main at the end. Plan: `~/.claude/plans/wonderful-now-time-to-quirky-pizza.md`. Ships:
+  - E1: career-ops consolidation (committed)
   - E2: heartbeat + watchdog + `/status` + `/diagnose`
   - E3: phrase-proximity scoring, match floor, seen-jobs decay, role-cluster auto-detection
   - E4: inline-button Telegram UI (callback_query, paginated `/batch`, `/history`)
