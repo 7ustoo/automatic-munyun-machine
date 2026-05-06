@@ -92,6 +92,25 @@ process.on('uncaughtException', (e) => {
   log('UNCAUGHT EXCEPTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
 });
 
+// ---------- heartbeat ----------
+// Written every poll-loop iteration (success OR failure) so the watchdog can
+// distinguish "process alive but Telegram unreachable" from "process dead."
+// Out-of-process watchdog (scripts/watchdog.mjs) reads this and restarts the
+// bot if ts is stale > 10 min.
+const HEARTBEAT_FILE = path.join(ROOT, 'data', 'heartbeat.json');
+const BOT_STARTED_AT = Date.now();
+function writeHeartbeat(extra = {}) {
+  try {
+    fs.writeFileSync(HEARTBEAT_FILE, JSON.stringify({
+      ts: new Date().toISOString(),
+      pid: process.pid,
+      version: VERSION,
+      startedAt: new Date(BOT_STARTED_AT).toISOString(),
+      ...extra
+    }, null, 2));
+  } catch { /* never let heartbeat write crash the bot */ }
+}
+
 // ---------- offset persistence ----------
 const OFFSET_FILE = path.join(ROOT, 'data', 'bot-offset.json');
 function loadOffset() {
@@ -294,6 +313,8 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /schedule HH:MM      → change daily push time
 
 <b>Maintenance</b>
+/status              → bot uptime, last batch, last poll, version, task state
+/diagnose            → why am I getting only N jobs? per-query supply + funnel
 /auth                → check hiring.cafe login
 /reauth              → re-login on your computer
 /pause /resume-bot   → stop/start the 7am push
@@ -327,6 +348,156 @@ async function spawnAction(action, jobUrl) {
   return { code: r.code, output: (r.output || '').trim(), timeout: r.timeout };
 }
 
+// Format a millisecond duration as a compact "5d 3h 12m" / "47m" / "8s" string.
+function fmtDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ${min % 60}m`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ${hr % 24}h`;
+}
+
+function fmtAgo(iso) {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'just now';
+  return fmtDuration(ms) + ' ago';
+}
+
+// /status — bot health snapshot. Single screen, structured for fast scan.
+async function buildStatusMessage() {
+  const lines = [`<b>🤖 Status — v${VERSION}</b>`, ''];
+
+  // Process uptime
+  lines.push(`<b>Bot</b>`);
+  lines.push(`  Uptime: ${fmtDuration(Date.now() - BOT_STARTED_AT)} (PID ${process.pid})`);
+
+  // Heartbeat (should be very recent)
+  let hb = null;
+  try { hb = JSON.parse(fs.readFileSync(HEARTBEAT_FILE, 'utf8')); } catch {}
+  if (hb) {
+    lines.push(`  Last heartbeat: ${fmtAgo(hb.ts)}` + (hb.lastPollOk === false ? ` ⚠️ poll failing (${hb.consecutiveFailures || 0}× in a row)` : ''));
+  }
+
+  // Last successful batch
+  let lastBatch = null;
+  try { lastBatch = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Last batch</b>`);
+  if (lastBatch) {
+    lines.push(`  ${lastBatch.date} · ${lastBatch.jobs?.length || 0} jobs · ${fmtAgo(lastBatch.generatedAt)}`);
+    if (lastBatch.funnel) {
+      const f = lastBatch.funnel;
+      lines.push(`  Funnel: raw=${f.raw} → kept=${f.keptAfterFilter} → fresh=${f.afterDedup} → sent=${f.sent}`);
+      lines.push(`  Score: top=${f.topPct}% median=${f.medianPct}% bottom=${f.bottomPct}%`);
+    }
+  } else {
+    lines.push(`  none yet`);
+  }
+
+  // Auth state
+  let auth = null;
+  try { auth = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'auth-state.json'), 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Auth</b>`);
+  if (auth) {
+    lines.push(`  Last OK: ${fmtAgo(auth.lastAuthOK)}`);
+    if (auth.lastAuthFail) lines.push(`  ⚠️ Last fail: ${fmtAgo(auth.lastAuthFail)}`);
+  } else {
+    lines.push(`  unknown — run /auth`);
+  }
+
+  // Running batch lock state
+  lines.push('');
+  lines.push(`<b>Activity</b>`);
+  lines.push(`  Batch in progress: ${runningJob ? '✓ yes' : 'no'}`);
+
+  // Scheduled tasks state via schtasks /query (silent fail if not Windows)
+  let tasksLine = '  Scheduled tasks: query failed';
+  try {
+    const r = await spawnWithTimeout(SCHTASKS, ['/query', '/tn', 'munyun-bot', '/fo', 'CSV', '/nh'], 5000);
+    if (r.code === 0) {
+      const cols = (r.output || '').replace(/^"|"$/g, '').split('","');
+      tasksLine = `  munyun-bot: ${cols[2] || '?'}`;
+    }
+  } catch { /* ignore */ }
+  lines.push(tasksLine);
+
+  return lines.join('\n');
+}
+
+// /diagnose — "why am I getting only N jobs?" Surfaces supply-side health:
+// last batch's funnel, per-query 7-day averages, seen-jobs size.
+function buildDiagnoseMessage() {
+  const lines = [`<b>🔬 Diagnose — supply pipeline</b>`, ''];
+
+  // Funnel from last batch
+  let lastBatch = null;
+  try { lastBatch = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8')); } catch {}
+  lines.push(`<b>Last batch funnel</b>`);
+  if (lastBatch?.funnel) {
+    const f = lastBatch.funnel;
+    lines.push(`  Date: ${lastBatch.date}`);
+    lines.push(`  Raw cards scraped: ${f.raw}`);
+    lines.push(`  After filters: ${f.keptAfterFilter} (-${f.raw - f.keptAfterFilter} dropped, ${f.droppedClearance} were clearance)`);
+    lines.push(`  After dedup: ${f.afterDedup} (-${f.keptAfterFilter - f.afterDedup} already seen / applied)`);
+    lines.push(`  Sent to Telegram: ${f.sent}`);
+    lines.push(`  Score band: ${f.bottomPct}% – ${f.topPct}% (median ${f.medianPct}%)`);
+    if (f.afterDedup < 30) {
+      lines.push(`  ⚠️ Below typical 50–80 fresh jobs. Try <code>/forget last</code> or expand <code>/jobs add</code>.`);
+    }
+  } else if (lastBatch) {
+    lines.push(`  (older batch — funnel data added in v1.0; re-run /scrape)`);
+  } else {
+    lines.push(`  no batches yet — run /scrape`);
+  }
+
+  // Seen-jobs size
+  let seen = null;
+  try { seen = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'seen-jobs.json'), 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Seen-jobs memory</b>`);
+  if (seen?.ids) {
+    lines.push(`  Total: ${seen.ids.length} jobs`);
+    lines.push(`  Last updated: ${fmtAgo(seen.lastUpdated)}`);
+    lines.push(`  <i>Freshness window (60-day decay) lands in v1.0 E3 — until then, /forget all wipes the list.</i>`);
+  } else {
+    lines.push(`  empty`);
+  }
+
+  // Per-query 7-day averages
+  let stats = null;
+  try { stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'query-stats.json'), 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Per-query supply (7-day avg)</b>`);
+  if (stats?.queries && Object.keys(stats.queries).length) {
+    const rows = Object.entries(stats.queries).map(([term, slot]) => {
+      const cards = (slot.history || []).map(h => h.cards);
+      const avg = cards.length ? Math.round(cards.reduce((a, b) => a + b, 0) / cards.length) : 0;
+      const recent = cards.slice(-3).join('/'); // last 3 days
+      return { term, avg, recent, n: cards.length };
+    });
+    rows.sort((a, b) => a.avg - b.avg); // surface low-supply queries first
+    for (const r of rows) {
+      const flag = r.avg === 0 ? '⚠️ ' : (r.avg < 5 ? '· ' : '  ');
+      lines.push(`${flag}${escHtml(r.term)}: avg ${r.avg}/day (last 3: ${r.recent || '—'})`);
+    }
+    const dryRuns = rows.filter(r => r.avg === 0 && r.n >= 3);
+    if (dryRuns.length) {
+      lines.push('');
+      lines.push(`⚠️ <b>${dryRuns.length}</b> queries averaged 0 cards — likely typos or terms hiring.cafe doesn't index. Edit via <code>/jobs remove</code> + <code>/jobs add</code>.`);
+    }
+  } else {
+    lines.push(`  no history yet — run /scrape a few times`);
+  }
+
+  return lines.join('\n');
+}
+
 async function handleMessage(msg) {
   const chatId = String(msg.chat.id);
   if (chatId !== ALLOWED_CHAT) {
@@ -343,6 +514,21 @@ async function handleMessage(msg) {
   if (/^\/?(test|ping)\b/.test(text)) {
     return reply(chatId, '✅ alive');
   }
+
+  // /status — bot uptime, last batch, last poll, version, scheduled-task state.
+  // The "is the bot alive and well?" command. Read by the user; structured
+  // similarly by the watchdog.
+  if (/^\/?status\b/.test(text)) {
+    return reply(chatId, await buildStatusMessage());
+  }
+
+  // /diagnose — supply-side health: per-query 7-day averages, seen-jobs size,
+  // last batch's funnel (raw → kept → afterDedup → scored). Answers
+  // "why am I getting only N jobs?" directly.
+  if (/^\/?diagnose\b/.test(text)) {
+    return reply(chatId, buildDiagnoseMessage());
+  }
+
   if (/^\/?weather\b/.test(text)) {
     try { return reply(chatId, await getWeather()); }
     catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + e.message); }
@@ -901,6 +1087,10 @@ async function notifyIfUpdateAvailable() {
 setTimeout(() => { notifyIfUpdateAvailable(); }, 5000);
 setInterval(() => { notifyIfUpdateAvailable(); }, 24 * 60 * 60 * 1000);
 
+// Initial heartbeat so the watchdog sees us as alive before the first poll
+// completes (Telegram long-poll can take up to 30s to return).
+writeHeartbeat({ lastPollOk: null, consecutiveFailures: 0 });
+
 // Resilient poll loop with exponential backoff + recovery detection.
 // On Telegram outages we used to retry every 5s and silently die if anything
 // in the catch block threw. Now we:
@@ -918,6 +1108,9 @@ let outageStartedAt = null;
 while (true) {
   try {
     const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message']) });
+
+    // Heartbeat: tell the watchdog we're alive and Telegram-reachable.
+    writeHeartbeat({ lastPollOk: true, consecutiveFailures: 0 });
 
     // Just recovered from a poll-failure streak — note it loudly.
     if (consecutiveFailures > 0) {
@@ -948,6 +1141,9 @@ while (true) {
   } catch (e) {
     consecutiveFailures++;
     if (consecutiveFailures === 1) outageStartedAt = Date.now();
+    // Heartbeat even when polling failed — process is alive, network is the
+    // issue. Watchdog should not restart us for a Telegram outage.
+    writeHeartbeat({ lastPollOk: false, consecutiveFailures, lastPollError: String(e.message || e).slice(0, 200) });
     const delay = BACKOFF_MS[Math.min(consecutiveFailures - 1, BACKOFF_MS.length - 1)];
     log(`poll error #${consecutiveFailures}: ${e.message} — backing off ${delay / 1000}s`);
     try {

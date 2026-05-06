@@ -46,3 +46,27 @@ $triggerB = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNA
 $setB     = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 1) -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName 'munyun-bot' -Action $actionB -Trigger $triggerB -Settings $setB -Description "AMM Telegram bot listener (polls /daily etc.)" -Force | Out-Null
 Write-Host "[OK] Registered: munyun-bot (At logon, auto-restart on crash)"
+
+# Watchdog every 5 minutes — restarts the bot if its heartbeat is stale.
+# Runs `node scripts/watchdog.mjs` via cmd.exe so it inherits PATH; the
+# script itself uses absolute %SystemRoot% paths for the binaries it spawns.
+$nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
+if (-not $nodeExe) { $nodeExe = 'node' }
+$WATCHDOG_SCRIPT = Join-Path $ROOT 'scripts\watchdog.mjs'
+$actionW   = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$WATCHDOG_SCRIPT`"" -WorkingDirectory $ROOT
+$triggerW  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
+$setW      = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -MultipleInstances IgnoreNew
+Register-ScheduledTask -TaskName 'munyun-watchdog' -Action $actionW -Trigger $triggerW -Settings $setW -Description "AMM bot watchdog (every 5 min; restarts on stale heartbeat)" -Force | Out-Null
+Write-Host "[OK] Registered: munyun-watchdog (every 5 min)"
+
+# Batch-missed watcher — runs 1 hour after the scheduled batch time on the
+# same days. Pings Telegram if today's batch TSV is missing.
+$BATCH_MISSED_SCRIPT = Join-Path $ROOT 'scripts\batch-missed-watcher.mjs'
+$batchHour = [int]($time.Split(':')[0])
+$batchMin  = [int]($time.Split(':')[1])
+$missedTime = ('{0:D2}:{1:D2}' -f (($batchHour + 1) % 24), $batchMin)
+$actionM  = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$BATCH_MISSED_SCRIPT`"" -WorkingDirectory $ROOT
+$triggerM = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayEnums -At $missedTime
+$setM     = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
+Register-ScheduledTask -TaskName 'munyun-batch-missed' -Action $actionM -Trigger $triggerM -Settings $setM -Description "AMM batch-missed alert ($missedTime, $($days -join ','))" -Force | Out-Null
+Write-Host "[OK] Registered: munyun-batch-missed ($missedTime, $($days -join ','))"

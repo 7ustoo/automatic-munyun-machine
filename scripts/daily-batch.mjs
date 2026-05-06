@@ -195,7 +195,10 @@ async function scrape() {
     throw e;
   }
   log('✓ logged in');
-  recordAuthOk();
+  // NOTE: recordAuthOk() deliberately deferred until AFTER the scrape loop
+  // produces at least one card. /saved loading is necessary but not sufficient
+  // — if every query then returns 0 cards the user is effectively broken and
+  // /status / /diagnose should not display "auth OK" as if everything's fine.
   const results = {};
   // Map config's applicationFormEase → hiring.cafe URL filter
   const formEase = (CFG.filters?.applicationFormEase || 'all').toLowerCase();
@@ -231,7 +234,39 @@ async function scrape() {
     log(`  → ${rows.length} cards`);
   }
   await ctx.close();
+
+  // Persist per-query 7-day rolling supply history. Surfaces in /diagnose
+  // so a user can see "Detection Engineer has averaged 0 cards/day for a
+  // week" and act on it — typo, niche term, or hiring.cafe simply doesn't
+  // have that kind of role indexed.
+  recordQueryStats(results);
+
+  // Auth state is "OK" only if we both passed /saved AND extracted at least
+  // one card across all queries. If every query returned zero, something
+  // upstream is wrong even though /saved loaded — don't lie to /status.
+  const totalCards = Object.values(results).reduce((s, rows) => s + rows.length, 0);
+  if (totalCards > 0) recordAuthOk();
   return results;
+}
+
+// Per-query rolling 7-day card-count history. Read by /diagnose.
+const QUERY_STATS_PATH = path.join(ROOT, 'data', 'query-stats.json');
+function recordQueryStats(byQuery) {
+  let store = { lastUpdated: null, queries: {} };
+  try { store = JSON.parse(fs.readFileSync(QUERY_STATS_PATH, 'utf8')); } catch {}
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  for (const [key, rows] of Object.entries(byQuery)) {
+    const q = QUERIES.find(([k]) => k === key);
+    const term = q ? q[1] : key;
+    const slot = store.queries[term] || { history: [] };
+    // Replace today's entry if it already exists (handles intra-day reruns)
+    slot.history = slot.history.filter(h => h.date !== DATE && h.date >= cutoff);
+    slot.history.push({ date: DATE, cards: rows.length });
+    slot.history.sort((a, b) => a.date.localeCompare(b.date));
+    store.queries[term] = slot;
+  }
+  store.lastUpdated = new Date().toISOString();
+  fs.writeFileSync(QUERY_STATS_PATH, JSON.stringify(store, null, 2));
 }
 
 // ---------- filter ----------
@@ -457,7 +492,7 @@ function writeBatchTxt(top, directUrls, weather, stats) {
   return file;
 }
 
-function writeBatchTsv(top, directUrls) {
+function writeBatchTsv(top, directUrls, funnel) {
   const dir = path.join(ROOT, 'data');
   fs.mkdirSync(dir, { recursive: true });
   const tsv = top.map((r, i) => {
@@ -471,10 +506,12 @@ function writeBatchTsv(top, directUrls) {
   fs.writeFileSync(path.join(dir, `today-batch-${DATE}.tsv`), tsv + '\n');
   fs.writeFileSync(path.join(dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
 
-  // Rich per-job match details, used by the bot's /why N command
+  // Rich per-job match details, used by the bot's /why N command.
+  // Funnel data is read by /diagnose to show the supply pipeline.
   const lastBatch = {
     date: DATE,
     generatedAt: new Date().toISOString(),
+    funnel: funnel || null,
     jobs: top.map((r, i) => ({
       idx: i + 1,
       id: r.href.split('/').pop(),
@@ -530,7 +567,18 @@ function writeBatchTsv(top, directUrls) {
     log(`Resolving ${top.length} direct ATS URLs in parallel…`);
     const directUrls = await resolveAll(top);
     log(`resolved=${directUrls.filter(Boolean).length}/${top.length}`);
-    writeBatchTsv(top, directUrls);
+    const funnel = {
+      raw: all.length,
+      keptAfterFilter: kept.length,
+      droppedClearance,
+      afterDedup: fresh.length,
+      scored: fresh.length,
+      sent: top.length,
+      topPct: top[0]?.matchPct ?? 0,
+      medianPct: top[Math.floor(top.length / 2)]?.matchPct ?? 0,
+      bottomPct: top[top.length - 1]?.matchPct ?? 0
+    };
+    writeBatchTsv(top, directUrls, funnel);
     const weather = await getWeather();
     const message = buildMessage(weather, top, directUrls, {
       raw: all.length,
