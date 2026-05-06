@@ -21,19 +21,28 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const DATE = new Date().toISOString().slice(0, 10);
 
+// CLI vs imported-as-module check. Used to gate side-effects (Playwright launch,
+// Telegram send) so test files can import scoreJob/parseSalaryK without
+// triggering a real scrape. v1.0 E3.
+const _thisFile = fileURLToPath(import.meta.url);
+const _invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const IS_CLI = path.resolve(_thisFile) === _invokedFile;
+
 // ---------- env ----------
 const ENV_PATH = path.join(ROOT, '.env');
-if (!fs.existsSync(ENV_PATH)) {
+if (!fs.existsSync(ENV_PATH) && IS_CLI) {
   console.error('❌ Missing .env file at ' + ENV_PATH);
   console.error('   Run: node scripts/setup-wizard.mjs');
   process.exit(1);
 }
-const env = Object.fromEntries(
-  fs.readFileSync(ENV_PATH, 'utf8')
-    .split('\n')
-    .filter(l => l && !l.startsWith('#') && l.includes('='))
-    .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
-);
+const env = fs.existsSync(ENV_PATH)
+  ? Object.fromEntries(
+      fs.readFileSync(ENV_PATH, 'utf8')
+        .split('\n')
+        .filter(l => l && !l.startsWith('#') && l.includes('='))
+        .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
+    )
+  : {};
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = env.TELEGRAM_CHAT_ID;
 const CDP_PORT = env.CHROME_DEBUG_PORT || '9222';
@@ -123,6 +132,17 @@ const QUERIES = (CFG.queries && CFG.queries.length)
   : [['IAM', 'IAM Engineer'], ['CloudSec', 'Cloud Security Engineer'], ['Cyber', 'Cybersecurity Engineer']];
 
 const EXTRACT_FN = `(() => {
+  // Reject candidate titles that are actually metadata bleed (e.g. the line
+  // "Full Time" or "Remote, US" got picked up because of a quirky card
+  // layout). v1.0 E3 fix — was returning these as titles previously, which
+  // poisoned scoring and made /why N's explanations confusing.
+  const NON_TITLE_RX = /^(full[- ]?time|part[- ]?time|remote|hybrid|onsite|contract|w2|c2c|us only|usa|united states|saved|save|apply|applied|view|new|featured)$/i;
+  const isPlausibleTitle = (s) => {
+    if (!s || s.length < 3 || s.length > 100) return false;
+    if (NON_TITLE_RX.test(s.trim())) return false;
+    if (/^\\$|^\\d+\\+\\s*YOE|^[\\d,–—-]+$/.test(s)) return false;
+    return true;
+  };
   const seen = new Set(); const out = [];
   document.querySelectorAll('a[href^="/viewjob/"]').forEach(a => {
     if (seen.has(a.href)) return; seen.add(a.href);
@@ -130,10 +150,17 @@ const EXTRACT_FN = `(() => {
     const cardText = card.innerText || '';
     const lines = cardText.split('\\n').map(l => l.trim()).filter(Boolean);
     const ageIdx = lines.findIndex(l => /^\\d+[wdhmoy]+$/.test(l));
-    let title = ageIdx >= 0 ? (lines[ageIdx + 1] || '') : (lines[0] || '');
-    if (!title || ageIdx < 0) {
-      title = lines.find(l => l.length > 5 && !/Remote|Full Time|Contract|United States|YOE|\\$|Save|Apply/.test(l)) || '';
+    // Try the post-age line, then the first line, then a heuristic search
+    // — but validate each candidate before accepting.
+    const candidates = [];
+    if (ageIdx >= 0 && lines[ageIdx + 1]) candidates.push(lines[ageIdx + 1]);
+    if (lines[0]) candidates.push(lines[0]);
+    for (const l of lines) {
+      if (l.length > 5 && !/Remote|Full Time|Contract|United States|YOE|\\$|Save|Apply|Hybrid|Onsite/.test(l)) {
+        candidates.push(l);
+      }
     }
+    let title = candidates.find(isPlausibleTitle) || '';
     const yoeM = lines.find(l => /^\\d+\\+\\s*YOE/i.test(l));
     const yoe = yoeM ? parseInt(yoeM) : null;
     const compM = lines.find(l => /^[A-Z][^:]+:.{10,}/.test(l));
@@ -282,13 +309,32 @@ const SKIP_CO = SKIP_COMPANIES.length
   ? new RegExp('^(' + SKIP_COMPANIES.map(escRx).join('|') + ')', 'i')
   : /(?!.*)/;
 
-// ---------- CV keyword scoring (Option B: calibrated percentage) ----------
+// ---------- CV keyword scoring ----------
 // Pulled from data/cv-parsed.json (written by resume-parser.mjs at setup-time).
 // To regenerate: node scripts/resume-parser.mjs <path-to-resume>
 const CV_TITLES     = CV.titles     || [];
 const CV_CERTS      = CV.certs      || [];
 const CV_SKILLS     = CV.skills     || [];
 const CV_COMPLIANCE = CV.compliance || [];
+
+// v1.0 E3: cluster-aware scoring. The CV's primary clusters narrow which
+// matches count at full weight — non-cluster matches still count but at
+// half weight. Kills the IAM-bias problem for backend/data-leaning users.
+const CV_PRIMARY_CLUSTERS = CV.primaryClusters || [];
+const CLUSTER_TERMS = (() => {
+  const set = new Set();
+  if (!CV_PRIMARY_CLUSTERS.length) return set; // no filter — everything full weight
+  let dict = {};
+  try { dict = JSON.parse(fs.readFileSync(path.join(__dirname, 'cv-keywords.json'), 'utf8')).clusters || {}; } catch {}
+  for (const c of CV_PRIMARY_CLUSTERS) {
+    for (const t of (dict[c]?.terms || [])) set.add(t.toLowerCase());
+  }
+  return set;
+})();
+function clusterMultiplier(term) {
+  if (CLUSTER_TERMS.size === 0) return 1.0;            // no clusters → flat weights
+  return CLUSTER_TERMS.has(term.toLowerCase()) ? 1.0 : 0.5;
+}
 
 const SCORING = CFG.scoring || {};
 const W_TITLE       = SCORING.titleWeight       ?? 10;
@@ -298,18 +344,69 @@ const W_COMPLIANCE  = SCORING.complianceWeight  ?? 2;
 const SALARY_BONUS  = SCORING.salaryBonus       ?? 5;
 const SALARY_PENALTY= SCORING.salaryPenalty     ?? -10;
 const SALARY_FLOOR_K= Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
+const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 25;
+const TF_CAP        = 3; // count term occurrences up to this many times
 
-function scoreJob(job) {
+// Parse salary numbers from text. Handles ranges, dashes (-, –, —), commas,
+// optional "K"/"k", and "USD"/"$" prefixes. Returns array of numbers in $K.
+//   "$120k–$160K"        → [120, 160]
+//   "$120,000-$160,000"  → [120, 160]
+//   "USD 120K - 160K"    → [120, 160]
+//   "Salary: $135K"      → [135]
+//   "competitive"        → []
+// v1.0 E3 — was previously /\$(\d{2,3})\s*[kK](?!\w)/g which accidentally
+// worked for many ranges by extracting digits, but failed on em-dashes
+// (Windows console encoding) and never parsed comma-separated thousands.
+export function parseSalaryK(text) {
+  const out = [];
+  // Pattern A: $XXXk style. Captures number + optional K. Supports en/em dashes between two patterns.
+  const reA = /(?:USD\s*|\$|€|£)?\s*(\d{2,4}(?:[.,]\d{3})?)\s*[kK](?!\w)/g;
+  let m;
+  while ((m = reA.exec(text)) !== null) {
+    const n = parseFloat(m[1].replace(/,/g, ''));
+    if (!isNaN(n) && n >= 30 && n <= 999) out.push(Math.round(n));
+  }
+  // Pattern B: $120,000 style (no K suffix). Convert to K.
+  const reB = /\$\s*(\d{2,3}),(\d{3})(?!\d)/g;
+  while ((m = reB.exec(text)) !== null) {
+    const n = parseFloat(m[1] + m[2]) / 1000;
+    if (!isNaN(n) && n >= 30 && n <= 999) out.push(Math.round(n));
+  }
+  return out;
+}
+
+// Phrase-proximity helper: for multi-token CV phrases that aren't found as
+// an exact word-boundary match, fall back to "all tokens present anywhere
+// in the text" → half credit. Means "AWS … RDS" gets some credit even if
+// not adjacent. v1.0 E3.
+function tokensAllPresent(jdText, phrase) {
+  const tokens = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return false;
+  return tokens.every(t => new RegExp('\\b' + escRx(t) + '\\b', 'i').test(jdText));
+}
+
+export function scoreJob(job) {
   const text = ((job.title || '') + '\n' + (job.cardText || ''));
   let score = 0;
   const matched = [];
   const seen = new Set();
-  const tryMatch = (term, weight) => {
+  const tryMatch = (term, baseWeight) => {
     if (seen.has(term.toLowerCase())) return;
-    // Word-boundary match, case-insensitive
-    if (new RegExp('\\b' + escRx(term) + '\\b', 'i').test(text)) {
-      score += weight;
-      matched.push(term);
+    const weight = baseWeight * clusterMultiplier(term);
+    // Exact phrase / word-boundary match. Term-frequency cap: count up to TF_CAP.
+    const re = new RegExp('\\b' + escRx(term) + '\\b', 'gi');
+    const matches = text.match(re);
+    if (matches && matches.length > 0) {
+      const tf = Math.min(matches.length, TF_CAP);
+      score += weight * tf;
+      matched.push(tf > 1 ? `${term} ×${tf}` : term);
+      seen.add(term.toLowerCase());
+      return;
+    }
+    // Multi-token phrase that didn't match exactly — try tokens-anywhere fallback
+    if (term.includes(' ') && tokensAllPresent(text, term)) {
+      score += weight * 0.5;
+      matched.push(`${term} (partial)`);
       seen.add(term.toLowerCase());
     }
   };
@@ -318,7 +415,7 @@ function scoreJob(job) {
   for (const s of CV_SKILLS)     tryMatch(s, W_SKILL);
   for (const c of CV_COMPLIANCE) tryMatch(c, W_COMPLIANCE);
   // Salary check — if visible and any number ≥ floor (in $K), bonus; else penalty
-  const salaryNums = [...text.matchAll(/\$(\d{2,3})\s*[kK](?!\w)/g)].map(m => parseInt(m[1]));
+  const salaryNums = parseSalaryK(text);
   if (salaryNums.length) {
     if (Math.max(...salaryNums) >= SALARY_FLOOR_K) score += SALARY_BONUS;
     else score += SALARY_PENALTY;
@@ -371,16 +468,83 @@ function loadAppliedHrefs() {
   } catch { return new Set(); }
 }
 
-// Persistent set of every viewjob URL we've ever surfaced via Telegram.
-// Combined with applications.md, this is what guarantees fresh jobs each run.
+// Persistent map of every viewjob URL we've ever surfaced via Telegram, with
+// firstSeen / lastSeen timestamps. Combined with applications.md, this is
+// what guarantees fresh jobs each run.
+//
+// v1.0 E3 — schema upgraded from `{ids: string[]}` (boolean has-seen) to
+// `{jobs: {url: {firstSeenAt, lastSeenAt}}}`. Old entries auto-migrate on
+// first load. Decay rule: drop entries with `lastSeenAt > N days ago` so
+// jobs that didn't get applied to come back into rotation after the window
+// (default 60 days). Applied jobs are blocked separately via applications.md.
 const SEEN_PATH = path.join(ROOT, 'data', 'seen-jobs.json');
-function loadSeenIds() {
-  try { return new Set(JSON.parse(fs.readFileSync(SEEN_PATH, 'utf8')).ids || []); }
-  catch { return new Set(); }
+const SEEN_FRESHNESS_DAYS = SCORING.seenJobsFreshnessDays ?? 60;
+
+function loadSeenStore() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SEEN_PATH, 'utf8'));
+    // Migrate old flat schema if encountered.
+    if (Array.isArray(raw.ids) && !raw.jobs) {
+      log(`Migrating seen-jobs.json: ${raw.ids.length} entries → new schema (firstSeenAt/lastSeenAt).`);
+      const stamp = raw.lastUpdated || new Date().toISOString();
+      const jobs = {};
+      for (const url of raw.ids) jobs[url] = { firstSeenAt: stamp, lastSeenAt: stamp };
+      return { lastUpdated: stamp, jobs, _migrated: true };
+    }
+    return { lastUpdated: raw.lastUpdated || null, jobs: raw.jobs || {} };
+  } catch {
+    return { lastUpdated: null, jobs: {} };
+  }
 }
-function saveSeenIds(set) {
-  const obj = { lastUpdated: new Date().toISOString(), ids: [...set].sort() };
-  fs.writeFileSync(SEEN_PATH, JSON.stringify(obj, null, 2));
+
+function decaySeenStore(store) {
+  const cutoff = Date.now() - SEEN_FRESHNESS_DAYS * 24 * 60 * 60 * 1000;
+  let dropped = 0;
+  const fresh = {};
+  for (const [url, meta] of Object.entries(store.jobs)) {
+    const lastSeen = new Date(meta.lastSeenAt || meta.firstSeenAt || 0).getTime();
+    if (lastSeen >= cutoff) fresh[url] = meta;
+    else dropped++;
+  }
+  return { fresh, dropped };
+}
+
+// Returns the set of URLs currently considered "blocked by previous-seen."
+// Decayed entries are NOT in this set — they're back in the supply pool.
+function loadBlockedSeen() {
+  const store = loadSeenStore();
+  const { fresh, dropped } = decaySeenStore(store);
+  if (dropped > 0) log(`Decayed ${dropped} seen entries past ${SEEN_FRESHNESS_DAYS}-day freshness window.`);
+  return new Set(Object.keys(fresh));
+}
+
+// Persist the seen store. Called only after Telegram delivery succeeds for
+// the batch — see "Persist seen IDs" block below. v1.0 E3 race fix: was
+// previously written before sendDocument retries, so a Telegram outage
+// mid-attachment could mark jobs seen that the user never received.
+function saveSeenStore(blockedSet, top) {
+  const store = loadSeenStore();
+  const { fresh } = decaySeenStore(store);
+  const now = new Date().toISOString();
+  // Add today's top entries with current timestamp; refresh lastSeenAt
+  // for any that were already in the set.
+  for (const r of top) {
+    const existing = fresh[r.href];
+    fresh[r.href] = {
+      firstSeenAt: existing?.firstSeenAt || now,
+      lastSeenAt: now
+    };
+  }
+  // Belt: also ensure everything in blockedSet (passed from caller) is recorded.
+  for (const url of blockedSet) {
+    if (!fresh[url]) fresh[url] = { firstSeenAt: now, lastSeenAt: now };
+  }
+  const out = {
+    lastUpdated: now,
+    freshnessDays: SEEN_FRESHNESS_DAYS,
+    jobs: fresh
+  };
+  fs.writeFileSync(SEEN_PATH, JSON.stringify(out, null, 2));
 }
 
 // Track when the bot last confirmed a healthy hiring.cafe session.
@@ -423,6 +587,34 @@ async function resolveAll(rows) {
 }
 
 function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+// v1.0 E3: prepend supply-side warnings to the batch when something's off.
+// (1) afterDedup < 30 → low supply, suggest /forget last + /jobs add
+// (2) any query has 3+ consecutive zero-card days → likely typo, suggest /jobs remove + /jobs add
+function buildSupplyBanner({ funnel, byQuery }) {
+  const warnings = [];
+  if (funnel.afterDedup < 30) {
+    warnings.push(`⚠️ <b>Limited supply today: ${funnel.afterDedup} fresh jobs</b> (typical: 50–80).`);
+    const tips = [];
+    if (funnel.droppedBelowFloor > 0) tips.push(`Lower the match floor with <code>/floor 0</code> (currently ${funnel.matchFloorPercent}%) — would surface ${funnel.droppedBelowFloor} more.`);
+    tips.push(`<code>/forget last</code> to revisit yesterday's batch.`);
+    tips.push(`<code>/jobs add "Title"</code> to widen your queries.`);
+    warnings.push(tips.join('\n'));
+  }
+  // Dry-query detection — read the freshly-written stats and find queries
+  // averaging zero across the most recent 3+ runs.
+  let stats = null;
+  try { stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'query-stats.json'), 'utf8')); } catch {}
+  const dryQueries = [];
+  for (const [term, slot] of Object.entries(stats?.queries || {})) {
+    const recent = (slot.history || []).slice(-3);
+    if (recent.length >= 3 && recent.every(h => h.cards === 0)) dryQueries.push(term);
+  }
+  if (dryQueries.length) {
+    warnings.push(`⚠️ <b>Dry queries (3+ days at 0 cards):</b>\n${dryQueries.map(q => '  · ' + escHtml(q)).join('\n')}\nLikely typos or terms hiring.cafe doesn't index. Edit via <code>/jobs remove</code> + <code>/jobs add</code>.`);
+  }
+  return warnings.length ? warnings.join('\n\n') : null;
+}
 function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const filterBits = [];
@@ -529,7 +721,10 @@ function writeBatchTsv(top, directUrls, funnel) {
   fs.writeFileSync(path.join(dir, 'last-batch.json'), JSON.stringify(lastBatch, null, 2));
 }
 
-(async () => {
+// Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation
+// at the top of the file). Skipped on `import`, so test files can pull
+// scoreJob / parseSalaryK without triggering a real scrape.
+if (IS_CLI) (async () => {
   try {
     log(`=== daily-batch ${DATE} ===`);
     let byQuery;
@@ -547,14 +742,14 @@ function writeBatchTsv(top, directUrls, funnel) {
     const { all, kept, droppedClearance } = filterAndDedupe(byQuery);
     log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance})`);
     const applied = loadAppliedHrefs();
-    const seen = loadSeenIds();
-    // Combined block-list: applications.md URLs + every job we've previously surfaced.
-    const blocked = new Set([...applied, ...seen]);
-    const fresh = kept.filter(r => !blocked.has(r.href));
-    const skippedApplied = kept.length - fresh.length;
-    log(`afterDedup=${fresh.length} (skipped ${skippedApplied}: ${applied.size} applied + ${seen.size} previously seen)`);
+    const blockedSeen = loadBlockedSeen(); // decayed: jobs > freshness window are no longer blocked
+    const blockAll = new Set([...applied, ...blockedSeen]);
+    const fresh = kept.filter(r => !blockAll.has(r.href));
+    const skippedApplied = kept.filter(r => applied.has(r.href)).length;
+    const skippedSeen    = kept.filter(r => !applied.has(r.href) && blockedSeen.has(r.href)).length;
+    log(`afterDedup=${fresh.length} (skipped ${kept.length - fresh.length}: ${skippedApplied} applied + ${skippedSeen} previously seen, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
-    // Score every fresh job against your CV, sort by match quality, take top 100.
+    // Score every fresh job against your CV, sort by match quality.
     for (const r of fresh) {
       const s = scoreJob(r);
       r.score = s.score;
@@ -562,8 +757,12 @@ function writeBatchTsv(top, directUrls, funnel) {
       r.matchPct = scoreToPercent(s.score);
     }
     fresh.sort((a, b) => b.score - a.score);
-    const top = fresh.slice(0, 100);
-    log(`scored: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%`);
+    // v1.0 E3: match floor — drop jobs below threshold BEFORE slicing top 100,
+    // so the bot never ships 0% filler to fill out the batch.
+    const aboveFloor = fresh.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
+    const droppedBelowFloor = fresh.length - aboveFloor.length;
+    const top = aboveFloor.slice(0, 100);
+    log(`scored: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%  (floor=${MATCH_FLOOR_PCT}%, dropped ${droppedBelowFloor} below)`);
     log(`Resolving ${top.length} direct ATS URLs in parallel…`);
     const directUrls = await resolveAll(top);
     log(`resolved=${directUrls.filter(Boolean).length}/${top.length}`);
@@ -573,6 +772,8 @@ function writeBatchTsv(top, directUrls, funnel) {
       droppedClearance,
       afterDedup: fresh.length,
       scored: fresh.length,
+      droppedBelowFloor,
+      matchFloorPercent: MATCH_FLOOR_PCT,
       sent: top.length,
       topPct: top[0]?.matchPct ?? 0,
       medianPct: top[Math.floor(top.length / 2)]?.matchPct ?? 0,
@@ -580,24 +781,21 @@ function writeBatchTsv(top, directUrls, funnel) {
     };
     writeBatchTsv(top, directUrls, funnel);
     const weather = await getWeather();
-    const message = buildMessage(weather, top, directUrls, {
+    const banner = buildSupplyBanner({ funnel, byQuery });
+    let message = buildMessage(weather, top, directUrls, {
       raw: all.length,
       kept: kept.length,
       droppedClearance,
-      skippedApplied: applied.size === 0 ? 0 : kept.filter(r => applied.has(r.href)).length,
-      skippedSeen: seen.size === 0 ? 0 : kept.filter(r => !applied.has(r.href) && seen.has(r.href)).length
+      skippedApplied,
+      skippedSeen
     });
+    if (banner) message = banner + '\n\n' + message;
     const chunks = await tgChunked(message);
     log(`Telegram sent in ${chunks} chunk(s)`);
 
     // Build + attach the downloadable .txt as the final message of the batch.
     // Failure here is non-fatal — messages already went through.
-    const txtStats = {
-      raw: all.length,
-      droppedClearance,
-      skippedApplied: applied.size === 0 ? 0 : kept.filter(r => applied.has(r.href)).length,
-      skippedSeen: seen.size === 0 ? 0 : kept.filter(r => !applied.has(r.href) && seen.has(r.href)).length
-    };
+    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen };
     try {
       const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
       await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
@@ -606,11 +804,10 @@ function writeBatchTsv(top, directUrls, funnel) {
       log(`Batch .txt attach failed (non-fatal): ${e.message}`);
     }
 
-    // Only persist seen IDs *after* successful Telegram delivery —
+    // Only persist seen-jobs *after* successful Telegram delivery —
     // so a failed run doesn't burn jobs we never actually surfaced.
-    for (const r of top) seen.add(r.href);
-    saveSeenIds(seen);
-    log(`Persisted ${seen.size} seen IDs to data/seen-jobs.json`);
+    saveSeenStore(blockedSeen, top);
+    log(`Persisted seen-jobs.json (${top.length} new, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
     log('=== done ===');
   } catch (e) {

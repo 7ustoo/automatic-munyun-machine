@@ -13,7 +13,8 @@
     "daily": "node scripts/daily-batch.mjs",
     "bot": "node scripts/telegram-bot.mjs",
     "login": "node scripts/login-once.mjs",
-    "parse-resume": "node scripts/resume-parser.mjs"
+    "parse-resume": "node scripts/resume-parser.mjs",
+    "test": "node --test scripts/__tests__/*.test.mjs"
   },
   "keywords": [
     "job-search",

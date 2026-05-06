@@ -305,6 +305,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /jobs suggest        → bot reads your CV and proposes new titles
 /yoe N               → set max years of experience
 /salary N            → set salary floor in $K (e.g. /salary 120)
+/floor N             → minimum match-% to include in batch (default 25)
 /clearance on/off    → toggle gov clearance filter
 /forms all/simple/long → application form filter (Easy Apply etc.)
 /skip &lt;company&gt;      → never show this company again
@@ -658,6 +659,18 @@ async function handleMessage(msg) {
     const k = parseInt(salM[1]);
     cfgRW.set('user.salaryFloorUsd', k * 1000);
     return reply(chatId, `✅ Salary floor set to <b>$${k}k</b>.`);
+  }
+
+  // /floor N — set minimum match-percent threshold (jobs below this are
+  // dropped before the top-100 cut). v1.0 E3. Default 25%; lower to 0 to
+  // include filler when supply is low; raise to 50+ to be picky.
+  const floorM = text.match(/^\/?floor\s+(\d{1,3})\b/);
+  if (floorM) {
+    const n = Math.min(100, Math.max(0, parseInt(floorM[1])));
+    cfgRW.set('scoring.matchFloorPercent', n);
+    return reply(chatId, n === 0
+      ? `✅ Match floor set to <b>0%</b> — every scored job will surface (filler included).`
+      : `✅ Match floor set to <b>${n}%</b>. Jobs scoring below this are dropped before the top-100 cut.`);
   }
 
   // /clearance on/off
