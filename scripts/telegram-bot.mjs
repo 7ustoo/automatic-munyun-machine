@@ -8,6 +8,8 @@
  *   /jobs                  → 100 jobs only, no weather
  *   /export                → download today's batch as a .txt file
  *   /weather               → Miami weather only
+ *   /version               → show bot version + latest GitHub version
+ *   /update                → pull latest code from GitHub + restart
  *   /test, /ping           → reply "alive"
  *   /help, /start          → list commands
  *
@@ -19,9 +21,27 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import {
+  currentVersion,
+  checkForUpdate,
+  dismissVersion,
+  markUpdating,
+  consumePostUpdateFlag
+} from './update-checker.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
+const VERSION = currentVersion();
+
+// Absolute paths to Windows system binaries. spawn('powershell', ...) and
+// spawn('cmd.exe', ...) rely on PATH lookup, which fails on the
+// stripped-PATH installs we've seen in the wild (Daniel hit this in v0.4
+// during wizard task registration; another tester hit it in v0.5 trying
+// to /pause). Resolving via %SystemRoot% always works on a sane Windows.
+const SYS32      = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
+const POWERSHELL = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+const CMD_EXE    = path.join(SYS32, 'cmd.exe');
+const SCHTASKS   = path.join(SYS32, 'schtasks.exe');
 
 // ---------- env ----------
 const ENV_PATH = path.join(ROOT, '.env');
@@ -166,7 +186,7 @@ function runClaudeBatch(chatId) {
   }
   reply(chatId, '🔄 Scraping hiring.cafe… this takes 1–2 min. You\'ll get the batch when it\'s done.');
   log('Starting daily batch via run-daily-batch.cmd');
-  const child = spawn('cmd.exe', ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
+  const child = spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
     cwd: ROOT,
     detached: false,
     windowsHide: true
@@ -246,7 +266,7 @@ setInterval(() => {
 }, 60 * 1000);
 
 // ---------- dispatch ----------
-const HELP_TEXT = `<b>🤖 Automatic Munyun Machine</b>
+const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 
 <b>Core actions</b>
 /scrape, /daily, gm  → weather + 100 jobs ranked by CV match
@@ -278,6 +298,9 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine</b>
 /forget all          → wipe seen-jobs memory
 /forget last         → un-memorize most recent batch
 /weather             → Miami weather
+/version             → show running version
+/update              → pull latest from GitHub + restart
+/update skip         → skip notifications about the latest version
 /test, /ping         → bot health check
 /help                → this message`;
 
@@ -345,20 +368,22 @@ async function handleMessage(msg) {
 
   // /pause — disable 7am push
   if (/^\/?pause\b/.test(text)) {
-    const r = await spawnWithTimeout('powershell', ['-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
+    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
     if (r.timeout) return reply(chatId, '⏰ Pause command timed out after 30s. Try again.');
-    return reply(chatId, r.code === 0 ? '⏸ Daily 7am push paused. Use /resume-bot to re-enable.' : `❌ Could not pause (exit ${r.code}).`);
+    if (r.code === 0) return reply(chatId, '⏸ Daily 7am push paused. Use /resume-bot to re-enable.');
+    return reply(chatId, `❌ Could not pause (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
   }
   // /resume-bot — re-enable 7am push
   if (/^\/?resume[-_\s]?bot\b/.test(text)) {
-    const r = await spawnWithTimeout('powershell', ['-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
+    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
     if (r.timeout) return reply(chatId, '⏰ Resume command timed out after 30s. Try again.');
-    return reply(chatId, r.code === 0 ? '▶️ Daily 7am push re-enabled.' : `❌ Could not resume (exit ${r.code}).`);
+    if (r.code === 0) return reply(chatId, '▶️ Daily 7am push re-enabled.');
+    return reply(chatId, `❌ Could not resume (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
   }
   // /reauth — spawn login-once.mjs on the user's machine
   if (/^\/?reauth\b/.test(text)) {
     reply(chatId, '🔓 Opening login window on your computer. Sign into hiring.cafe with Google, then close the window.');
-    spawn('cmd.exe', ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
+    spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
       cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
     }).unref();
     return;
@@ -515,7 +540,7 @@ async function handleMessage(msg) {
     if (hh > 23 || mm > 59) return reply(chatId, '❌ Invalid time. Use 24-hour HH:MM.');
     const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     cfgRW.set('schedule.time', time);
-    const r = await spawnWithTimeout('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
     if (r.timeout) return reply(chatId, `⏰ Schedule saved but task re-registration timed out after 30s.`);
     return reply(chatId, r.code === 0
       ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
@@ -632,6 +657,96 @@ async function handleMessage(msg) {
     }
   }
 
+  // /version — show running version + last seen latest version
+  if (/^\/?version\b/.test(text)) {
+    const latest = (await checkForUpdate())?.latest || '?';
+    return reply(chatId, [
+      `🤖 <b>Automatic Munyun Machine v${VERSION}</b>`,
+      `Latest on GitHub: v${latest}`,
+      latest && latest !== '?' && latest !== VERSION ? '\n<i>Run /update to install the latest.</i>' : ''
+    ].filter(Boolean).join('\n'));
+  }
+
+  // /update [skip|check]
+  //   /update         → pull latest from main, npm install, restart bot
+  //   /update skip    → mark current latest as "don't notify me about this version"
+  //   /update check   → re-fetch GitHub and report
+  //   /update notes   → release notes for the latest
+  if (/^\/?update\b/.test(text)) {
+    const sub = text.replace(/^\/?update\s*/, '').trim();
+
+    if (sub.startsWith('skip')) {
+      const info = await checkForUpdate();
+      if (!info || !info.latest) return reply(chatId, '⚠️ Could not reach GitHub to confirm the version. Try again later.');
+      dismissVersion(info.latest);
+      return reply(chatId, `🙈 Skipping v${info.latest}. I'll let you know when a newer version is available.`);
+    }
+
+    if (sub.startsWith('check')) {
+      // Force-refresh: user explicitly asked, bypass the 5-min cache.
+      const info = await checkForUpdate({ force: true });
+      if (!info) return reply(chatId, '⚠️ Could not reach GitHub. Try again later.');
+      if (!info.hasUpdate) return reply(chatId, `✅ You're on the latest: v${info.current}.`);
+      const notes = info.releaseNotes ? info.releaseNotes.slice(0, 500) : '';
+      return reply(chatId, [
+        `🆕 v${info.latest} available (you're on v${info.current})`,
+        notes ? '\n' + escHtml(notes) : '',
+        `\n<code>/update</code> to install · <code>/update skip</code> to dismiss`
+      ].join('\n'));
+    }
+
+    if (sub.startsWith('notes')) {
+      const info = await checkForUpdate();
+      if (!info) return reply(chatId, '⚠️ Could not reach GitHub.');
+      const notes = info.releaseNotes || '<i>(no release notes)</i>';
+      return reply(chatId, `<b>v${info.latest} release notes:</b>\n\n${escHtml(notes).slice(0, 3500)}\n\n${info.releaseUrl}`);
+    }
+
+    // Bare /update → run the actual update flow
+    const info = await checkForUpdate();
+    if (!info) return reply(chatId, '⚠️ Could not reach GitHub. Try again later.');
+    if (!info.hasUpdate) return reply(chatId, `✅ You're already on the latest: v${info.current}. Nothing to update.`);
+
+    await reply(chatId, `🔄 Updating from v${info.current} to v${info.latest}…\n<i>Pulling latest from GitHub.</i>`);
+
+    // git pull origin main (spawnWithTimeout's cwd already defaults to ROOT)
+    const pullR = await spawnWithTimeout('git', ['pull', 'origin', 'main'], 60000);
+    if (pullR.timeout) return reply(chatId, '❌ git pull timed out after 60s. Cancelling update.');
+    if (pullR.code !== 0) {
+      return reply(chatId, `❌ git pull failed (exit ${pullR.code}):\n<pre>${escHtml((pullR.output || '').slice(0, 800))}</pre>\n\n<i>Likely cause: uncommitted local changes. Update the bot manually:\n<code>cd %LOCALAPPDATA%\\automatic-munyun-machine; git stash; git pull origin main; npm install</code></i>`);
+    }
+
+    await reply(chatId, '📦 <i>Installing dependencies…</i>');
+    // npm.cmd on Windows — passing 'npm' to spawn() without shell:true won't find it
+    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const npmR = await spawnWithTimeout(npmCmd, ['install', '--no-audit', '--no-fund', '--loglevel=error'], 120000);
+    if (npmR.timeout) return reply(chatId, '❌ npm install timed out after 2min. Bot left in old state — restart manually.');
+    if (npmR.code !== 0) {
+      return reply(chatId, `❌ npm install failed (exit ${npmR.code}):\n<pre>${escHtml((npmR.output || '').slice(0, 800))}</pre>`);
+    }
+
+    // Mark for the post-restart confirmation message
+    markUpdating(info.current, info.latest);
+
+    await reply(chatId, '👋 <b>Restarting bot to apply update…</b>\nBack online in ~10 seconds.');
+
+    // Detached restarter: waits 4s for this bot to exit, then runs schtasks
+    // to start a fresh bot from the (now updated) code on disk.
+    // Absolute paths used everywhere — if PATH is stripped (which is exactly
+    // the kind of environment that needs auto-update most), this still works.
+    const TIMEOUT = path.join(SYS32, 'timeout.exe');
+    const restartCmd = `"${TIMEOUT}" /t 4 /nobreak >nul && "${SCHTASKS}" /run /tn munyun-bot`;
+    const restarter = spawn(CMD_EXE, ['/c', restartCmd], {
+      detached: true, stdio: 'ignore', windowsHide: true
+    });
+    restarter.unref();
+
+    // Give Telegram ~1s to deliver the "restarting" message before we exit
+    await new Promise(r => setTimeout(r, 1500));
+    log('Bot exiting for update restart');
+    process.exit(0);
+  }
+
   // /export — send today's jobs(YYYY-MM-DD).txt as a downloadable attachment.
   // Falls back to the most recent dated file if today's hasn't been generated yet.
   if (/^\/?export\b/.test(text)) {
@@ -744,8 +859,45 @@ function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt
 let offset = loadOffset();
 // Mask all but last 4 digits of chat ID in logs
 const maskedChat = ALLOWED_CHAT.length > 4 ? '***' + ALLOWED_CHAT.slice(-4) : '***';
-log(`Bot starting. Offset=${offset}. Allowed chat=${maskedChat}.`);
-reply(ALLOWED_CHAT, '🤖 <b>Automatic Munyun Machine</b> — online. /help for commands.').catch(e => log('Initial ping failed: ' + e.message));
+log(`Bot starting v${VERSION}. Offset=${offset}. Allowed chat=${maskedChat}.`);
+
+// Detect a fresh-from-update reboot — if the previous bot wrote .updating
+// before exiting, this run is the result of a successful pull+install.
+// Send a clear confirmation message instead of the generic "online" ping.
+const postUpdate = consumePostUpdateFlag();
+if (postUpdate) {
+  log(`Post-update detected: from v${postUpdate.from} to v${VERSION}`);
+  reply(ALLOWED_CHAT, `✅ <b>Updated to v${VERSION}</b> (was v${postUpdate.from}).\nBot is back online — type /help for commands.`).catch(e => log('Post-update ping failed: ' + e.message));
+} else {
+  reply(ALLOWED_CHAT, `🤖 <b>Automatic Munyun Machine v${VERSION}</b> — online. /help for commands.`).catch(e => log('Initial ping failed: ' + e.message));
+}
+
+// Update check on startup (5s delay so we don't race the startup ping) +
+// once every 24h thereafter. If a newer release is on GitHub and the user
+// hasn't dismissed it, the bot pings the chat with what's new.
+async function notifyIfUpdateAvailable() {
+  try {
+    const info = await checkForUpdate();
+    if (!info) return; // network/API failed — silently retry next cycle
+    if (!info.hasUpdate) { log(`Update check: on latest v${info.current}`); return; }
+    if (info.dismissed) { log(`Update check: v${info.latest} available but dismissed`); return; }
+    log(`Update check: v${info.current} -> v${info.latest} available`);
+    const notes = info.releaseNotes ? info.releaseNotes.slice(0, 700) : '';
+    const text = [
+      `🆕 <b>Update available: v${info.current} → v${info.latest}</b>`,
+      '',
+      notes ? `<b>What's new:</b>\n${escHtml(notes)}\n` : '',
+      `Install now: <code>/update</code>`,
+      `Skip this version: <code>/update skip</code>`,
+      `Full release notes: ${info.releaseUrl}`
+    ].filter(Boolean).join('\n');
+    await reply(ALLOWED_CHAT, text).catch(e => log('Update notification failed: ' + e.message));
+  } catch (e) {
+    log('notifyIfUpdateAvailable error: ' + e.message);
+  }
+}
+setTimeout(() => { notifyIfUpdateAvailable(); }, 5000);
+setInterval(() => { notifyIfUpdateAvailable(); }, 24 * 60 * 60 * 1000);
 
 // Resilient poll loop with exponential backoff + recovery detection.
 // On Telegram outages we used to retry every 5s and silently die if anything
