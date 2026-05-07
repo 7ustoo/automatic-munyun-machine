@@ -243,6 +243,12 @@ async function scrape() {
                         : formEase === 'long'  ? ['TimeConsuming']
                         : null; // 'all' or anything else → no filter
 
+  // v1.0.x: pagination. Hiring.cafe shows ~40 cards per page. We click the
+  // "Next" link (a[aria-label*="next"]) up to MAX_PAGES_PER_QUERY-1 times to
+  // pull additional pages. Stops early if Next disappears/disables OR new
+  // page returns no fresh cards (already seen this query).
+  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 5;
+
   for (const [key, query] of QUERIES) {
     const searchState = {
       searchQuery: query,
@@ -252,14 +258,17 @@ async function scrape() {
     if (formEaseFilter) searchState.applicationFormEase = formEaseFilter;
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
-    let rows = [];
+    const seenInQuery = new Set();
+    const allRows = [];
+
+    // Page 1 — initial navigation, retry up to 3 times on failure.
+    let firstPageRows = [];
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        // Wait for at least one card anchor or 8s max — whichever comes first
         await page.waitForSelector('a[href^="/viewjob/"]', { timeout: 8000 }).catch(() => {});
-        await page.waitForTimeout(2000); // settle
-        rows = await page.evaluate(EXTRACT_FN);
+        await page.waitForTimeout(2000);
+        firstPageRows = await page.evaluate(EXTRACT_FN);
         break;
       } catch (e) {
         log(`  attempt ${attempt} failed: ${e.message.split('\n')[0]}`);
@@ -267,8 +276,41 @@ async function scrape() {
         await page.waitForTimeout(2000);
       }
     }
-    results[key] = rows;
-    log(`  → ${rows.length} cards`);
+    for (const r of firstPageRows) {
+      if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); }
+    }
+    log(`  page 1 → ${firstPageRows.length} cards (running total: ${allRows.length})`);
+
+    // Pages 2..N — click Next until cap, button disappears, or no new cards.
+    for (let pageNum = 2; pageNum <= MAX_PAGES_PER_QUERY; pageNum++) {
+      const nextBtn = page.locator('a[aria-label*="next" i], button[aria-label*="next" i]').first();
+      const visible = await nextBtn.isVisible().catch(() => false);
+      const enabled = visible && await nextBtn.isEnabled().catch(() => false);
+      if (!visible || !enabled) {
+        log(`  no more pages after ${pageNum - 1} (Next not available)`);
+        break;
+      }
+      try {
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await nextBtn.click({ timeout: 5000 });
+        await page.waitForTimeout(2500);
+        const pageRows = await page.evaluate(EXTRACT_FN);
+        let newCards = 0;
+        for (const r of pageRows) {
+          if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); newCards++; }
+        }
+        log(`  page ${pageNum} → ${pageRows.length} cards (${newCards} new, running total: ${allRows.length})`);
+        if (newCards === 0) {
+          log(`  stopping pagination — page ${pageNum} returned no new cards`);
+          break;
+        }
+      } catch (e) {
+        log(`  page ${pageNum} failed: ${e.message.split('\n')[0]} — stopping pagination`);
+        break;
+      }
+    }
+
+    results[key] = allRows;
   }
   await ctx.close();
 
@@ -575,24 +617,43 @@ function recordAuthFail() {
   }, null, 2));
 }
 
-async function resolveOne(viewjobUrl) {
+// v1.0.x: Cloudflare bot-blocks plain Node fetch on viewjob URLs (returns
+// 403 even with auth cookies via APIRequestContext). Real-browser navigation
+// works. This re-launches the persistent profile (auth cookies preserved),
+// spawns a small page pool, and parallel-fetches each viewjob page,
+// extracting "apply_url" from the rendered HTML.
+async function resolveOnePage(page, viewjobUrl) {
   try {
-    const r = await fetch(viewjobUrl, { signal: AbortSignal.timeout(15000) });
-    const html = await r.text();
+    await page.goto(viewjobUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    // Settle so JSON payload renders into HTML
+    await page.waitForTimeout(1500);
+    const html = await page.content();
     const m = html.match(/"apply_url":"([^"]+)"/);
     return m ? m[1] : null;
   } catch { return null; }
 }
+
 async function resolveAll(rows) {
-  const PAR = 20;
-  const out = new Array(rows.length); let i = 0;
-  await Promise.all(Array.from({ length: PAR }, async () => {
+  if (!rows.length) return [];
+  log(`Launching browser for direct-URL resolution (${rows.length} jobs)…`);
+  const ctx = await launchBrowser();
+  const PAR = 5; // 5 concurrent pages — balances speed vs bot-detection risk
+  const pages = [];
+  for (let i = 0; i < PAR; i++) {
+    pages.push(i === 0 ? (ctx.pages()[0] || await ctx.newPage()) : await ctx.newPage());
+  }
+  const out = new Array(rows.length);
+  let i = 0;
+  let resolved = 0;
+  await Promise.all(pages.map(async (p) => {
     while (true) {
       const idx = i++;
       if (idx >= rows.length) break;
-      out[idx] = await resolveOne(rows[idx].href);
+      out[idx] = await resolveOnePage(p, rows[idx].href);
+      if (out[idx]) resolved++;
     }
   }));
+  await ctx.close();
   return out;
 }
 
