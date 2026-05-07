@@ -19,7 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
-import { migrateIfNeeded, paths as profilePaths } from './profile-store.mjs';
+import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -30,7 +30,8 @@ const STATE_FILE      = path.join(DATA_DIR, 'batch-missed-state.json'); // share
 const TELEGRAM_SEND   = path.join(__dirname, 'telegram-send.mjs');
 
 function loadConfig() {
-  try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8')); }
+  // Profile-aware after v1.0 E5 — schedule lives at profiles.<active>.schedule.
+  try { return readActiveConfig(); }
   catch { return {}; }
 }
 

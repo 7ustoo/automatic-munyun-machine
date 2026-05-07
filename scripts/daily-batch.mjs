@@ -17,7 +17,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
-import { migrateIfNeeded, paths as profilePaths } from './profile-store.mjs';
+import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 
 // v1.0 E5: ensure config + data layout are profile-aware before we read anything.
 migrateIfNeeded();
@@ -53,12 +53,14 @@ const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = env.TELEGRAM_CHAT_ID;
 const CDP_PORT = env.CHROME_DEBUG_PORT || '9222';
 
-// ---------- config (config.json) ----------
+// ---------- config (profile-aware after v1.0 E5) ----------
+// Returns the ACTIVE profile's contents flattened to top level (CFG.queries,
+// CFG.weather, CFG.filters, ...) so consumers below don't need to know about
+// the profiles wrapper. Without this, a raw read of config.json after the E5
+// migration leaves CFG.queries undefined → fallback to 3 default queries +
+// no weather + no filters. (Regression caught 2026-05-07.)
 function loadConfig() {
-  const userPath = path.join(ROOT, 'config.json');
-  const examplePath = path.join(ROOT, 'config.example.json');
-  const src = fs.existsSync(userPath) ? userPath : examplePath;
-  return JSON.parse(fs.readFileSync(src, 'utf8'));
+  return readActiveConfig();
 }
 const CFG = loadConfig();
 

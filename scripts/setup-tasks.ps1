@@ -12,7 +12,9 @@ $ROOT = Split-Path -Parent $PSScriptRoot
 $RUN_BATCH_CMD = Join-Path $ROOT 'scripts\run-daily-batch.cmd'
 $START_BOT_CMD = Join-Path $ROOT 'scripts\start-bot.cmd'
 
-# Read time + days from config.json if present
+# Read time + days from config.json if present.
+# v1.0 E5+ : schedule lives at profiles.<active>.schedule (post-migration).
+# v0.x    : schedule lived at the top level. Both shapes handled below.
 $cfg = $null
 $cfgPath = Join-Path $ROOT 'config.json'
 if (Test-Path $cfgPath) {
@@ -21,8 +23,18 @@ if (Test-Path $cfgPath) {
   Write-Host "[warn] config.json not found at $cfgPath - using defaults (07:00 Mon-Fri)." -ForegroundColor Yellow
   Write-Host "[warn] Run: node scripts\setup-wizard.mjs to generate one." -ForegroundColor Yellow
 }
-$time = if ($cfg -and $cfg.schedule -and $cfg.schedule.time) { $cfg.schedule.time } else { '07:00' }
-$days = if ($cfg -and $cfg.schedule -and $cfg.schedule.days) { $cfg.schedule.days } else { @('Monday','Tuesday','Wednesday','Thursday','Friday') }
+
+# Resolve schedule from active profile (v1.0+) or top level (legacy).
+$scheduleNode = $null
+if ($cfg -and $cfg.profiles -and $cfg.active_profile) {
+  $activeName = $cfg.active_profile
+  $activeProfile = $cfg.profiles.$activeName
+  if ($activeProfile -and $activeProfile.schedule) { $scheduleNode = $activeProfile.schedule }
+} elseif ($cfg -and $cfg.schedule) {
+  $scheduleNode = $cfg.schedule
+}
+$time = if ($scheduleNode -and $scheduleNode.time) { $scheduleNode.time } else { '07:00' }
+$days = if ($scheduleNode -and $scheduleNode.days) { $scheduleNode.days } else { @('Monday','Tuesday','Wednesday','Thursday','Friday') }
 $dayEnums = $days | ForEach-Object { [System.DayOfWeek]$_ }
 
 # Migration: delete old career-ops-* tasks if they exist
