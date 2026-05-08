@@ -345,8 +345,9 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 <b>Core actions</b>
 /scrape, /daily, gm  → weather + 100 jobs ranked by CV match
 /batch [N]           → tap-friendly browser with Save/Applied/Why buttons
-/save N              → bookmark job N on hiring.cafe (text fallback)
-/applied N           → mark job N applied (text fallback)
+/save N              → bookmark job locally + on hiring.cafe (if /reauth'd)
+/applied N           → mark applied locally + on hiring.cafe (if /reauth'd)
+/saved [N]           → list locally-bookmarked jobs (paginated)
 /why N               → explain why job N got its match %
 /history [N]         → past applications (paginated)
 /export              → download today's batch as a .txt file
@@ -377,8 +378,8 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 <b>Maintenance</b>
 /status              → bot uptime, last batch, last poll, version, task state
 /diagnose            → why am I getting only N jobs? per-query supply + funnel
-/auth                → check hiring.cafe login
-/reauth              → re-login on your computer
+/auth                → check hiring.cafe sign-in (optional; only needed for hiring.cafe-side bookmarking)
+/reauth              → opt-in: sign into hiring.cafe so /save and /applied also click their buttons
 /pause /resume-bot   → stop/start the 7am push
 /forget all          → wipe seen-jobs memory
 /forget last         → un-memorize most recent batch
@@ -609,6 +610,15 @@ async function handleMessage(msg) {
     return showHistory(chatId, page);
   }
 
+  // /saved [N] — paginated list of locally-bookmarked jobs (saved.md).
+  // v1.0.x: bookmarks are local-first now; hiring.cafe-side bookmarking
+  // is opt-in via /reauth.
+  const savedM = text.match(/^\/?saved(?:\s+(\d{1,3}))?\b/);
+  if (savedM) {
+    const page = savedM[1] ? parseInt(savedM[1], 10) : 1;
+    return showSaved(chatId, page);
+  }
+
   // /uninstall — v1.0 E6. Two modes (pause / wipe) selected via inline buttons.
   // Bot can't delete its own dir; for wipe mode, we send the final message,
   // spawn uninstall.mjs detached, then exit. The detached process does the
@@ -735,7 +745,9 @@ async function handleMessage(msg) {
     }).unref();
     return;
   }
-  // /save N or /applied N
+  // /save N or /applied N — text-mode fallbacks. Both write locally first
+  // (source of truth) then attempt hiring.cafe click as a best-effort.
+  // Exit code 7 from job-action.mjs means "not signed in, skip silently."
   const actionMatch = text.match(/^\/?(save|applied)\s+(\d+)\b/);
   if (actionMatch) {
     const action = actionMatch[1];
@@ -744,19 +756,19 @@ async function handleMessage(msg) {
     if (!batch) return reply(chatId, '❌ No batch on disk yet — run /daily first.');
     const job = batch.rows.find(r => r.idx === n);
     if (!job) return reply(chatId, `❌ Job #${n} not found in latest batch (${batch.rows.length} jobs in ${batch.file}).`);
+
+    // Local write FIRST so the action persists regardless of hiring.cafe outcome.
+    try {
+      const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${job.title} @ ${job.company} — ${job.viewjobUrl}\n`;
+      const target = action === 'save' ? path.join(profilePaths().dir, 'saved.md') : profilePaths().applications;
+      fs.appendFileSync(target, line);
+    } catch (e) { log(`${action} local write failed: ` + e.message); }
+
     reply(chatId, `🔄 ${action === 'save' ? 'Bookmarking' : 'Marking applied'}: <b>${escHtml(job.title)}</b> @ ${escHtml(job.company)}…`);
     const { code, output } = await spawnAction(action, job.viewjobUrl);
-    if (code === 0) {
-      // Bonus: append to applications.md when /applied succeeds
-      if (action === 'applied') {
-        try {
-          const line = `\n| - | ${new Date().toISOString().slice(0, 10)} | ${job.company} | ${job.title} | - | APPLIED | - | - | via /applied | ${job.viewjobUrl} |`;
-          fs.appendFileSync(profilePaths().applications, line);
-        } catch (e) { log('applications.md append failed: ' + e.message); }
-      }
-      return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Applied'} on hiring.cafe.${action === 'applied' ? '\nAlso logged to applications.md.' : ''}`);
-    }
-    return reply(chatId, `❌ ${action} failed.\n<pre>${escHtml(output.slice(0, 400))}</pre>`);
+    if (code === 0) return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Applied'} locally + on hiring.cafe.`);
+    if (code === 7) return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Marked applied'} locally. <i>(Run /reauth to also act on hiring.cafe.)</i>`);
+    return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Marked applied'} locally. Hiring.cafe click failed (exit ${code}).\n<pre>${escHtml((output || '').slice(0, 300))}</pre>`);
   }
 
   // ===== v0.3 commands =====
@@ -1253,6 +1265,40 @@ async function showHistory(chatId, page = 1) {
   return reply(chatId, lines.join('\n'), { reply_markup: { inline_keyboard: [navRow] } });
 }
 
+// Show /saved — paginated list of locally-bookmarked jobs (saved.md), 5 per page.
+async function showSaved(chatId, page = 1) {
+  const PAGE_SIZE = 5;
+  const savedPath = path.join(profilePaths().dir, 'saved.md');
+  let entries = [];
+  try {
+    const md = fs.readFileSync(savedPath, 'utf8');
+    const lines = md.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/hiring\.cafe\/viewjob\/[a-z0-9]+/);
+      if (m) entries.push({ url: 'https://' + m[0], context: lines[i].slice(0, 200) });
+    }
+  } catch {
+    return reply(chatId, '<i>No saved jobs yet. Tap [💾 Save] in /batch or use /save N to bookmark.</i>');
+  }
+  if (!entries.length) return reply(chatId, '<i>No saved jobs yet.</i>');
+  entries.reverse();
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const slice = entries.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const lines = [`<b>💾 Saved jobs</b>  (page ${p}/${totalPages}, ${entries.length} total)`, ''];
+  for (const [i, e] of slice.entries()) {
+    const num = (p - 1) * PAGE_SIZE + i + 1;
+    lines.push(`<b>${num}.</b> <a href="${escHtml(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
+    if (e.context) lines.push(`<i>${escHtml(e.context.slice(0, 120))}</i>`);
+    lines.push('');
+  }
+  const navRow = [];
+  if (p > 1)            navRow.push({ text: '⬅️',  callback_data: makeNavCallback('sv', p - 1, TG_TOKEN) });
+  navRow.push({ text: `${p}/${totalPages}`, callback_data: makeNavCallback('noop', 0, TG_TOKEN) });
+  if (p < totalPages)   navRow.push({ text: '➡️',  callback_data: makeNavCallback('sv', p + 1, TG_TOKEN) });
+  return reply(chatId, lines.join('\n'), { reply_markup: { inline_keyboard: [navRow] } });
+}
+
 // Central callback dispatcher. Telegram fires this for every inline-button tap.
 async function handleCallback(cq) {
   const chatId = String(cq.message?.chat?.id || cq.from?.id);
@@ -1291,6 +1337,12 @@ async function handleCallback(cq) {
     return showHistory(chatId, idx);
   }
 
+  // Saved-jobs pagination (v1.0.x)
+  if (action === 'sv') {
+    await tgAnswerCallback(cq.id);
+    return showSaved(chatId, idx);
+  }
+
   // Diagnose shortcut
   if (action === 'diag') {
     await tgAnswerCallback(cq.id);
@@ -1325,27 +1377,34 @@ async function handleCallback(cq) {
   if (!item) return tgAnswerCallback(cq.id, 'Job context missing — re-run /scrape', true);
 
   if (action === 's') {
-    await tgAnswerCallback(cq.id, 'Saving on hiring.cafe…');
+    await tgAnswerCallback(cq.id, 'Saving…');
+    // v1.0.x: always write to local saved.md first (source of truth for /saved).
+    // Hiring.cafe click is best-effort — exit code 7 means "not signed in,
+    // skip silently and report local-only success."
+    const savedPath = path.join(profilePaths().dir, 'saved.md');
+    try {
+      const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
+      fs.appendFileSync(savedPath, line);
+    } catch (e) { log('saved.md append failed: ' + e.message); }
     const { code, output, timeout } = await spawnAction('save', item.url);
-    if (timeout) return reply(chatId, `❌ Save timed out for #${idx}.`);
-    if (code === 0) return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> on hiring.cafe.`);
-    return reply(chatId, `❌ Save failed (exit ${code}):\n<pre>${escHtml((output || '').slice(0, 400))}</pre>`);
+    if (timeout) return reply(chatId, `💾 Saved locally for #${idx}; hiring.cafe click timed out (run <code>/reauth</code> to enable hiring.cafe-side bookmarking).`);
+    if (code === 0) return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> locally and on hiring.cafe.`);
+    if (code === 7) return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> locally. <i>(Run /reauth to also bookmark on hiring.cafe.)</i>`);
+    return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> locally. Hiring.cafe click failed (exit ${code}); local record is what /saved reads.`);
   }
 
   if (action === 'a') {
     await tgAnswerCallback(cq.id, 'Marking applied…');
+    // Always write to applications.md first (source of truth for /history).
+    try {
+      const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
+      fs.appendFileSync(profilePaths().applications, line);
+    } catch (e) { log('applications.md append failed: ' + e.message); }
     const { code, output, timeout } = await spawnAction('applied', item.url);
-    if (timeout) return reply(chatId, `❌ Applied timed out for #${idx}.`);
-    if (code === 0) {
-      // Append to applications.md so /history sees it. job-action.mjs already does this,
-      // but we double-write with metadata for cleaner history rendering.
-      try {
-        const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
-        fs.appendFileSync(profilePaths().applications, line);
-      } catch {}
-      return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')}.`);
-    }
-    return reply(chatId, `❌ Applied failed (exit ${code}):\n<pre>${escHtml((output || '').slice(0, 400))}</pre>`);
+    if (timeout) return reply(chatId, `✅ Logged applied locally for #${idx}; hiring.cafe click timed out.`);
+    if (code === 0) return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')} (locally + on hiring.cafe).`);
+    if (code === 7) return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')} (locally; <i>/reauth to also mark on hiring.cafe</i>).`);
+    return reply(chatId, `✅ Logged applied locally. Hiring.cafe click failed (exit ${code}).`);
   }
 
   if (action === 'w') {

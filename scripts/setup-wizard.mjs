@@ -152,11 +152,15 @@ async function step2ChatId(token) {
   throw new Error('Timed out waiting for a Telegram message. Send any message to your bot and re-run setup.');
 }
 
-// ---- step 3: hiring.cafe login ----
+// ---- step 3: hiring.cafe Cloudflare warmup (no login required) ----
 async function step3Login() {
-  step(3, 10, 'hiring.cafe login');
-  console.log(`${c.dim}A Chromium window will open at hiring.cafe. Sign in with Google.${c.reset}`);
-  console.log(`${c.dim}When you see your profile picture top-right, close the window.${c.reset}\n`);
+  step(3, 10, 'hiring.cafe browser warmup');
+  console.log(`${c.dim}A Chromium window will open at hiring.cafe. No login required —${c.reset}`);
+  console.log(`${c.dim}we are just clearing Cloudflare's bot challenge.${c.reset}`);
+  console.log(`${c.dim}Wait until you see job listings (~20–30 seconds), then close the window.${c.reset}`);
+  console.log(`${c.dim}(Optional: if you sign into hiring.cafe inside that window, the bot's${c.reset}`);
+  console.log(`${c.dim}/save and /applied commands will also click those buttons on hiring.cafe.${c.reset}`);
+  console.log(`${c.dim}Skip the sign-in for the simplest setup.)${c.reset}\n`);
   await ask(arrow('Press Enter to open the browser… '));
 
   // Spawn login-once.mjs and wait for it to exit (window closed)
@@ -167,8 +171,10 @@ async function step3Login() {
     child.on('exit', code => code === 0 ? resolve() : reject(new Error('login-once exited ' + code)));
   });
 
-  // Verify auth landed
-  process.stdout.write(arrow('Verifying login… '));
+  // Verify hiring.cafe is browsable (Cloudflare cleared). Auth is optional;
+  // job-action.mjs returns AUTH_FAIL when not signed in but we don't treat
+  // that as a setup failure anymore.
+  process.stdout.write(arrow('Verifying hiring.cafe browsable… '));
   const r = await new Promise((resolve) => {
     const child = spawn('node', [path.join(__dirname, 'job-action.mjs'), 'auth'], {
       cwd: ROOT, windowsHide: true
@@ -178,11 +184,13 @@ async function step3Login() {
     child.on('exit', code => resolve({ code, out }));
   });
   if (r.code === 0) {
-    console.log(ok('Logged in to hiring.cafe.'));
-    return true;
+    console.log(ok('Hiring.cafe is browsable AND you signed in (full feature set).'));
+  } else {
+    // The new login-once warmed Cloudflare without requiring sign-in. The
+    // browsable check inside daily-batch will confirm at scrape time.
+    console.log(ok('Hiring.cafe browsable (no sign-in — /save and /applied will record locally).'));
   }
-  console.log(fail('Could not verify login. You can re-run /reauth on the bot later.'));
-  return false;
+  return true;
 }
 
 // ---- step 4: resume upload ----

@@ -202,19 +202,28 @@ async function launchBrowser() {
   });
 }
 
-// Returns true if the persistent profile is logged into hiring.cafe.
-// Strategy: navigate to /saved (auth-required). If the page loads without
-// redirecting back to home or showing a sign-in CTA, we're authed.
-async function checkLogin(page) {
-  await page.goto('https://hiring.cafe/saved', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(2500);
-  const finalUrl = page.url();
-  // Sign of LOGGED OUT: redirected away from /saved, OR a sign-in button is visible
-  if (!finalUrl.includes('/saved')) return false;
-  const signInVisible = await page.locator('button:has-text("Sign in"), button:has-text("Log in"), a:has-text("Sign in"):not(:has-text("Sign in with"))').first().isVisible().catch(() => false);
-  if (signInVisible) return false;
-  // Sign of LOGGED IN: any localStorage key or cookie suggesting auth, OR no sign-in CTA at all
-  return true;
+// v1.0.x: scraping is auth-OPTIONAL. Hiring.cafe lets logged-out users
+// browse jobs; the only blocker historically was Cloudflare's bot challenge,
+// which the persistent profile clears after the warmup pass.
+//
+// checkBrowsable() returns true if the search UI renders job cards — that's
+// the only thing the scraper actually needs. If it doesn't render, run
+// scripts/login-once.mjs to warm Cloudflare on this profile.
+async function checkBrowsable(page) {
+  const probe = { searchQuery: 'engineer', workplaceTypes: ['Remote'] };
+  const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(probe));
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // Cloudflare can take a while; wait up to 25s for cards to appear
+      for (let i = 0; i < 12; i++) {
+        await page.waitForTimeout(2000);
+        const count = await page.locator('a[href*="viewjob"]').count().catch(() => 0);
+        if (count > 0) return true;
+      }
+    } catch { /* retry once */ }
+  }
+  return false;
 }
 
 async function scrape() {
@@ -222,16 +231,18 @@ async function scrape() {
   const ctx = await launchBrowser();
   const page = ctx.pages()[0] || await ctx.newPage();
 
-  // Auth gate — if logged out, abort cleanly so we don't poison the seen-jobs store.
-  log('Verifying hiring.cafe login state…');
-  const loggedIn = await checkLogin(page);
-  if (!loggedIn) {
+  // Browsability gate — Cloudflare may not have cleared yet on a fresh
+  // profile. If cards never render, abort cleanly so we don't poison the
+  // seen-jobs store. (Renamed from "auth" gate; v1.0.x scraping is unauth.)
+  log('Verifying hiring.cafe is browsable (Cloudflare cleared)…');
+  const browsable = await checkBrowsable(page);
+  if (!browsable) {
     await ctx.close();
-    const e = new Error('Hiring.cafe session expired or never authenticated. Run scripts\\login-once.cmd to re-auth.');
+    const e = new Error('Hiring.cafe not yet browsable from this profile. Run scripts\\login-once.cmd to clear the Cloudflare challenge — no sign-in required.');
     e.unauth = true;
     throw e;
   }
-  log('✓ logged in');
+  log('✓ browsable');
   // NOTE: recordAuthOk() deliberately deferred until AFTER the scrape loop
   // produces at least one card. /saved loading is necessary but not sufficient
   // — if every query then returns 0 cards the user is effectively broken and
@@ -247,13 +258,25 @@ async function scrape() {
   // "Next" link (a[aria-label*="next"]) up to MAX_PAGES_PER_QUERY-1 times to
   // pull additional pages. Stops early if Next disappears/disables OR new
   // page returns no fresh cards (already seen this query).
-  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 5;
+  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 50;
+
+  // v1.0.x: target-driven cross-query early stop. After each query's
+  // pagination, we compute the running fresh-after-dedup count. If it
+  // exceeds the target with some headroom for floor losses, we stop
+  // scraping additional queries — saves time on heavy-supply days.
+  const TARGET_JOBS = SCORING.targetJobsPerBatch ?? 100;
+  const _appliedSet  = loadAppliedHrefs();
+  const _blockedSet  = loadBlockedSeen();
+  const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
+  let runningFreshEstimate = 0;
 
   for (const [key, query] of QUERIES) {
     const searchState = {
       searchQuery: query,
-      workplaceTypes: ['Remote'],
-      hideJobTypes: ['Saved', 'Applied', 'Viewed']
+      workplaceTypes: ['Remote']
+      // v1.0.x: dropped hideJobTypes — that field only takes effect for
+      // logged-in users, and we now scrape unauth. Local seen-jobs.json +
+      // applications.md cover the dedup we actually need.
     };
     if (formEaseFilter) searchState.applicationFormEase = formEaseFilter;
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
@@ -311,6 +334,22 @@ async function scrape() {
     }
 
     results[key] = allRows;
+
+    // Cross-query running-fresh estimate. We don't run the full scoring
+    // mid-scrape (too expensive); we just count how many of THIS query's
+    // rows aren't already blocked + haven't been seen earlier this run.
+    for (const r of allRows) {
+      if (_crossQuerySeen.has(r.href)) continue;
+      _crossQuerySeen.add(r.href);
+      if (!_appliedSet.has(r.href) && !_blockedSet.has(r.href)) runningFreshEstimate++;
+    }
+    // 50% headroom for filter+floor losses — stop scraping once we have
+    // ~1.5x the target candidate cards. Conservative; usually means we'll
+    // end up delivering close to TARGET_JOBS after filters trim.
+    if (runningFreshEstimate >= TARGET_JOBS * 1.5) {
+      log(`  ✓ target hit early — running fresh estimate ${runningFreshEstimate} ≥ ${Math.round(TARGET_JOBS * 1.5)} (target ${TARGET_JOBS} × 1.5 headroom). Skipping remaining queries.`);
+      break;
+    }
   }
   await ctx.close();
 
@@ -667,6 +706,12 @@ function buildSupplyBanner({ funnel, byQuery }) {
   if (funnel.afterDedup < 30) {
     warnings.push(`⚠️ <b>Limited supply today: ${funnel.afterDedup} fresh jobs</b> (typical: 50–80).`);
     const tips = [];
+    // Dedup-pressure diagnostic: if filter pass-through was healthy but
+    // dedup ate most of it, the freshness window is the real lever.
+    const dedupPressure = funnel.keptAfterFilter > 0 ? Math.round((1 - funnel.afterDedup / funnel.keptAfterFilter) * 100) : 0;
+    if (dedupPressure >= 50 && funnel.keptAfterFilter >= 50) {
+      tips.push(`<b>${dedupPressure}% of today's filter-passing cards were already seen</b> in the past ${SEEN_FRESHNESS_DAYS} days. Lower this in <code>config.json</code>: <code>profiles.&lt;active&gt;.scoring.seenJobsFreshnessDays</code> (try 14). Or run <code>/forget all</code> for a clean slate.`);
+    }
     if (funnel.droppedBelowFloor > 0) tips.push(`Lower the match floor with <code>/floor 0</code> (currently ${funnel.matchFloorPercent}%) — would surface ${funnel.droppedBelowFloor} more.`);
     tips.push(`<code>/forget last</code> to revisit yesterday's batch.`);
     tips.push(`<code>/jobs add "Title"</code> to widen your queries.`);

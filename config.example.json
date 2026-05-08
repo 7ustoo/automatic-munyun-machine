@@ -48,8 +48,10 @@
     "salaryPenalty": -10,
     "matchFloorPercent": 25,
     "_matchFloorComment": "Drop jobs below this match% before the top-100 cut. v1.0 E3. /floor 0 disables; /floor 50 picks only strong matches.",
-    "maxPagesPerQuery": 5,
-    "_maxPagesPerQueryComment": "Hiring.cafe shows ~40 cards per page. Bot clicks Next up to this many times per query. Default 5 → ~200 raw cards/query × 16 queries = ~3,200 raw. Higher = more supply, slower scrape.",
+    "maxPagesPerQuery": 50,
+    "_maxPagesPerQueryComment": "Hiring.cafe shows ~40 cards per page. Bot clicks Next up to this many times per query. Effective ceiling — per-query early-stop on '0 new cards' usually terminates much sooner.",
+    "targetJobsPerBatch": 100,
+    "_targetJobsPerBatchComment": "Cross-query early stop. Once we have ~1.5x this many candidate cards across queries, skip the remaining queries. Default 100 → stop at ~150 candidates.",
     "seenJobsFreshnessDays": 60,
     "_seenJobsFreshnessComment": "Days before an unapplied previously-seen job rolls back into the supply pool. Applied jobs (in applications.md) are always blocked.",
     "_percentBands": "score 30+ → 90-100%; 20-29 → 75-89%; 10-19 → 50-74%; 5-9 → 30-49%; 0-4 → 0-29%"
