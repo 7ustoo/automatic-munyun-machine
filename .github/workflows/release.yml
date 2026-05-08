@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v1.1.0). Leave blank for current branch."
+        required: false
+
+jobs:
+  # Windows: build Inno Setup .exe + (optionally) sign via Microsoft Trusted Signing.
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build .exe via Inno Setup
+        shell: powershell
+        run: |
+          $iss = "installer/amm.iss"
+          if (-not (Test-Path $iss)) { Write-Error "Missing $iss"; exit 1 }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" $iss
+          # Inno Setup writes to installer/dist/ by default
+          Get-ChildItem installer/dist/ -Filter '*.exe'
+
+      - name: Sign .exe (best-effort)
+        if: env.AZURE_CLIENT_ID != ''
+        shell: powershell
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+          AZURE_TS_PROFILE: ${{ secrets.AZURE_TS_PROFILE }}
+        run: |
+          dotnet tool install --global azuresigntool
+          $exe = (Get-ChildItem installer/dist/*.exe | Select-Object -First 1).FullName
+          pwsh scripts/build/sign-windows.ps1 $exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-windows
+          path: installer/dist/*.exe
+
+  # macOS: build .dmg + notarize.
+  build-mac:
+    name: Build macOS .dmg
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+      - name: Build .dmg
+        run: bash scripts/build/mac.sh
+
+      - name: Notarize .dmg (best-effort)
+        if: env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          bash scripts/build/notarize-mac.sh "$DMG"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-mac
+          path: dist/*.dmg
+
+  # Linux: build .deb + .AppImage + GPG-sign both.
+  build-linux:
+    name: Build Linux .deb + .AppImage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - run: npm test
+
+      - name: Install build prereqs
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y dpkg-dev fakeroot dpkg-sig
+
+      - name: Build .deb
+        run: bash scripts/build/deb.sh
+
+      - name: Build .AppImage
+        run: bash scripts/build/appimage.sh
+
+      - name: Import GPG key (best-effort)
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          echo "GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format SHORT | awk '/^sec/ {gsub(\".*/\", \"\", $2); print $2; exit}')" >> "$GITHUB_ENV"
+
+      - name: Sign artifacts (best-effort)
+        if: env.GPG_KEY_ID != ''
+        run: |
+          DEB=$(ls dist/*.deb | head -1)
+          APP=$(ls dist/*.AppImage | head -1)
+          bash scripts/build/sign-linux.sh "$DEB" "$APP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-linux
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.AppImage.sig
+
+  # Combine artifacts into a GitHub Release.
+  publish:
+    name: Publish Release
+    needs: [build-windows, build-mac, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Compute SHA256 sums
+        run: |
+          mkdir -p release
+          find artifacts -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.AppImage.sig' \) -exec cp {} release/ \;
+          (cd release && sha256sum * > SHA256SUMS.txt)
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false

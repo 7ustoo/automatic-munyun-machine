@@ -39,6 +39,7 @@ desktop.ini
 # Build / temp
 dist/
 build/
+!scripts/build/
 tmp/
 *.zip
 *.tar.gz
