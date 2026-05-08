@@ -24,6 +24,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { migrateIfNeeded, readActiveConfig, _internals } from './profile-store.mjs';
+import { atomicWriteText, lockedUpdateJsonSync } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -48,30 +49,16 @@ export function readRaw() {
   return JSON.parse(fs.readFileSync(CFG_PATH, 'utf8'));
 }
 
+// Atomic + cross-process-locked write. The proper-lockfile advisory lock
+// in io-helpers serializes concurrent writers (bot + scrape both touching
+// config.json) — without it, two readers could each compute a divergent
+// new state and the loser's write disappears. The atomic-rename retry loop
+// handles NTFS transient EPERM/EACCES/EBUSY.
 function atomicWrite(obj) {
-  const tmp = CFG_PATH + '.tmp.' + process.pid + '.' + Date.now();
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  // Retry on transient Windows lock errors. POSIX renames are atomic and
-  // never raise these codes; on NTFS, an antivirus scan or another process's
-  // open handle can briefly block the rename.
-  const RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
-  let lastErr;
-  for (let i = 0; i < 5; i++) {
-    try {
-      fs.renameSync(tmp, CFG_PATH);
-      return;
-    } catch (e) {
-      lastErr = e;
-      if (!RETRY_CODES.has(e.code)) break;
-      // Synchronous backoff; this code path is sync by contract (callers
-      // expect atomicWrite to return before they continue). 50, 100, 150, 200ms.
-      const end = Date.now() + 50 * (i + 1);
-      while (Date.now() < end) { /* spin */ }
-    }
-  }
-  // All retries exhausted (or non-transient error) — clean up tmp and re-throw.
-  try { fs.unlinkSync(tmp); } catch { /* tmp may already be gone */ }
-  throw lastErr;
+  // The lockedUpdateJsonSync wrapper takes a mutator that returns the
+  // new state. We've already computed the new state in the caller (set,
+  // appendUnique, etc.) — pass through.
+  lockedUpdateJsonSync(CFG_PATH, () => obj);
 }
 
 // Decide whether a dot-path is profile-scoped (lives inside profiles.<slug>)
@@ -88,22 +75,24 @@ function resolveDotPath(dotPath, raw) {
   return dotPath;
 }
 
-// dot-path setter: set('user.salaryFloorUsd', 90000)
+// dot-path setter: set('user.salaryFloorUsd', 90000). Read-modify-write
+// runs inside the file lock so concurrent writers serialize.
 export function set(dotPath, value) {
   migrateIfNeeded();
-  const raw = JSON.parse(fs.readFileSync(CFG_PATH, 'utf8'));
-  const fullPath = resolveDotPath(dotPath, raw);
-  const keys = fullPath.split('.');
-  let cur = raw;
-  for (let i = 0; i < keys.length - 1; i++) {
-    if (cur[keys[i]] === undefined || cur[keys[i]] === null || typeof cur[keys[i]] !== 'object') {
-      cur[keys[i]] = {};
+  return lockedUpdateJsonSync(CFG_PATH, (raw) => {
+    if (!raw) raw = {};
+    const fullPath = resolveDotPath(dotPath, raw);
+    const keys = fullPath.split('.');
+    let cur = raw;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (cur[keys[i]] === undefined || cur[keys[i]] === null || typeof cur[keys[i]] !== 'object') {
+        cur[keys[i]] = {};
+      }
+      cur = cur[keys[i]];
     }
-    cur = cur[keys[i]];
-  }
-  cur[keys[keys.length - 1]] = value;
-  atomicWrite(raw);
-  return raw;
+    cur[keys[keys.length - 1]] = value;
+    return raw;
+  });
 }
 
 // dot-path getter
@@ -112,54 +101,60 @@ export function get(dotPath, fallback = undefined) {
   return dotPath.split('.').reduce((o, k) => (o == null ? o : o[k]), view) ?? fallback;
 }
 
-// array append (no duplicates by .toLowerCase)
+// array append (no duplicates by .toLowerCase). Lock-and-update.
 export function appendUnique(dotPath, item) {
   migrateIfNeeded();
-  const raw = JSON.parse(fs.readFileSync(CFG_PATH, 'utf8'));
-  const fullPath = resolveDotPath(dotPath, raw);
-  const keys = fullPath.split('.');
-  let cur = raw;
-  for (let i = 0; i < keys.length - 1; i++) {
-    if (!cur[keys[i]]) cur[keys[i]] = {};
-    cur = cur[keys[i]];
-  }
-  const last = keys[keys.length - 1];
-  if (!Array.isArray(cur[last])) cur[last] = [];
-  const norm = (x) => (typeof x === 'string' ? x.toLowerCase() : JSON.stringify(x).toLowerCase());
-  const exists = cur[last].some(x => norm(x) === norm(item));
-  if (exists) { atomicWrite(raw); return { added: false, list: cur[last] }; }
-  cur[last].push(item);
-  atomicWrite(raw);
-  return { added: true, list: cur[last] };
+  let result = { added: false, list: [] };
+  lockedUpdateJsonSync(CFG_PATH, (raw) => {
+    if (!raw) raw = {};
+    const fullPath = resolveDotPath(dotPath, raw);
+    const keys = fullPath.split('.');
+    let cur = raw;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (!cur[keys[i]]) cur[keys[i]] = {};
+      cur = cur[keys[i]];
+    }
+    const last = keys[keys.length - 1];
+    if (!Array.isArray(cur[last])) cur[last] = [];
+    const norm = (x) => (typeof x === 'string' ? x.toLowerCase() : JSON.stringify(x).toLowerCase());
+    const exists = cur[last].some(x => norm(x) === norm(item));
+    if (!exists) cur[last].push(item);
+    result = { added: !exists, list: cur[last] };
+    return raw;
+  });
+  return result;
 }
 
-// array remove (case-insensitive match for strings)
+// array remove (case-insensitive match for strings). Lock-and-update.
 export function removeFromArray(dotPath, predicateOrValue) {
   migrateIfNeeded();
-  const raw = JSON.parse(fs.readFileSync(CFG_PATH, 'utf8'));
-  const fullPath = resolveDotPath(dotPath, raw);
-  const keys = fullPath.split('.');
-  let cur = raw;
-  for (let i = 0; i < keys.length - 1; i++) {
-    if (!cur[keys[i]]) return { removed: 0, list: [] };
-    cur = cur[keys[i]];
-  }
-  const last = keys[keys.length - 1];
-  if (!Array.isArray(cur[last])) return { removed: 0, list: [] };
-  const before = cur[last].length;
-  const pred = typeof predicateOrValue === 'function'
-    ? predicateOrValue
-    : (item) => {
-        if (typeof item === 'string' && typeof predicateOrValue === 'string') {
-          return item.toLowerCase() === predicateOrValue.toLowerCase();
-        }
-        if (item && typeof item === 'object' && typeof predicateOrValue === 'string') {
-          // for queries: { key, term } — match by term
-          return (item.term || '').toLowerCase() === predicateOrValue.toLowerCase();
-        }
-        return JSON.stringify(item) === JSON.stringify(predicateOrValue);
-      };
-  cur[last] = cur[last].filter(x => !pred(x));
-  atomicWrite(raw);
-  return { removed: before - cur[last].length, list: cur[last] };
+  let result = { removed: 0, list: [] };
+  lockedUpdateJsonSync(CFG_PATH, (raw) => {
+    if (!raw) return undefined; // no file → nothing to remove, skip write
+    const fullPath = resolveDotPath(dotPath, raw);
+    const keys = fullPath.split('.');
+    let cur = raw;
+    for (let i = 0; i < keys.length - 1; i++) {
+      if (!cur[keys[i]]) { result = { removed: 0, list: [] }; return undefined; }
+      cur = cur[keys[i]];
+    }
+    const last = keys[keys.length - 1];
+    if (!Array.isArray(cur[last])) { result = { removed: 0, list: [] }; return undefined; }
+    const before = cur[last].length;
+    const pred = typeof predicateOrValue === 'function'
+      ? predicateOrValue
+      : (item) => {
+          if (typeof item === 'string' && typeof predicateOrValue === 'string') {
+            return item.toLowerCase() === predicateOrValue.toLowerCase();
+          }
+          if (item && typeof item === 'object' && typeof predicateOrValue === 'string') {
+            return (item.term || '').toLowerCase() === predicateOrValue.toLowerCase();
+          }
+          return JSON.stringify(item) === JSON.stringify(predicateOrValue);
+        };
+    cur[last] = cur[last].filter(x => !pred(x));
+    result = { removed: before - cur[last].length, list: cur[last] };
+    return raw;
+  });
+  return result;
 }

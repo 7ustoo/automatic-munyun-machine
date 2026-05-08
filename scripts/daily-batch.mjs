@@ -25,6 +25,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
+import { atomicWriteJson } from './io-helpers.mjs';
 
 // v1.0 E5: ensure config + data layout are profile-aware before we read anything.
 migrateIfNeeded();
@@ -424,7 +425,7 @@ function recordQueryStats(byQuery) {
     store.queries[term] = slot;
   }
   store.lastUpdated = new Date().toISOString();
-  fs.writeFileSync(QUERY_STATS_PATH, JSON.stringify(store, null, 2));
+  atomicWriteJson(QUERY_STATS_PATH, store);
 }
 
 // ---------- filter ----------
@@ -681,25 +682,25 @@ function saveSeenStore(blockedSet, top) {
     freshnessDays: SEEN_FRESHNESS_DAYS,
     jobs: fresh
   };
-  fs.writeFileSync(SEEN_PATH, JSON.stringify(out, null, 2));
+  atomicWriteJson(SEEN_PATH, out);
 }
 
 // Track when the bot last confirmed a healthy hiring.cafe session.
 // Used by the periodic re-auth nag and by the /auth bot command.
 const AUTH_PATH = path.join(ROOT, 'data', 'auth-state.json');
 function recordAuthOk() {
-  fs.writeFileSync(AUTH_PATH, JSON.stringify({
+  atomicWriteJson(AUTH_PATH, {
     lastAuthOK: new Date().toISOString(),
     lastAuthFail: null
-  }, null, 2));
+  });
 }
 function recordAuthFail() {
   let prev = {};
   try { prev = JSON.parse(fs.readFileSync(AUTH_PATH, 'utf8')); } catch {}
-  fs.writeFileSync(AUTH_PATH, JSON.stringify({
+  atomicWriteJson(AUTH_PATH, {
     lastAuthOK: prev.lastAuthOK || null,
     lastAuthFail: new Date().toISOString()
-  }, null, 2));
+  });
 }
 
 // v1.0.x: Cloudflare bot-blocks plain Node fetch on viewjob URLs (returns
@@ -877,6 +878,9 @@ function writeBatchTsv(top, directUrls, funnel) {
     const yoe = r.yoe ?? '';
     return `${i + 1}\t${id}\t${title}\t${co}\t${yoe}\t${r.q}\t${url}`;
   }).join('\n');
+  // TSV + direct-URLs files are write-once-per-day artifacts; not contended,
+  // plain writes are fine. last-batch.json IS contended (bot's /forget last
+  // can mutate while a scrape is mid-run), so use atomicWriteJson for it.
   fs.writeFileSync(path.join(PP.dir, `today-batch-${DATE}.tsv`), tsv + '\n');
   fs.writeFileSync(path.join(PP.dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
 
@@ -901,7 +905,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       viewjobUrl: r.href
     }))
   };
-  fs.writeFileSync(PP.lastBatch, JSON.stringify(lastBatch, null, 2));
+  atomicWriteJson(PP.lastBatch, lastBatch);
 }
 
 // Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation

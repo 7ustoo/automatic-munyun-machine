@@ -133,17 +133,41 @@ function pruneRestarts(restarts) {
   return restarts.filter(t => t > cutoff);
 }
 
-(async () => {
+// Refactored to an exported tick() so tests can drive the logic without
+// running a real PowerShell spawn or hitting the live filesystem layout.
+// The CLI behavior at the bottom of the file matches the prior IIFE.
+//
+// Tests can override the four side-effecting helpers via setHooks():
+//   readHeartbeatFn, killBotFn, startBotFn, alertTelegramFn
+// — letting them assert the right calls happen in the right order without
+// needing to actually fork PowerShell.
+let _hooks = {
+  readHeartbeat,
+  killBot,
+  startBot,
+  alertTelegram,
+  // Sleep is also injectable so the cross-test 2 s pause can collapse to 0.
+  sleep: (ms) => new Promise(r => setTimeout(r, ms))
+};
+export function setHooks(overrides) {
+  Object.assign(_hooks, overrides);
+}
+export function resetHooks() {
+  _hooks = { readHeartbeat, killBot, startBot, alertTelegram,
+             sleep: (ms) => new Promise(r => setTimeout(r, ms)) };
+}
+
+export async function tick() {
   writeSelfHeartbeat({ phase: 'starting' });
   log('--- watchdog tick ---');
 
-  const hb = readHeartbeat();
+  const hb = _hooks.readHeartbeat();
   const now = Date.now();
 
   if (!hb) {
     log('No heartbeat file. Bot has never run, or data/ was wiped.');
     writeSelfHeartbeat({ phase: 'no-heartbeat-skipping' });
-    return;
+    return { phase: 'no-heartbeat' };
   }
 
   const hbAge = now - new Date(hb.ts).getTime();
@@ -152,7 +176,7 @@ function pruneRestarts(restarts) {
   if (hbAge < STALE_THRESHOLD_MS) {
     log('healthy — exiting');
     writeSelfHeartbeat({ phase: 'healthy', botHeartbeatAgeMs: hbAge });
-    return;
+    return { phase: 'healthy', hbAge };
   }
 
   // Stale — bot is dead or hung.
@@ -162,27 +186,22 @@ function pruneRestarts(restarts) {
   if (state.restarts.length >= MAX_RESTARTS) {
     log(`MAX_RESTARTS reached (${state.restarts.length} in last hour). Holding off.`);
     if (!state.gaveUpAt || (now - new Date(state.gaveUpAt).getTime()) > RESTART_WINDOW_MS) {
-      // First "give up" of this hour-window — alert once.
-      alertTelegram(`⛔ Watchdog: bot has crashed ${state.restarts.length}× in the last hour and won't auto-restart again. Check data/telegram-bot.log + data/watchdog.log on the host.`);
+      _hooks.alertTelegram(`⛔ Watchdog: bot has crashed ${state.restarts.length}× in the last hour and won't auto-restart again. Check data/telegram-bot.log + data/watchdog.log on the host.`);
       state.gaveUpAt = new Date().toISOString();
       writeState(state);
     }
     writeSelfHeartbeat({ phase: 'gave-up', restarts: state.restarts.length });
-    return;
+    return { phase: 'gave-up', restarts: state.restarts.length };
   }
 
   log(`restart attempt ${state.restarts.length + 1}/${MAX_RESTARTS}`);
   writeSelfHeartbeat({ phase: 'restarting', attempt: state.restarts.length + 1 });
 
-  killBot(hb);
-  // Brief pause so the OS can reap the killed process
-  await new Promise(r => setTimeout(r, 2000));
-  const started = startBot();
+  _hooks.killBot(hb);
+  await _hooks.sleep(2000);
+  const started = _hooks.startBot();
 
-  // Only count successful restart attempts toward MAX_RESTARTS. A transient
-  // schtasks failure (UAC, machine sleeping, missing task) shouldn't burn
-  // one of the three retry slots when no restart actually happened. The
-  // failed-attempt is logged + alerted regardless.
+  // F-M7: only count successful restart attempts toward MAX_RESTARTS.
   if (started) {
     state.restarts.push(now);
     state.gaveUpAt = null;
@@ -191,10 +210,21 @@ function pruneRestarts(restarts) {
 
   const hbAgeMin = Math.round(hbAge / 60000);
   if (started) {
-    alertTelegram(`📶 Bot recovered after ~${hbAgeMin}m offline. Watchdog restarted munyun-bot. Send /status to verify.`);
+    _hooks.alertTelegram(`📶 Bot recovered after ~${hbAgeMin}m offline. Watchdog restarted munyun-bot. Send /status to verify.`);
   } else {
-    alertTelegram(`⚠️ Watchdog tried to restart the bot (heartbeat ${hbAgeMin}m stale) but the scheduler call failed. Check the platform's task scheduler manually.`);
+    _hooks.alertTelegram(`⚠️ Watchdog tried to restart the bot (heartbeat ${hbAgeMin}m stale) but the scheduler call failed. Check the platform's task scheduler manually.`);
   }
   writeSelfHeartbeat({ phase: 'restart-issued', startedTask: started });
   log('done');
-})();
+  return { phase: 'restart-issued', startedTask: started, restarts: state.restarts.length };
+}
+
+// Internals exported for tests.
+export { pruneRestarts, readState, writeState, RESTART_WINDOW_MS, MAX_RESTARTS, STALE_THRESHOLD_MS };
+
+// CLI entrypoint — only fires when invoked directly, not on import.
+const _thisFile = fileURLToPath(import.meta.url);
+const _invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+if (path.resolve(_thisFile) === _invokedFile) {
+  tick().catch(err => { log(`tick failed: ${err.message}`); process.exit(1); });
+}

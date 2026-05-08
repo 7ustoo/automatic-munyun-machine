@@ -53,15 +53,18 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const VERSION = currentVersion();
 
-// Absolute paths to Windows system binaries. spawn('powershell', ...) and
-// spawn('cmd.exe', ...) rely on PATH lookup, which fails on the
-// stripped-PATH installs we've seen in the wild (Daniel hit this in v0.4
-// during wizard task registration; another tester hit it in v0.5 trying
-// to /pause). Resolving via %SystemRoot% always works on a sane Windows.
-const SYS32      = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-const POWERSHELL = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-const CMD_EXE    = path.join(SYS32, 'cmd.exe');
-const SCHTASKS   = path.join(SYS32, 'schtasks.exe');
+// v1.1 — system binaries + scheduler ops moved into scripts/os-paths.mjs.
+// On Win32 these resolve to absolute %SystemRoot% paths (the stripped-PATH
+// defense from v0.4.1 / v0.5); on Mac/Linux they're null + the runtime
+// branches via runScheduledTask / disableScheduledTask / etc.
+import {
+  IS_WIN32, IS_DARWIN, IS_LINUX, PLATFORM,
+  POWERSHELL, CMD_EXE, SCHTASKS,
+  npmCmd, nodeCmd,
+  runScheduledTask, disableScheduledTask, enableScheduledTask, scheduledTaskExists,
+  LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
+} from './os-paths.mjs';
+import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
 
 // ---------- env ----------
 const ENV_PATH = path.join(ROOT, '.env');
@@ -269,12 +272,23 @@ function runClaudeBatch(chatId) {
     return reply(chatId, '⏳ A scrape is already in progress — wait for it to finish.');
   }
   reply(chatId, '🔄 Scraping hiring.cafe… this takes 1–2 min. You\'ll get the batch when it\'s done.');
-  log('Starting daily batch via run-daily-batch.cmd');
-  const child = spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
-    cwd: ROOT,
-    detached: false,
-    windowsHide: true
-  });
+  // v1.1 cross-platform: on Windows we go through cmd /c run-daily-batch.cmd
+  // (preserves the legacy detached-window contract); on Mac/Linux we invoke
+  // node directly with the daily-batch.mjs path. Both inherit cwd=ROOT.
+  let child;
+  if (IS_WIN32) {
+    log('Starting daily batch via run-daily-batch.cmd');
+    child = spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
+      cwd: ROOT, detached: false, windowsHide: true
+    });
+  } else {
+    log('Starting daily batch via node scripts/daily-batch.mjs');
+    child = spawn(nodeCmd(), [path.join(ROOT, 'scripts', 'daily-batch.mjs')], {
+      cwd: ROOT, detached: false
+    });
+  }
+  // (Legacy spawn below replaced — kept signature for the rest of the function.)
+  ;
   runningJob = child;
   let stderr = '';
   child.stderr?.on('data', d => { stderr += d.toString(); });
@@ -491,15 +505,14 @@ async function buildStatusMessage() {
   lines.push(`<b>Activity</b>`);
   lines.push(`  Batch in progress: ${runningJob ? '✓ yes' : 'no'}`);
 
-  // Scheduled tasks state via schtasks /query (silent fail if not Windows)
-  let tasksLine = '  Scheduled tasks: query failed';
+  // Scheduled tasks state — platform-aware via os-paths.
+  let tasksLine;
   try {
-    const r = await spawnWithTimeout(SCHTASKS, ['/query', '/tn', 'munyun-bot', '/fo', 'CSV', '/nh'], 5000);
-    if (r.code === 0) {
-      const cols = (r.output || '').replace(/^"|"$/g, '').split('","');
-      tasksLine = `  munyun-bot: ${cols[2] || '?'}`;
-    }
-  } catch { /* ignore */ }
+    const exists = scheduledTaskExists('bot');
+    tasksLine = exists ? `  munyun-bot: registered (${PLATFORM})` : `  munyun-bot: not registered`;
+  } catch (e) {
+    tasksLine = `  Scheduled tasks: query failed (${escHtml(e.message)})`;
+  }
   lines.push(tasksLine);
 
   return lines.join('\n');
@@ -735,29 +748,35 @@ async function handleMessage(msg) {
       } catch {}
       return reply(chatId, '✅ Logged in to hiring.cafe.' + extra);
     }
-    return reply(chatId, '❌ Not logged in. Run <code>scripts\\login-once.cmd</code> on the laptop to re-auth.');
+    return reply(chatId, `❌ Not logged in. Run <code>${escHtml(LOGIN_HELPER_DOC)}</code> on the laptop to re-auth.`);
   }
 
-  // /pause — disable 7am push
+  // /pause — disable scheduled batch (cross-platform via os-paths)
   if (/^\/?pause\b/.test(text)) {
-    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
-    if (r.timeout) return reply(chatId, '⏰ Pause command timed out after 30s. Try again.');
-    if (r.code === 0) return reply(chatId, '⏸ Daily 7am push paused. Use /resume-bot to re-enable.');
-    return reply(chatId, `❌ Could not pause (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
+    const r = disableScheduledTask('daily');
+    if (r.ok) return reply(chatId, '⏸ Daily push paused. Use /resume-bot to re-enable.');
+    return reply(chatId, `❌ Could not pause (exit ${r.code}).\n<pre>${escHtml((r.output || '').slice(0, 200))}</pre>`);
   }
-  // /resume-bot — re-enable 7am push
+  // /resume-bot — re-enable scheduled batch
   if (/^\/?resume[-_\s]?bot\b/.test(text)) {
-    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
-    if (r.timeout) return reply(chatId, '⏰ Resume command timed out after 30s. Try again.');
-    if (r.code === 0) return reply(chatId, '▶️ Daily 7am push re-enabled.');
-    return reply(chatId, `❌ Could not resume (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
+    const r = enableScheduledTask('daily');
+    if (r.ok) return reply(chatId, '▶️ Daily push re-enabled.');
+    return reply(chatId, `❌ Could not resume (exit ${r.code}).\n<pre>${escHtml((r.output || '').slice(0, 200))}</pre>`);
   }
-  // /reauth — spawn login-once.mjs on the user's machine
+  // /reauth — spawn login-once on the user's machine. Cross-platform:
+  // on Win32 we route through the .cmd wrapper (preserves the visible
+  // window contract); on Mac/Linux we exec node directly.
   if (/^\/?reauth\b/.test(text)) {
-    reply(chatId, '🔓 Opening login window on your computer. Sign into hiring.cafe with Google, then close the window.');
-    spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
-      cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
-    }).unref();
+    reply(chatId, '🔓 Opening Cloudflare warmup window on your computer. Wait for it to finish — no sign-in required.');
+    if (IS_WIN32) {
+      spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
+        cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
+      }).unref();
+    } else {
+      spawn(nodeCmd(), [path.join(ROOT, 'scripts', 'login-once.mjs')], {
+        cwd: ROOT, detached: true, stdio: 'ignore'
+      }).unref();
+    }
     return;
   }
   // /save N or /applied N — text-mode fallbacks. Both write locally first
@@ -931,7 +950,16 @@ async function handleMessage(msg) {
     if (hh > 23 || mm > 59) return reply(chatId, '❌ Invalid time. Use 24-hour HH:MM.');
     const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     cfgRW.set('schedule.time', time);
-    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    // Re-register scheduled tasks on the host platform.
+    let r;
+    if (IS_WIN32) {
+      r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    } else {
+      const setupScript = IS_DARWIN
+        ? path.join(ROOT, 'scripts', 'setup-tasks-mac.sh')
+        : path.join(ROOT, 'scripts', 'setup-tasks-linux.sh');
+      r = await spawnWithTimeout('bash', [setupScript], 30000);
+    }
     if (r.timeout) return reply(chatId, `⏰ Schedule saved but task re-registration timed out after 30s.`);
     return reply(chatId, r.code === 0
       ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
@@ -1107,13 +1135,13 @@ async function handleMessage(msg) {
     const pullR = await spawnWithTimeout('git', ['pull', 'origin', 'main'], 60000);
     if (pullR.timeout) return reply(chatId, '❌ git pull timed out after 60s. Cancelling update.');
     if (pullR.code !== 0) {
-      return reply(chatId, `❌ git pull failed (exit ${pullR.code}):\n<pre>${escHtml((pullR.output || '').slice(0, 800))}</pre>\n\n<i>Likely cause: uncommitted local changes. Update the bot manually:\n<code>cd %LOCALAPPDATA%\\automatic-munyun-machine; git stash; git pull origin main; npm install</code></i>`);
+      return reply(chatId, `❌ git pull failed (exit ${pullR.code}):\n<pre>${escHtml((pullR.output || '').slice(0, 800))}</pre>\n\n<i>Likely cause: uncommitted local changes. Update manually:\n<code>cd ${escHtml(INSTALL_DIR_HINT)}; git stash; git pull origin main; npm install</code></i>`);
     }
 
     await reply(chatId, '📦 <i>Installing dependencies…</i>');
-    // npm.cmd on Windows — passing 'npm' to spawn() without shell:true won't find it
-    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const npmR = await spawnWithTimeout(npmCmd, ['install', '--no-audit', '--no-fund', '--loglevel=error'], 120000);
+    // Resolve npm absolutely via os-paths (handles Win32 stripped-PATH +
+    // Mac/Linux PATH lookup uniformly).
+    const npmR = await spawnWithTimeout(npmCmd(), ['install', '--no-audit', '--no-fund', '--loglevel=error'], 120000);
     if (npmR.timeout) return reply(chatId, '❌ npm install timed out after 2min. Bot left in old state — restart manually.');
     if (npmR.code !== 0) {
       return reply(chatId, `❌ npm install failed (exit ${npmR.code}):\n<pre>${escHtml((npmR.output || '').slice(0, 800))}</pre>`);
@@ -1124,16 +1152,26 @@ async function handleMessage(msg) {
 
     await reply(chatId, '👋 <b>Restarting bot to apply update…</b>\nBack online in ~10 seconds.');
 
-    // Detached restarter: waits 4s for this bot to exit, then runs schtasks
-    // to start a fresh bot from the (now updated) code on disk.
-    // Absolute paths used everywhere — if PATH is stripped (which is exactly
-    // the kind of environment that needs auto-update most), this still works.
-    const TIMEOUT = path.join(SYS32, 'timeout.exe');
-    const restartCmd = `"${TIMEOUT}" /t 4 /nobreak >nul && "${SCHTASKS}" /run /tn munyun-bot`;
-    const restarter = spawn(CMD_EXE, ['/c', restartCmd], {
-      detached: true, stdio: 'ignore', windowsHide: true
-    });
-    restarter.unref();
+    // Detached restarter: waits 4s for this bot to exit, then asks the
+    // platform scheduler to start a fresh bot from the (now updated) code.
+    // Cross-platform via os-paths.runScheduledTask — internally branches
+    // schtasks (Win32) / launchctl kickstart (Mac) / systemctl --user start (Linux).
+    if (IS_WIN32) {
+      const TIMEOUT = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'timeout.exe');
+      const restartCmd = `"${TIMEOUT}" /t 4 /nobreak >nul && "${SCHTASKS}" /run /tn munyun-bot`;
+      spawn(CMD_EXE, ['/c', restartCmd], {
+        detached: true, stdio: 'ignore', windowsHide: true
+      }).unref();
+    } else {
+      // POSIX: a tiny detached shell sleeps 4s then runs the scheduler call.
+      // Shell-out is the simplest portable way to detach + sleep + invoke.
+      const sleepThenStart = IS_DARWIN
+        ? `sleep 4 && launchctl kickstart -k gui/$(id -u)/com.amm.bot`
+        : `sleep 4 && systemctl --user start munyun-bot.service`;
+      spawn('/bin/sh', ['-c', sleepThenStart], {
+        detached: true, stdio: 'ignore'
+      }).unref();
+    }
 
     // Give Telegram ~1s to deliver the "restarting" message before we exit
     await new Promise(r => setTimeout(r, 1500));
@@ -1182,7 +1220,7 @@ async function handleMessage(msg) {
         seen.ids = seen.ids.filter(id => !remove.has(id));
         after = seen.ids.length;
       }
-      fs.writeFileSync(seenPath, JSON.stringify(seen, null, 2));
+      atomicWriteJson(seenPath, seen);
       return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.`);
     } catch (e) {
       return reply(chatId, '❌ ' + escHtml(e.message));
@@ -1376,7 +1414,7 @@ async function handleCallback(cq) {
     const mode = idx === 1 ? 'pause' : 'wipe';
     await tgAnswerCallback(cq.id, mode === 'pause' ? 'Pausing…' : 'Wiping everything…');
     const finalMsg = mode === 'pause'
-      ? `🛑 <b>Pausing.</b>\nBot exiting; scheduled tasks unregistering. Preserved: data/, config.json, .env. Re-run <code>scripts\\setup-tasks.ps1</code> to bring it back.`
+      ? `🛑 <b>Pausing.</b>\nBot exiting; scheduled tasks unregistering. Preserved: data/, config.json, .env. ${escHtml(RESTART_HINT_DOC)}.`
       : `☠️ <b>Wiping everything.</b>\nBot exiting. data/, config.json, .env, browser session will be deleted by the uninstall process.\n\n<i>Install dir at <code>${escHtml(ROOT)}</code> remains — delete by hand if you want the code gone.</i>`;
     await reply(chatId, finalMsg);
     // Spawn uninstall.mjs detached so it survives our exit

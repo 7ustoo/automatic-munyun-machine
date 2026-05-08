@@ -37,6 +37,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths } from './profile-store.mjs';
+import { atomicWriteJson } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -166,8 +167,7 @@ export function writeCallbackTable(items) {
       q: i.q || ''
     }))
   };
-  fs.mkdirSync(path.dirname(callbacksPath()), { recursive: true });
-  fs.writeFileSync(callbacksPath(), JSON.stringify(tbl, null, 2));
+  atomicWriteJson(callbacksPath(), tbl);
   return callbacksPath();
 }
 

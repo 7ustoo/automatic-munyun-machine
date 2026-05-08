@@ -25,6 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -54,9 +55,10 @@ function readRawConfig() {
 }
 
 function atomicWriteConfig(obj) {
-  const tmp = CFG_PATH + '.tmp.' + process.pid;
-  fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, CFG_PATH);
+  // Delegated to io-helpers for the lock + retry semantics. Safe even when
+  // the caller is already holding the lock indirectly through the same
+  // path — proper-lockfile is process-aware (it tags the lock with PID).
+  atomicWriteJson(CFG_PATH, obj);
 }
 
 // Idempotent. Safe to call from any script entrypoint.
