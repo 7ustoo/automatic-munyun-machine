@@ -1,19 +1,21 @@
 #!/usr/bin/env node
-// Windows native file-picker dialog spawned from PowerShell.
+// Cross-platform native file-picker dialog (v1.1).
+//
+// Branches by platform:
+//   Win32  → PowerShell + System.Windows.Forms.OpenFileDialog
+//   Darwin → osascript "choose file with prompt"
+//   Linux  → zenity --file-selection (GTK), kdialog (KDE), or null fallback
 //
 // Returns the absolute path of the selected file, or null if the user
-// cancelled. Throws if PowerShell is unavailable or the dialog fails to
-// open (e.g. no GUI session). Caller should fall back to typed-path input.
+// cancelled / no GUI is available. Caller should fall back to typed-path
+// input on null.
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import os from 'node:os';
+import { POWERSHELL, OSASCRIPT, ZENITY, KDIALOG, IS_WIN32, IS_DARWIN, IS_LINUX } from './os-paths.mjs';
 
-const POWERSHELL = path.join(
-  process.env.SystemRoot || 'C:\\Windows',
-  'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
-);
-
-const SCRIPT = `
+const PS_SCRIPT = `
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 $dlg = New-Object System.Windows.Forms.OpenFileDialog
 $dlg.Filter = 'Resumes (*.pdf;*.docx;*.md;*.txt)|*.pdf;*.docx;*.md;*.txt|All files (*.*)|*.*'
@@ -27,26 +29,55 @@ if ($dlg.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 }
 `.trim();
 
-export async function pickResumeFile() {
+// AppleScript: returns a POSIX path. Cancel raises NSError → exit non-zero.
+const OSA_SCRIPT = `try
+  set f to choose file with prompt "Select your resume" of type {"pdf", "docx", "md", "txt", "markdown"}
+  return POSIX path of f
+on error number -128
+  return ""
+end try`;
+
+function runChild(cmd, args) {
   return new Promise((resolve, reject) => {
-    const child = spawn(POWERSHELL, ['-NoProfile', '-STA', '-Command', SCRIPT], {
-      windowsHide: true
-    });
+    const child = spawn(cmd, args, { windowsHide: true });
     let out = '';
     let err = '';
     child.stdout.on('data', d => { out += d.toString(); });
     child.stderr.on('data', d => { err += d.toString(); });
     child.on('error', e => reject(new Error('File picker unavailable: ' + e.message)));
     child.on('exit', code => {
-      if (code === 0) {
-        const picked = out.trim();
-        if (picked) resolve(picked);
-        else resolve(null);
-      } else if (code === 2) {
-        resolve(null);
-      } else {
-        reject(new Error(`File picker exit ${code}: ${err.trim() || '(no stderr)'}`));
-      }
+      const trimmed = out.trim();
+      if (code === 0) resolve(trimmed || null);
+      else if (code === 2 || (cmd.endsWith('osascript') && trimmed === '')) resolve(null);
+      else reject(new Error(`File picker exit ${code}: ${err.trim() || '(no stderr)'}`));
     });
   });
+}
+
+export async function pickResumeFile() {
+  if (IS_WIN32) {
+    if (!POWERSHELL) return null;
+    return runChild(POWERSHELL, ['-NoProfile', '-STA', '-Command', PS_SCRIPT]);
+  }
+  if (IS_DARWIN) {
+    if (!OSASCRIPT) return null;
+    return runChild(OSASCRIPT, ['-e', OSA_SCRIPT]);
+  }
+  if (IS_LINUX) {
+    if (ZENITY) {
+      return runChild(ZENITY, [
+        '--file-selection',
+        '--title=Select your resume',
+        '--file-filter=Resumes (pdf, docx, md, txt) | *.pdf *.docx *.md *.txt *.markdown',
+        '--file-filter=All files | *'
+      ]);
+    }
+    if (KDIALOG) {
+      return runChild(KDIALOG, ['--getopenfilename', os.homedir(),
+        '*.pdf *.docx *.md *.txt *.markdown|Resumes\n*|All files']);
+    }
+    // No GUI dialog backend — caller falls back to typed-path input.
+    return null;
+  }
+  return null;
 }

@@ -24,16 +24,18 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { IS_WIN32, IS_DARWIN, IS_LINUX, POWERSHELL, SCHTASKS } from './os-paths.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
-const SYS32 = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-const POWERSHELL = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-const SCHTASKS   = path.join(SYS32, 'schtasks.exe');
 
-const TASKS = ['munyun-bot', 'munyun-daily-batch', 'munyun-watchdog', 'munyun-batch-missed'];
+// Logical task names — same set on every platform; runtime maps these
+// through deleteScheduledTask() for the actual scheduler call. Listed
+// here just for the loop-summary log.
+const TASKS = ['bot', 'daily', 'watchdog', 'batch-missed'];
 
 const args = Object.fromEntries(
   process.argv.slice(2)
@@ -49,37 +51,89 @@ if (!['pause', 'wipe'].includes(MODE)) {
 console.log(`=== AMM uninstall (mode=${MODE}) ===`);
 
 // 1. Stop the bot process. PID match first (cleaner) via heartbeat.json,
-// then a belt-and-suspenders cmdline match for orphans.
+// then a belt-and-suspenders cmdline match for orphans. Cross-platform.
 function killBot() {
   const heartbeat = path.join(ROOT, 'data', 'heartbeat.json');
   let pid = null;
   try { pid = JSON.parse(fs.readFileSync(heartbeat, 'utf8')).pid; } catch {}
   if (pid) {
-    spawnSync(POWERSHELL, ['-NoProfile', '-Command',
-      `Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue`],
-      { stdio: 'ignore', timeout: 10000, windowsHide: true });
+    if (IS_WIN32) {
+      spawnSync(POWERSHELL, ['-NoProfile', '-Command',
+        `Stop-Process -Id ${pid} -Force -ErrorAction SilentlyContinue`],
+        { stdio: 'ignore', timeout: 10000, windowsHide: true });
+    } else {
+      // POSIX: kill -9 idempotently
+      try { process.kill(pid, 'SIGKILL'); } catch { /* already dead */ }
+    }
     console.log(`  killed PID ${pid}`);
   }
-  // Cmdline-match cleanup. Anchor to actual script filename to avoid
-  // collateral kills (e.g. an editor process whose CLI happens to contain
-  // the substring 'telegram-bot').
-  const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
-  spawnSync(POWERSHELL, ['-NoProfile', '-Command', cmd], {
-    stdio: 'ignore', timeout: 10000, windowsHide: true
-  });
+  // Cmdline-match cleanup, branched per platform.
+  if (IS_WIN32) {
+    const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
+    spawnSync(POWERSHELL, ['-NoProfile', '-Command', cmd], {
+      stdio: 'ignore', timeout: 10000, windowsHide: true
+    });
+  } else {
+    // POSIX: pgrep -f matches the cmdline; pipe to xargs kill.
+    spawnSync('/bin/sh', ['-c',
+      `pgrep -f 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs' | xargs -r kill -9 2>/dev/null || true`
+    ], { stdio: 'ignore', timeout: 10000 });
+  }
   console.log('  cleaned bot orphans');
 }
 
-// 2. Unregister all four Task Scheduler entries. Idempotent — schtasks
-// returns exit 1 if the task doesn't exist; we ignore that.
+// 2. Unregister all four scheduler entries — Win32 schtasks, Mac launchd,
+// Linux systemd. All idempotent: missing entry is fine.
 function unregisterTasks() {
-  for (const name of TASKS) {
-    const r = spawnSync(SCHTASKS, ['/delete', '/tn', name, '/f'], {
-      stdio: 'pipe', timeout: 10000, windowsHide: true
-    });
-    if (r.status === 0) console.log(`  unregistered: ${name}`);
-    else console.log(`  ${name}: not registered (skip)`);
+  if (IS_WIN32) {
+    const win32Names = ['munyun-bot', 'munyun-daily-batch', 'munyun-watchdog', 'munyun-batch-missed'];
+    for (const name of win32Names) {
+      const r = spawnSync(SCHTASKS, ['/delete', '/tn', name, '/f'], {
+        stdio: 'pipe', timeout: 10000, windowsHide: true
+      });
+      if (r.status === 0) console.log(`  unregistered: ${name}`);
+      else console.log(`  ${name}: not registered (skip)`);
+    }
+    return;
   }
+  if (IS_DARWIN) {
+    const labels = ['com.amm.bot', 'com.amm.daily', 'com.amm.watchdog', 'com.amm.batch-missed'];
+    const uid = process.getuid?.();
+    for (const label of labels) {
+      // bootout from gui session
+      spawnSync('launchctl', ['bootout', `gui/${uid}/${label}`], {
+        stdio: 'ignore', timeout: 8000
+      });
+      // remove plist
+      const plist = path.join(os.homedir(), 'Library', 'LaunchAgents', `${label}.plist`);
+      try { fs.unlinkSync(plist); console.log(`  unregistered: ${label}`); }
+      catch (e) {
+        if (e.code === 'ENOENT') console.log(`  ${label}: not registered (skip)`);
+        else console.log(`  ${label}: ${e.message}`);
+      }
+    }
+    return;
+  }
+  if (IS_LINUX) {
+    const units = ['munyun-bot.service',
+                   'munyun-daily.service', 'munyun-daily.timer',
+                   'munyun-watchdog.service', 'munyun-watchdog.timer',
+                   'munyun-batch-missed.service', 'munyun-batch-missed.timer'];
+    for (const unit of units) {
+      spawnSync('systemctl', ['--user', 'disable', '--now', unit], {
+        stdio: 'ignore', timeout: 8000
+      });
+      const unitPath = path.join(os.homedir(), '.config', 'systemd', 'user', unit);
+      try { fs.unlinkSync(unitPath); console.log(`  unregistered: ${unit}`); }
+      catch (e) {
+        if (e.code === 'ENOENT') console.log(`  ${unit}: not registered (skip)`);
+        else console.log(`  ${unit}: ${e.message}`);
+      }
+    }
+    spawnSync('systemctl', ['--user', 'daemon-reload'], { stdio: 'ignore', timeout: 8000 });
+    return;
+  }
+  console.log(`  Unsupported platform: ${process.platform}`);
 }
 
 // 3. Wipe per-user data + secrets. Only in --mode=wipe.
