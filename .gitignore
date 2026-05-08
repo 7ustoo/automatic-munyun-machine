@@ -42,3 +42,6 @@ build/
 tmp/
 *.zip
 *.tar.gz
+
+# Local Claude Code state
+.claude/
