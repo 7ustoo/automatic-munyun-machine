@@ -2,17 +2,22 @@
 /**
  * Atomic config.json read/write helper.
  *
- * Ensures multi-process safety (bot + scrape may both touch config.json) by
- * using temp-file + rename. All writes are atomic — no partial writes.
+ * Bot + scrape both touch config.json. We use a temp-file + rename pattern
+ * so a torn write never lands. CAVEAT (Windows/NTFS): rename-over-existing-
+ * destination is atomic for crash-consistency but can fail with
+ * EPERM/EACCES/EBUSY if the destination has a transient lock (antivirus
+ * scan, a concurrent reader's open handle). We mitigate with a short
+ * retry loop. Phase 2 of v1.1 layers a `proper-lockfile` advisory lock on
+ * top so concurrent writers serialize cleanly.
  *
- * Used by every Telegram /settings, /yoe, /salary, /clearance, /skip, /jobs add,
- * etc. command handler.
+ * Used by every Telegram /settings, /yoe, /salary, /clearance, /skip,
+ * /jobs add, etc. command handler.
  *
  * v1.0 E5: profile-aware. After migration, dot-paths into profile-scoped
  * fields (user, queries, filters, scoring, weather, schedule, telegram) are
- * automatically rerouted under `profiles.<active_profile>.*`. `read()` returns
- * a flattened view of the active profile so existing consumers (cfg.user.X,
- * cfg.queries) keep working without modification.
+ * automatically rerouted under `profiles.<active_profile>.*`. `read()`
+ * returns a flattened view of the active profile so existing consumers
+ * (cfg.user.X, cfg.queries) keep working without modification.
  */
 
 import fs from 'node:fs';
@@ -44,9 +49,29 @@ export function readRaw() {
 }
 
 function atomicWrite(obj) {
-  const tmp = CFG_PATH + '.tmp.' + process.pid;
+  const tmp = CFG_PATH + '.tmp.' + process.pid + '.' + Date.now();
   fs.writeFileSync(tmp, JSON.stringify(obj, null, 2));
-  fs.renameSync(tmp, CFG_PATH);
+  // Retry on transient Windows lock errors. POSIX renames are atomic and
+  // never raise these codes; on NTFS, an antivirus scan or another process's
+  // open handle can briefly block the rename.
+  const RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+  let lastErr;
+  for (let i = 0; i < 5; i++) {
+    try {
+      fs.renameSync(tmp, CFG_PATH);
+      return;
+    } catch (e) {
+      lastErr = e;
+      if (!RETRY_CODES.has(e.code)) break;
+      // Synchronous backoff; this code path is sync by contract (callers
+      // expect atomicWrite to return before they continue). 50, 100, 150, 200ms.
+      const end = Date.now() + 50 * (i + 1);
+      while (Date.now() < end) { /* spin */ }
+    }
+  }
+  // All retries exhausted (or non-transient error) — clean up tmp and re-throw.
+  try { fs.unlinkSync(tmp); } catch { /* tmp may already be gone */ }
+  throw lastErr;
 }
 
 // Decide whether a dot-path is profile-scoped (lives inside profiles.<slug>)

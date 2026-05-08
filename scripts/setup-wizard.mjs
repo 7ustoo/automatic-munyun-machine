@@ -96,6 +96,10 @@ async function step1Token() {
     const tok = (await ask(arrow('Paste bot token: '))).trim();
     if (!tok) continue;
     process.stdout.write(arrow('Validating… '));
+    // Local scrubber — wizard transcripts (screen recordings, terminal scroll-
+    // back) are a token-leak vector if a fetch error message echoes the URL
+    // (which contains the token). Match the bot's discipline.
+    const scrub = (s) => (s == null ? '' : String(s).split(tok).join('<TOKEN>'));
     try {
       const r = await fetch(`https://api.telegram.org/bot${tok}/getMe`);
       const j = await r.json();
@@ -104,9 +108,9 @@ async function step1Token() {
         writeEnv({ TELEGRAM_BOT_TOKEN: tok });
         return tok;
       }
-      console.log(fail(`Telegram says: ${j.description || 'invalid token'}`));
+      console.log(fail(`Telegram says: ${scrub(j.description || 'invalid token')}`));
     } catch (e) {
-      console.log(fail('Network error: ' + e.message));
+      console.log(fail('Network error: ' + scrub(e.message)));
     }
   }
 }

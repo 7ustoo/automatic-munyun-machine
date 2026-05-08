@@ -87,7 +87,13 @@ export function migrateIfNeeded() {
     const oldPath = path.join(ROOT, 'data', f);
     const newPath = path.join(targetDir, f);
     if (fs.existsSync(oldPath) && !fs.existsSync(newPath)) {
-      try { fs.renameSync(oldPath, newPath); moved++; } catch {}
+      try { fs.renameSync(oldPath, newPath); moved++; }
+      catch (e) {
+        // Surface the failure — silent swallow used to leave stranded
+        // files in the v0.x location, and later code expecting v1.0
+        // paths would silently see "no data" instead of "migration broke."
+        console.error(`profile-store: migration rename failed for ${f}: ${e.message}`);
+      }
     }
   }
   return { migrated: true, profile: 'default', dataFilesMoved: moved };
@@ -125,6 +131,12 @@ export function paths(slug) {
 
 // Add a new profile. Optionally clones config from another (default: copy
 // from active so a freshly added profile inherits queries / filters / etc.).
+//
+// F-H9: also clone cv-parsed.json from the source profile if present, so a
+// newly-created persona can score jobs immediately. The caller can override
+// with a fresh /resume upload later. Without this, the first batch on the
+// new profile drops every job below the match floor and the user gets a
+// confusing "0 fresh jobs" outcome.
 export function addProfile(slug, opts = {}) {
   if (!/^[a-z0-9_-]{1,32}$/i.test(slug)) {
     throw new Error('Profile slug must be 1-32 chars: letters, digits, dash, underscore.');
@@ -139,8 +151,22 @@ export function addProfile(slug, opts = {}) {
   atomicWriteConfig(raw);
 
   // Create the data dir
-  fs.mkdirSync(path.join(PROFILES_DIR, slug), { recursive: true });
-  return { slug, clonedFrom: cloneFrom };
+  const targetDir = path.join(PROFILES_DIR, slug);
+  fs.mkdirSync(targetDir, { recursive: true });
+
+  // Clone cv-parsed.json from source profile if it exists. cv-parsed.json
+  // is the only per-profile data file worth carrying forward — applications,
+  // saved, seen-jobs, last-batch should start fresh on a new persona.
+  let cvCloned = false;
+  if (cloneFrom && cloneFrom !== slug) {
+    const srcCv = path.join(PROFILES_DIR, cloneFrom, 'cv-parsed.json');
+    const dstCv = path.join(targetDir, 'cv-parsed.json');
+    if (fs.existsSync(srcCv) && !fs.existsSync(dstCv)) {
+      try { fs.copyFileSync(srcCv, dstCv); cvCloned = true; }
+      catch (e) { console.error(`profile-store: cv clone failed: ${e.message}`); }
+    }
+  }
+  return { slug, clonedFrom: cloneFrom, cvCloned };
 }
 
 // Switch the active profile. Subsequent reads/writes route through the new one.

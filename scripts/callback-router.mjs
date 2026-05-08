@@ -8,10 +8,14 @@
  *   - idx:    integer index into data/last-batch-callbacks.json (or other ctx)
  *   - sig:    8-hex-char HMAC of (action+idx+viewjobUrl) keyed by TG_TOKEN
  *
- * The sig is our defense against stale callbacks: when a new batch rotates
- * the callback table, an old button's idx may map to a NEW job — the sig
- * check rejects it so we never act on stale state. (Telegram callbacks
- * can't be forged by a user, but they can be CLICKED late.)
+ * The sig acts as a cheap stale-state checksum, not an auth token. Telegram
+ * authenticates the callback origin upstream (the bot only sees callbacks
+ * that came through Telegram's signed delivery to its bot identity), and the
+ * `chatId !== ALLOWED_CHAT` gate filters non-allowed chats before reaching
+ * here. The 32-bit truncated HMAC's job is to reject "old button clicked
+ * after batch rotation" — when idx N now maps to a different job, the sig
+ * recomputed against the new viewjobUrl won't match. 32 bits is overkill
+ * for that purpose; we'd be safe at 24.
  *
  * Action codes:
  *   s    save (job idx)
@@ -21,7 +25,10 @@
  *   b    batch nav: idx encodes page (e.g. "b:3" → page 3)
  *   bf   batch filter: e.g. "bf:saved" or "bf:all"
  *   h    history nav: idx is page
+ *   sv   saved-jobs nav: idx is page
  *   cfg  settings toggle: idx is dot-path key index in settings table
+ *   diag diagnose-supply (idx unused)
+ *   uni  uninstall confirmation (idx 0=cancel, 1=pause, 2=wipe)
  *   noop dummy (for the page-counter button)
  */
 
@@ -38,12 +45,54 @@ const ROOT = path.join(__dirname, '..');
 const callbacksPath = () => paths().lastBatchCallbacks;
 const CALLBACK_TTL_DAYS = 7;
 
+// Whitelist of action codes the router will sign or verify. Callbacks with
+// any other action are rejected without reaching the HMAC compute. Defense
+// against stale builds with old action codes (deprecated routes silently
+// passing verify against the wrong handler).
+const KNOWN_ACTIONS = new Set([
+  's', 'a', 'w', 'k',          // job-targeted
+  'b', 'bf', 'h', 'sv',        // pagination / filter
+  'cfg', 'diag', 'uni', 'noop' // control
+]);
+// Job-targeted actions look up viewjobUrl from the callbacks table; nav/
+// control actions don't.
+const JOB_ACTIONS = new Set(['s', 'a', 'w', 'k']);
+
+// HMAC keying material is mandatory. The previous fallback to the literal
+// string 'no-token' was a defense-in-depth concern: in any future code path
+// that bypassed the bot's startup TG_TOKEN gate, every callback would sign +
+// verify against a known string, defeating the stale-state check entirely.
+function requireToken(token) {
+  if (!token || typeof token !== 'string' || token.length < 10) {
+    throw new Error('callback-router: TG_TOKEN required (length >= 10)');
+  }
+  return token;
+}
+
+// Constant-time string compare for the sig check. The practical risk of a
+// timing oracle here is essentially nil (Telegram routes callbacks; an
+// attacker can't time bot replies with sub-microsecond precision over the
+// network), but using `===` for a cryptographic primitive is the kind of
+// thing audits flag. Use the right primitive.
+function safeEqual(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string') return false;
+  if (a.length !== b.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'));
+  } catch {
+    return false;
+  }
+}
+
 // Sign + format a callback_data string. Stable across the bot's lifetime
 // (token doesn't change), so a button minted today is verifiable next week
 // — until it rolls out of the callback table on batch rotation.
 export function makeCallback(action, idx, viewjobUrl, token) {
+  if (!KNOWN_ACTIONS.has(action)) {
+    throw new Error(`callback-router: unknown action "${action}"`);
+  }
   const sig = crypto
-    .createHmac('sha256', token || 'no-token')
+    .createHmac('sha256', requireToken(token))
     .update(`${action}:${idx}:${viewjobUrl || ''}`)
     .digest('hex')
     .slice(0, 8);
@@ -62,22 +111,30 @@ export function parseAndVerify(callbackData, token) {
   const parts = String(callbackData || '').split(':');
   if (parts.length !== 3) return { action: null, idx: null, ok: false };
   const [action, idxStr, sig] = parts;
+
+  // Whitelist gate before anything else. Saves an HMAC compute on garbage
+  // and prevents stale-build action codes from sneaking past verify.
+  if (!KNOWN_ACTIONS.has(action)) return { action, idx: null, ok: false };
+
   const idx = parseInt(idxStr, 10);
   if (isNaN(idx)) return { action, idx: null, ok: false };
 
-  // Job-targeted actions: look up viewjobUrl from the callbacks table to
-  // recompute sig.
-  const jobActions = new Set(['s', 'a', 'w', 'k']);
-  if (jobActions.has(action)) {
+  // Without a token we can't verify anything — surface that as not-ok rather
+  // than silently treating signature as valid.
+  if (!token || typeof token !== 'string' || token.length < 10) {
+    return { action, idx, ok: false };
+  }
+
+  if (JOB_ACTIONS.has(action)) {
     const item = lookupItem(idx);
     if (!item) return { action, idx, ok: false, expired: true };
     const expected = makeCallback(action, idx, item.url, token).split(':')[2];
-    return { action, idx, ok: sig === expected, item };
+    return { action, idx, ok: safeEqual(sig, expected), item };
   }
 
   // Nav/control actions: no item to look up.
   const expected = makeNavCallback(action, idx, token).split(':')[2];
-  return { action, idx, ok: sig === expected };
+  return { action, idx, ok: safeEqual(sig, expected) };
 }
 
 function lookupItem(idx) {

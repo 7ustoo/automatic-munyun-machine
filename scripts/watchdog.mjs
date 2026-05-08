@@ -110,7 +110,10 @@ function killBot(hb) {
 
   // Belt-and-suspenders: kill any remaining node process running telegram-bot.mjs.
   // Win32 wmic-style command-line filter via Get-CimInstance.
-  const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
+  // Anchor the match to the actual script filename — bare 'telegram-bot' would
+  // also match e.g. an editor process whose CLI happens to include the string
+  // (rare in production, but the substring match was unanchored).
+  const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
   const r2 = spawnSync(POWERSHELL, ['-NoProfile', '-Command', cmd], {
     stdio: 'ignore', timeout: 10000, windowsHide: true
   });
@@ -176,15 +179,21 @@ function pruneRestarts(restarts) {
   await new Promise(r => setTimeout(r, 2000));
   const started = startBot();
 
-  state.restarts.push(now);
-  state.gaveUpAt = null; // reset give-up flag on successful restart attempt
+  // Only count successful restart attempts toward MAX_RESTARTS. A transient
+  // schtasks failure (UAC, machine sleeping, missing task) shouldn't burn
+  // one of the three retry slots when no restart actually happened. The
+  // failed-attempt is logged + alerted regardless.
+  if (started) {
+    state.restarts.push(now);
+    state.gaveUpAt = null;
+  }
   writeState(state);
 
   const hbAgeMin = Math.round(hbAge / 60000);
   if (started) {
     alertTelegram(`📶 Bot recovered after ~${hbAgeMin}m offline. Watchdog restarted munyun-bot. Send /status to verify.`);
   } else {
-    alertTelegram(`⚠️ Watchdog tried to restart the bot (heartbeat ${hbAgeMin}m stale) but <code>schtasks /run</code> failed. Check Task Scheduler manually.`);
+    alertTelegram(`⚠️ Watchdog tried to restart the bot (heartbeat ${hbAgeMin}m stale) but the scheduler call failed. Check the platform's task scheduler manually.`);
   }
   writeSelfHeartbeat({ phase: 'restart-issued', startedTask: started });
   log('done');

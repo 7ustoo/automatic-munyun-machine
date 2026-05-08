@@ -1,15 +1,22 @@
 #!/usr/bin/env node
 /**
  * Daily 100-job batch.
- *   1. Connects to your already-running Chrome via CDP (port 9222).
- *   2. Runs 7 hiring.cafe searches, extracts/filters cards, takes top 100.
- *   3. Resolves each viewjob URL to its direct ATS URL (parallel fetch).
- *   4. Pulls Miami weather from open-meteo.
- *   5. Sends formatted message(s) to Telegram.
- *   6. Writes data/today-batch-{date}.tsv on disk.
+ *   1. Launches a headless Chromium with the persistent profile (Cloudflare
+ *      cookies live there); warmup probe verifies hiring.cafe is browsable.
+ *   2. Runs every configured hiring.cafe search (default 16), paginates to
+ *      maxPagesPerQuery (default 50), with target-driven cross-query early
+ *      stop once running fresh estimate ≥ targetJobsPerBatch × 1.5.
+ *   3. Filters (clearance, skip-companies, drop-titles, max YOE), dedups,
+ *      subtracts applied + previously-seen, scores against the parsed CV.
+ *   4. Slices top targetJobsPerBatch (default 100) above matchFloorPercent.
+ *   5. Resolves each viewjob URL to its direct ATS URL via 5-page browser
+ *      pool (Cloudflare blocks plain Node fetch; browser nav works).
+ *   6. Pulls weather from open-meteo (lat/lon/city are user-configurable).
+ *   7. Sends chunked HTML messages + jobs(<DATE>).txt attachment + inline
+ *      callback CTA to Telegram. Persists seen-jobs only after delivery.
  *
- * Prereq: Chrome must be running with --remote-debugging-port=9222 (your
- * normal Chrome, Default profile, has been launched this way already).
+ * Prereq: persistent Chromium profile (created on first run / login-once
+ * warmup). No CDP, no remote debugging port. Local-first.
  */
 
 import fs from 'node:fs';
@@ -51,7 +58,18 @@ const env = fs.existsSync(ENV_PATH)
   : {};
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = env.TELEGRAM_CHAT_ID;
-const CDP_PORT = env.CHROME_DEBUG_PORT || '9222';
+
+// Token scrubber for everything that lands in logs or user-visible error
+// messages. Telegram URL is `…/bot<TOKEN>/sendMessage`; if a fetch failure
+// surfaces the URL via `cause` chain, the token can leak into log files
+// users routinely paste publicly when asking for help. Mirror the bot's
+// pattern so the discipline is uniform across all entrypoints.
+const SCRUB = (s) => {
+  if (s == null) return '';
+  let str = String(s);
+  if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
+  return str;
+};
 
 // ---------- config (profile-aware after v1.0 E5) ----------
 // Returns the ACTIVE profile's contents flattened to top level (CFG.queries,
@@ -75,21 +93,30 @@ const CV = loadParsedCV();
 // ---------- helpers ----------
 function log(line) {
   const stamp = new Date().toISOString();
-  const msg = `[${stamp}] ${line}`;
+  const msg = `[${stamp}] ${SCRUB(line)}`;
   console.log(msg);
-  fs.appendFileSync(path.join(ROOT, 'data', `daily-batch-${DATE}.log`), msg + '\n');
+  try {
+    fs.appendFileSync(path.join(ROOT, 'data', `daily-batch-${DATE}.log`), msg + '\n');
+  } catch { /* never let log writes crash the scrape */ }
 }
 
 async function tg(text, opts = {}) {
   const body = { chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true };
   if (opts.reply_markup) body.reply_markup = opts.reply_markup;
-  const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+  let res;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch (netErr) {
+    // fetch-level error (DNS, connection, timeout). The error's cause chain
+    // can include the full URL (with TOKEN) — scrub before re-throwing.
+    throw new Error('Telegram fetch failed: ' + SCRUB(netErr.message || netErr));
+  }
   const json = await res.json();
-  if (!json.ok) throw new Error('Telegram error: ' + JSON.stringify(json));
+  if (!json.ok) throw new Error('Telegram error: ' + SCRUB(JSON.stringify(json)));
   return json.result.message_id;
 }
 
@@ -99,9 +126,14 @@ async function tgDocument(filePath, caption) {
   fd.append('chat_id', TG_CHAT);
   if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
   fd.append('document', new Blob([buf]), path.basename(filePath));
-  const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+  let res;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+  } catch (netErr) {
+    throw new Error('Telegram sendDocument fetch failed: ' + SCRUB(netErr.message || netErr));
+  }
   const json = await res.json();
-  if (!json.ok) throw new Error('Telegram sendDocument error: ' + JSON.stringify(json));
+  if (!json.ok) throw new Error('Telegram sendDocument error: ' + SCRUB(JSON.stringify(json)));
   return json.result.message_id;
 }
 
@@ -229,6 +261,16 @@ async function checkBrowsable(page) {
 async function scrape() {
   log(`Launching headless Chromium with persistent profile…`);
   const ctx = await launchBrowser();
+  try {
+    return await _scrapeWith(ctx);
+  } finally {
+    // Always close — leaked Chromium leaves a LevelDB lockfile in
+    // data/browser-profile/ that blocks the next run.
+    await ctx.close().catch(() => {});
+  }
+}
+
+async function _scrapeWith(ctx) {
   const page = ctx.pages()[0] || await ctx.newPage();
 
   // Browsability gate — Cloudflare may not have cleared yet on a fresh
@@ -237,8 +279,7 @@ async function scrape() {
   log('Verifying hiring.cafe is browsable (Cloudflare cleared)…');
   const browsable = await checkBrowsable(page);
   if (!browsable) {
-    await ctx.close();
-    const e = new Error('Hiring.cafe not yet browsable from this profile. Run scripts\\login-once.cmd to clear the Cloudflare challenge — no sign-in required.');
+    const e = new Error('Hiring.cafe not yet browsable from this profile. Run the login-once helper to clear the Cloudflare challenge — no sign-in required.');
     e.unauth = true;
     throw e;
   }
@@ -351,7 +392,6 @@ async function scrape() {
       break;
     }
   }
-  await ctx.close();
 
   // Persist per-query 7-day rolling supply history. Surfaces in /diagnose
   // so a user can see "Detection Engineer has averaged 0 cards/day for a
@@ -555,7 +595,11 @@ function filterAndDedupe(byQuery) {
 function loadAppliedHrefs() {
   try {
     const apps = fs.readFileSync(PP.applications, 'utf8');
-    return new Set([...apps.matchAll(/hiring\.cafe\/viewjob\/([a-z0-9]+)/g)].map(m => 'https://hiring.cafe/viewjob/' + m[1]));
+    // Case-insensitive match + lowercase normalization. hiring.cafe IDs are
+    // lowercase today, but treating them as a case-sensitive contract was
+    // the kind of brittleness that bites silently if the upstream shifts.
+    return new Set([...apps.matchAll(/hiring\.cafe\/viewjob\/([a-z0-9]+)/gi)]
+      .map(m => 'https://hiring.cafe/viewjob/' + m[1].toLowerCase()));
   } catch { return new Set(); }
 }
 
@@ -617,18 +661,20 @@ function saveSeenStore(blockedSet, top) {
   const store = loadSeenStore();
   const { fresh } = decaySeenStore(store);
   const now = new Date().toISOString();
-  // Add today's top entries with current timestamp; refresh lastSeenAt
-  // for any that were already in the set.
+  // F-M5: only record what was actually shown today. Preserve the original
+  // firstSeenAt (looking up the pre-decay store, not just `fresh`) so a
+  // job that was about to age out but got re-shown keeps its real
+  // first-seen timestamp instead of being reset to `now`. That used to
+  // bump near-expired entries back to day 0 every batch — meaning the
+  // 60-day decay window was effectively "60 days since last sighting,"
+  // not the documented "60 days since first sighting." The old belt-
+  // and-suspenders rewrite of `blockedSet` is dropped — it was the bug.
   for (const r of top) {
-    const existing = fresh[r.href];
+    const existing = fresh[r.href] || store.jobs[r.href];
     fresh[r.href] = {
       firstSeenAt: existing?.firstSeenAt || now,
       lastSeenAt: now
     };
-  }
-  // Belt: also ensure everything in blockedSet (passed from caller) is recorded.
-  for (const url of blockedSet) {
-    if (!fresh[url]) fresh[url] = { firstSeenAt: now, lastSeenAt: now };
   }
   const out = {
     lastUpdated: now,
@@ -668,7 +714,15 @@ async function resolveOnePage(page, viewjobUrl) {
     await page.waitForTimeout(1500);
     const html = await page.content();
     const m = html.match(/"apply_url":"([^"]+)"/);
-    return m ? m[1] : null;
+    if (!m) return null;
+    const u = m[1];
+    // Sanity check — `apply_url` is attacker-controllable (whatever the job
+    // poster typed into hiring.cafe). Reject anything that isn't a plain
+    // http(s) URL with no embedded HTML/quote characters before we let it
+    // through to a Telegram <a href="…"> interpolation. Defense layered with
+    // escHtmlAttr() at the message-build site (see buildMessage / F-H1).
+    if (!/^https?:\/\/[^\s<>"']+$/i.test(u)) return null;
+    return u;
   } catch { return null; }
 }
 
@@ -676,27 +730,35 @@ async function resolveAll(rows) {
   if (!rows.length) return [];
   log(`Launching browser for direct-URL resolution (${rows.length} jobs)…`);
   const ctx = await launchBrowser();
-  const PAR = 5; // 5 concurrent pages — balances speed vs bot-detection risk
-  const pages = [];
-  for (let i = 0; i < PAR; i++) {
-    pages.push(i === 0 ? (ctx.pages()[0] || await ctx.newPage()) : await ctx.newPage());
-  }
-  const out = new Array(rows.length);
-  let i = 0;
-  let resolved = 0;
-  await Promise.all(pages.map(async (p) => {
-    while (true) {
-      const idx = i++;
-      if (idx >= rows.length) break;
-      out[idx] = await resolveOnePage(p, rows[idx].href);
-      if (out[idx]) resolved++;
+  try {
+    const PAR = 5; // 5 concurrent pages — balances speed vs bot-detection risk
+    const pages = [];
+    for (let i = 0; i < PAR; i++) {
+      pages.push(i === 0 ? (ctx.pages()[0] || await ctx.newPage()) : await ctx.newPage());
     }
-  }));
-  await ctx.close();
-  return out;
+    const out = new Array(rows.length);
+    let i = 0;
+    let resolved = 0;
+    await Promise.all(pages.map(async (p) => {
+      while (true) {
+        const idx = i++;
+        if (idx >= rows.length) break;
+        out[idx] = await resolveOnePage(p, rows[idx].href);
+        if (out[idx]) resolved++;
+      }
+    }));
+    return out;
+  } finally {
+    await ctx.close().catch(() => {});
+  }
 }
 
+// Telegram HTML mode recognizes & < > as syntax. For text contexts that's
+// enough; for attribute contexts (href="…"), `"` can break out of the
+// attribute and Telegram does NOT auto-escape it. escHtmlAttr is the
+// attribute-safe variant — use it for every `href=` interpolation.
 function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function escHtmlAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 // v1.0 E3: prepend supply-side warnings to the batch when something's off.
 // (1) afterDedup < 30 → low supply, suggest /forget last + /jobs add
@@ -753,7 +815,12 @@ function buildMessage(weather, top, directUrls, stats) {
     const pct = `${r.matchPct ?? 0}% match`;
     const matchedTop = (r.matched || []).slice(0, 5).map(escHtml).join(' · ');
     const matchedLine = matchedTop ? `\n✓ ${matchedTop}` : '';
-    lines.push(`<b>${i + 1}.</b> ${title}${yoe} · <b>${pct}</b>\n<i>${co}</i>${matchedLine}\n<a href="${url}">${url}</a>`);
+    // F-H1: attacker-controllable URL inside HTML attribute + text. Use
+    // escHtmlAttr for the href value (escapes "), escHtml for the visible
+    // anchor text.
+    const safeHref = escHtmlAttr(url);
+    const safeText = escHtml(url);
+    lines.push(`<b>${i + 1}.</b> ${title}${yoe} · <b>${pct}</b>\n<i>${co}</i>${matchedLine}\n<a href="${safeHref}">${safeText}</a>`);
     lines.push('');
   });
   return lines.join('\n');
@@ -843,14 +910,29 @@ function writeBatchTsv(top, directUrls, funnel) {
 if (IS_CLI) (async () => {
   try {
     log(`=== daily-batch ${DATE} ===`);
+
+    // F-H9: a freshly-added profile starts with an empty CV (no /resume
+    // upload yet). Every job scores 0 → all dropped by match floor → user
+    // gets a confusing empty batch. Fail loud with a Telegram nudge instead.
+    if (!CV.titles?.length && !CV.skills?.length && !CV.certs?.length && !CV.compliance?.length) {
+      const msg = '⚠️ <b>This profile has no parsed CV.</b>\n\nEvery job will score 0% until you upload one. Run <code>/resume</code> in the bot, then <code>/scrape</code>.';
+      log('Empty CV detected — aborting batch with user nudge.');
+      try { await tg(msg); } catch {}
+      return;
+    }
+
     let byQuery;
     try {
       byQuery = await scrape();
     } catch (e) {
       if (e.unauth) {
         recordAuthFail();
-        log('AUTH FAIL: ' + e.message);
-        await tg('⚠️ <b>Hiring.cafe session expired.</b>\nRun <code>scripts\\login-once.cmd</code> to re-auth — the bot will resume normally on the next /daily.');
+        log('AUTH FAIL: ' + SCRUB(e.message));
+        // Cross-platform-aware help string. The bot stamps the right helper
+        // path per OS in v1.1; for the scraper's failure path we point at
+        // the platform-neutral "login-once helper" + npm-script form so the
+        // message renders correctly on Mac/Linux too.
+        await tg('⚠️ <b>Hiring.cafe session expired.</b>\nRun the login-once helper (<code>npm run login</code>) to clear Cloudflare — the bot will resume normally on the next /daily.');
         return; // exit clean, don't propagate as crash
       }
       throw e;
@@ -955,9 +1037,9 @@ if (IS_CLI) (async () => {
 
     log('=== done ===');
   } catch (e) {
-    const msg = '❌ daily-batch failed: ' + (e.message || e);
+    const msg = '❌ daily-batch failed: ' + SCRUB(e.message || e);
     log(msg);
-    try { await tg(msg); } catch {}
+    try { await tg(msg); } catch (tgErr) { log(`(also: tg failed: ${SCRUB(tgErr.message || tgErr)})`); }
     process.exit(1);
   }
 })();

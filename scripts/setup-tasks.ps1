@@ -37,13 +37,10 @@ $time = if ($scheduleNode -and $scheduleNode.time) { $scheduleNode.time } else {
 $days = if ($scheduleNode -and $scheduleNode.days) { $scheduleNode.days } else { @('Monday','Tuesday','Wednesday','Thursday','Friday') }
 $dayEnums = $days | ForEach-Object { [System.DayOfWeek]$_ }
 
-# Migration: delete old career-ops-* tasks if they exist
-foreach ($oldName in @('career-ops-daily-batch','career-ops-bot')) {
-  if (Get-ScheduledTask -TaskName $oldName -ErrorAction SilentlyContinue) {
-    Unregister-ScheduledTask -TaskName $oldName -Confirm:$false
-    Write-Host "[migration] Removed legacy task: $oldName"
-  }
-}
+# (career-ops-* legacy migration block removed in v1.1; pre-v0.2 installs
+# are far enough back that we no longer carry the cleanup. Anyone still
+# upgrading from v0.1 can manually `schtasks /delete /tn career-ops-bot`
+# and `…career-ops-daily-batch`.)
 
 # Daily batch at scheduled time, scheduled days
 $action7  = New-ScheduledTaskAction -Execute $RUN_BATCH_CMD

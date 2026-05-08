@@ -19,9 +19,10 @@ npm run daily       # one-shot scrape + Telegram push (also: node scripts/daily-
 npm run bot         # long-running Telegram poller
 npm run login       # opens Chromium so user signs into hiring.cafe (persists session)
 npm run parse-resume <path>   # re-parse CV → data/cv-parsed.json
+npm test            # runs the unit suite (~40 tests across pure helpers)
 ```
 
-There is no test suite, linter, or build step — changes are validated by running `npm run daily` end-to-end and watching the Telegram output, plus tailing `data/daily-batch-{date}.log` and `data/telegram-bot.log`.
+There is a small `node:test` suite (no third-party framework — pure Node ≥18 built-in runner) covering parseSalaryK, role-cluster scoring, profile-store CRUD, callback-router HMAC, watchdog throttling, and atomic-write helpers. There is no linter or build step — changes are still validated by running `npm run daily` end-to-end and watching the Telegram output, plus tailing `data/daily-batch-{date}.log` and `data/telegram-bot.log`.
 
 Restart the bot after editing `telegram-bot.mjs`:
 ```powershell
@@ -57,7 +58,7 @@ Scoring lives inline in `daily-batch.mjs`: keyword overlap between job text and 
 
 **Personal data and secrets are gitignored.** `.env`, `config.json`, `cv.md`, `cv.pdf`, all of `data/`, and any `*PRIVATE*.md`. `config.example.json` is the shipping template; the wizard copies it to `config.json` and edits in place. `CONTEXT-PRIVATE.md` is for the developer's machine state and never gets committed.
 
-**Branding sentinel.** Task Scheduler entries are `munyun-daily-batch` and `munyun-bot`. Old `career-ops-*` names are auto-migrated by `setup-tasks.ps1` — leave that migration block alone until v1.x.
+**Branding sentinel.** Task Scheduler / launchd / systemd entries are `munyun-bot`, `munyun-daily-batch`, `munyun-watchdog`, `munyun-batch-missed` (or the Mac/Linux platform-equivalent reverse-DNS / unit-name forms). Old `career-ops-*` migration block was removed in v1.1 — anyone still on v0.1 must `schtasks /delete` those by hand.
 
 ## Branching
 

@@ -101,13 +101,23 @@ function log(line) {
 // poll-loop's catch block (e.g., log() failing on a locked file). Catch
 // the kitchen sink so the bot never silently disappears. Token is scrubbed
 // from log lines defensively in case it leaks via a stack trace.
+//
+// Defensive scrubber: if TG_TOKEN is somehow falsy (env reload, future
+// refactor), `String.replace(undefined, …)` would coerce to literal
+// "undefined" and replace stray substrings. Explicitly check truthiness.
+const SCRUB = (s) => {
+  if (s == null) return '';
+  let str = String(s);
+  if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
+  return str;
+};
 process.on('unhandledRejection', (e) => {
   const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
-  log('UNHANDLED REJECTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
+  log('UNHANDLED REJECTION: ' + SCRUB(raw));
 });
 process.on('uncaughtException', (e) => {
   const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
-  log('UNCAUGHT EXCEPTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
+  log('UNCAUGHT EXCEPTION: ' + SCRUB(raw));
 });
 
 // ---------- heartbeat ----------
@@ -521,15 +531,20 @@ function buildDiagnoseMessage() {
     lines.push(`  no batches yet — run /scrape`);
   }
 
-  // Seen-jobs size
+  // Seen-jobs size — v1.0 E3 schema is { jobs: { url: { firstSeenAt, lastSeenAt } } }
+  // with 60-day decay. Old v0.x flat `ids` array is auto-migrated by daily-batch
+  // on first load; we read both shapes here for transitional safety.
   let seen = null;
   try { seen = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Seen-jobs memory</b>`);
-  if (seen?.ids) {
-    lines.push(`  Total: ${seen.ids.length} jobs`);
+  const jobCount = seen?.jobs ? Object.keys(seen.jobs).length
+                  : (Array.isArray(seen?.ids) ? seen.ids.length : 0);
+  if (jobCount > 0) {
+    const fd = seen?.freshnessDays ?? 60;
+    lines.push(`  Total: ${jobCount} jobs`);
     lines.push(`  Last updated: ${fmtAgo(seen.lastUpdated)}`);
-    lines.push(`  <i>Freshness window (60-day decay) lands in v1.0 E3 — until then, /forget all wipes the list.</i>`);
+    lines.push(`  Freshness window: ${fd} days (entries decay after; <code>/forget all</code> wipes immediately).`);
   } else {
     lines.push(`  empty`);
   }
@@ -700,7 +715,7 @@ async function handleMessage(msg) {
 
   if (/^\/?weather\b/.test(text)) {
     try { return reply(chatId, await getWeather()); }
-    catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + e.message); }
+    catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + escHtml(e.message)); }
   }
   // /scrape (and aliases /daily, gm, morning, update) — run a fresh batch
   if (/^\/?(scrape|daily|gm|morning|update)\b/.test(text) && !/^\/?jobs\b/.test(text)) {
@@ -816,7 +831,7 @@ async function handleMessage(msg) {
       ];
       return reply(chatId, lines.join('\n'));
     } catch (e) {
-      return reply(chatId, '❌ Could not read settings: ' + e.message);
+      return reply(chatId, '❌ Could not read settings: ' + escHtml(e.message));
     }
   }
 
@@ -906,7 +921,7 @@ async function handleMessage(msg) {
       cfgRW.set('weather.lon', r.lon);
       cfgRW.set('weather.timezone', r.timezone);
       return reply(chatId, `✅ Weather city: <b>${escHtml(r.city)}</b>${r.admin ? `, ${escHtml(r.admin)}` : ''} (${escHtml(r.country)})`);
-    } catch (e) { return reply(chatId, '❌ Geocoding failed: ' + e.message); }
+    } catch (e) { return reply(chatId, '❌ Geocoding failed: ' + escHtml(e.message)); }
   }
 
   // /schedule HH:MM
@@ -932,7 +947,10 @@ async function handleMessage(msg) {
     const addM = rawText.match(/^\/?jobs\s+add\s+["']?(.+?)["']?$/i);
     if (addM) {
       const term = addM[1].trim();
-      const key = term.replace(/[^a-z0-9]/gi, '').slice(0, 20);
+      // F-M13: non-Latin queries (e.g. /jobs add 中文工程师 or /jobs add !!!)
+      // collapse to an empty key, and two empty keys collide silently in
+      // results[key]. Fall back to a timestamp-based slug.
+      const key = (term.replace(/[^a-z0-9]/gi, '').slice(0, 20)) || `q${Date.now().toString(36)}`;
       const r = cfgRW.appendUnique('queries', { key, term });
       return reply(chatId, r.added
         ? `✅ Added "<b>${escHtml(term)}</b>" — now searching ${r.list.length} job titles.`
@@ -1015,7 +1033,7 @@ async function handleMessage(msg) {
         `<b>Search query that found it:</b> ${escHtml(job.q)}`,
         job.matched.length ? `<b>Matched keywords (${job.matched.length}):</b>\n${job.matched.map(escHtml).join(' · ')}` : '<i>No CV keywords matched — score is from search relevance only.</i>',
         '',
-        `<a href="${job.directUrl || job.viewjobUrl}">Open job →</a>`
+        `<a href="${escHtmlAttr(job.directUrl || job.viewjobUrl)}">Open job →</a>`
       ];
       return reply(chatId, lines.join('\n'));
     } catch {
@@ -1167,7 +1185,7 @@ async function handleMessage(msg) {
       fs.writeFileSync(seenPath, JSON.stringify(seen, null, 2));
       return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.`);
     } catch (e) {
-      return reply(chatId, '❌ ' + e.message);
+      return reply(chatId, '❌ ' + escHtml(e.message));
     }
   }
 
@@ -1191,8 +1209,8 @@ function renderJobPage(idx, total, item, opts = {}) {
     `<b>${escHtml(item.title || '(untitled)')}</b>`,
     `${escHtml(co)}  ·  ${item.matchPct}% match  ·  ${yoe}${q}`,
     '',
-    item.directUrl ? `🔗 <a href="${escHtml(item.directUrl)}">Apply directly</a>` : '',
-    `🔍 <a href="${escHtml(item.url)}">View on hiring.cafe</a>`
+    item.directUrl ? `🔗 <a href="${escHtmlAttr(item.directUrl)}">Apply directly</a>` : '',
+    `🔍 <a href="${escHtmlAttr(item.url)}">View on hiring.cafe</a>`
   ].filter(Boolean);
 
   // Action row
@@ -1254,7 +1272,7 @@ async function showHistory(chatId, page = 1) {
   const lines = [`<b>📋 Application history</b>  (page ${p}/${totalPages}, ${entries.length} total)`, ''];
   for (const [i, e] of slice.entries()) {
     const num = (p - 1) * PAGE_SIZE + i + 1;
-    lines.push(`<b>${num}.</b> <a href="${escHtml(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
+    lines.push(`<b>${num}.</b> <a href="${escHtmlAttr(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
     if (e.context) lines.push(`<i>${escHtml(e.context.slice(0, 120))}</i>`);
     lines.push('');
   }
@@ -1288,7 +1306,7 @@ async function showSaved(chatId, page = 1) {
   const lines = [`<b>💾 Saved jobs</b>  (page ${p}/${totalPages}, ${entries.length} total)`, ''];
   for (const [i, e] of slice.entries()) {
     const num = (p - 1) * PAGE_SIZE + i + 1;
-    lines.push(`<b>${num}.</b> <a href="${escHtml(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
+    lines.push(`<b>${num}.</b> <a href="${escHtmlAttr(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
     if (e.context) lines.push(`<i>${escHtml(e.context.slice(0, 120))}</i>`);
     lines.push('');
   }
@@ -1467,9 +1485,10 @@ async function handleAttachment(msg) {
     try {
       r = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
     } catch (netErr) {
-      // Strip token from any thrown error message before re-raising
-      const safe = String(netErr.message || netErr).replace(TG_TOKEN, '<TOKEN>');
-      throw new Error('Network: ' + safe);
+      // Strip token from any thrown error message before re-raising. The
+      // download URL embeds TG_TOKEN; a fetch-internal error with `cause`
+      // chain can echo the URL.
+      throw new Error('Network: ' + SCRUB(netErr.message || netErr));
     }
     if (!r.ok) throw new Error(`Download HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
@@ -1495,13 +1514,18 @@ async function handleAttachment(msg) {
     ].join('\n'));
   } catch (e) {
     // Defense-in-depth: scrub any token that might have leaked into the error message
-    const safe = String(e.message || e).replace(TG_TOKEN, '<TOKEN>');
+    const safe = SCRUB(e.message || e);
     log('Resume upload failed: ' + safe);
     return reply(chatId, '❌ Resume upload failed: ' + escHtml(safe));
   }
 }
 
 function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Attribute-context escaper. Telegram HTML mode honors `"`-delimited href
+// attributes but does NOT auto-escape `"` in text — meaning a hostile job
+// posting could break out of href="…" and inject content. Apply this to
+// every `href=` interpolation; escHtml stays for visible text.
+function escHtmlAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 // ---------- main loop ----------
 let offset = loadOffset();

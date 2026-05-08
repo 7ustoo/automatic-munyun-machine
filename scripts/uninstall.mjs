@@ -60,8 +60,10 @@ function killBot() {
       { stdio: 'ignore', timeout: 10000, windowsHide: true });
     console.log(`  killed PID ${pid}`);
   }
-  // Cmdline-match cleanup
-  const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot|munyun') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
+  // Cmdline-match cleanup. Anchor to actual script filename to avoid
+  // collateral kills (e.g. an editor process whose CLI happens to contain
+  // the substring 'telegram-bot').
+  const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
   spawnSync(POWERSHELL, ['-NoProfile', '-Command', cmd], {
     stdio: 'ignore', timeout: 10000, windowsHide: true
   });
