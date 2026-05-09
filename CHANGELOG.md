@@ -8,6 +8,85 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+---
+
+## [1.1.0] — 2026-05-08
+
+> **"Cross-platform + hardened."** Two parallel tracks bundled into one release: every HIGH-severity bug from the v1.0 code review closed, and Mac launchd + Linux systemd ports landed alongside a GitHub Actions release pipeline. Ships as one PR — no per-phase branches.
+
+### Added — Cross-platform support
+
+- **macOS** runs via launchd. New `scripts/setup-tasks-mac.sh` renders four LaunchAgent plists into `~/Library/LaunchAgents/` (`com.amm.bot` with `RunAtLoad`+`KeepAlive(Crashed)`, `com.amm.daily` with `StartCalendarInterval`, `com.amm.watchdog` with `StartInterval=300`, `com.amm.batch-missed` with `StartCalendarInterval`+1h).
+- **Linux** runs via systemd user units. New `scripts/setup-tasks-linux.sh` renders four units into `~/.config/systemd/user/` and enables linger so they fire when the user isn't logged in.
+- **Cross-platform installer** at `install.sh` mirroring `install.ps1`. Auto-detects platform via `uname -s`, installs missing prereqs (git, node ≥ 18) via `brew` / `apt-get` / `dnf`, clones into `~/Library/Application Support/automatic-munyun-machine` (Mac) or `~/.local/share/automatic-munyun-machine` (Linux), runs `npm install` + `npx playwright install chromium`, hands off to the wizard.
+- **Bash launcher trio** (`scripts/start-bot.sh`, `scripts/run-daily-batch.sh`, `scripts/login-once.sh`) symmetric to the existing `.cmd` launchers.
+- **Native file picker on macOS + Linux** via `osascript "choose file"` (Mac) / `zenity` (GNOME) / `kdialog` (KDE), with typed-path fallback when no GUI dialog backend is available.
+- **`scripts/os-paths.mjs`** — single source of truth for system-binary paths (`POWERSHELL`/`CMD_EXE`/`SCHTASKS` on Win32, `BASH`/`LAUNCHCTL`/`SYSTEMCTL`/`OSASCRIPT` on POSIX), `npmCmd()` / `nodeCmd()` resolution, and scheduler abstractions (`runScheduledTask` / `disableScheduledTask` / `enableScheduledTask` / `scheduledTaskExists` / `deleteScheduledTask` — internally branch by `process.platform`). User-facing helper-name strings (`LOGIN_HELPER_DOC`, `SETUP_HELPER_DOC`, `RESTART_HINT_DOC`, `INSTALL_DIR_HINT`) resolve to the right per-platform path so Telegram messages render correctly across all three platforms.
+- **`scripts/io-helpers.mjs`** — atomic write helpers (`atomicWriteText`, `atomicWriteJson`, `atomicUpdateJson`) with NTFS EPERM/EACCES/EBUSY retry, plus `withFileLock` / `lockedUpdateJson` / `lockedUpdateJsonSync` via `proper-lockfile` for cross-process serialization of `config.json` and per-profile JSON file writes.
+
+### Added — Code signing + CI
+
+- **`docs/SIGNING.md`** — maintainer playbook covering Microsoft Trusted Signing (Windows), Apple Developer ID + notarization (macOS), and GPG self-signed (Linux .deb / .AppImage).
+- **`scripts/build/sign-windows.ps1`** — AzureSignTool wrapper.
+- **`scripts/build/notarize-mac.sh`** — `xcrun notarytool submit --wait` + `xcrun stapler staple`.
+- **`scripts/build/sign-linux.sh`** — `dpkg-sig` for `.deb`, detached GPG `.sig` for AppImages.
+- All three signers degrade gracefully: missing secrets log `[skip signing — env:X not set]` and exit 0; releases still ship unsigned-but-functional artifacts.
+- **`scripts/build/mac.sh`** — `hdiutil`-based `.dmg` builder. Stages source tree (excludes `node_modules`/`data`/`.env`/`cv.*`/`.planning`); embeds a "Run Setup.command" double-click target that runs `npm install` + `playwright install` + wizard on first launch.
+- **`scripts/build/deb.sh`** — `dpkg-deb` builder. Installs to `/opt/automatic-munyun-machine` + `/usr/local/bin/amm` wrapper exposing `setup`/`daily`/`bot`/`login`/`uninstall` subcommands. Depends: `nodejs >= 18`, `git`. Recommends: `zenity | kdialog`.
+- **`scripts/build/appimage.sh`** — `appimagetool` builder with a bundled Node 20 runtime so the AppImage works on minimal distros without system Node.
+- **`.github/workflows/ci.yml`** — matrix CI on `(windows-latest, macos-latest, ubuntu-latest) × (Node 18, 20)`. Per-PR + per-push. Runs `npm test` on every leg + an `os-paths` import smoke test.
+- **`.github/workflows/release.yml`** — triggered by `v*.*.*` tag push. Three parallel build jobs. Each runs tests, builds the platform installer, conditionally signs (best-effort), uploads as artifact. Final `publish` job downloads all artifacts, computes `SHA256SUMS.txt`, creates GitHub Release with auto-generated notes.
+
+### Added — Tests
+
+41 new unit tests bringing the total from 24 → 65 (all passing on Windows). Same suite runs on Mac + Linux via the CI matrix.
+
+- **`scripts/__tests__/callback-router.test.mjs`** (18 tests) — `makeCallback` / `parseAndVerify` round-trip, sig determinism, action/idx/token-divergence checks, `requireToken` throw, `KNOWN_ACTIONS` whitelist, timing-safe sig compare via `crypto.timingSafeEqual`, malformed-input handling, full round-trip with `writeCallbackTable` + sig verification, stale-rotation rejection.
+- **`scripts/__tests__/io-helpers.test.mjs`** (16 tests) — atomic write semantics, lock release on success/throw, `withFileLock` serializes `Promise.all` of three incrementers (final v=3, no lost updates), and the cross-process integration test: 3 child node processes × 30 increments each → final v=90 with no lost updates. (Pre-Phase 2 this routinely lost updates on Windows.)
+- **`scripts/__tests__/watchdog.test.mjs`** (7 tests) — healthy heartbeat → no kill; stale → kill + start + recovery alert; F-M7 failed-start does NOT increment restarts; MAX_RESTARTS gives up with single alert; alert is suppressed on second consecutive give-up within 1h window; `pruneRestarts` drops old timestamps; no-heartbeat short-circuit.
+
+### Changed — Cross-platform plumbing
+
+- `telegram-bot.mjs` `/pause` / `/resume-bot` / `/reauth` / `/schedule` / `/update` restart all branch through `os-paths` instead of hardcoding PowerShell + schtasks. `/status` scheduled-tasks probe goes through `scheduledTaskExists`.
+- `setup-wizard.mjs` `registerSchedulerForPlatform()` picks `setup-tasks.ps1` (Win32) / `setup-tasks-mac.sh` (Darwin) / `setup-tasks-linux.sh` (Linux) and `startBotForPlatform()` uses `runScheduledTask('bot')`. `POWERSHELL_EXE` retained as a Win32-only alias.
+- `uninstall.mjs` cross-platform: launchctl bootout + plist removal on Mac, `systemctl --user disable --now` + unit removal on Linux. POSIX `process.kill` + `pgrep -f` cmdline cleanup replaces the PowerShell `Stop-Process` orphan-killer on non-Windows.
+- All `config.json` and per-profile JSON writes (`seen-jobs.json`, `last-batch.json`, `last-batch-callbacks.json`, `auth-state.json`, `query-stats.json`) now route through `atomicWriteJson` / `lockedUpdateJsonSync`. The TOCTOU window in `cfgRW.set` / `appendUnique` / `removeFromArray` is closed.
+- User-facing Telegram strings that referenced `scripts\login-once.cmd` / `scripts\setup-tasks.ps1` / `%LOCALAPPDATA%` now read from the platform-aware `LOGIN_HELPER_DOC` / `SETUP_HELPER_DOC` / `RESTART_HINT_DOC` / `INSTALL_DIR_HINT` constants.
+
+### Fixed — Hardening (v1.0 code review findings)
+
+Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.planning/REVIEW.md`):
+
+- **F-H1: HTML injection via unescaped `directUrl`** in batch + browser + history + saved messages. Added `escHtmlAttr()` helper that escapes `"` for href-attribute contexts (Telegram HTML mode does NOT auto-escape `"`); applied to every `<a href="…">` interpolation. `resolveOnePage` now rejects malformed `apply_url` values upstream via regex sanity check.
+- **F-H2: Token scrubbing missing in `daily-batch.mjs` error paths.** Hoisted `SCRUB(s)` helper that tokenizes `TG_TOKEN` to `<TOKEN>`. Applied to `log()`, `tg()` throws, `tgDocument()` throws, the CLI outer catch, the bot's `unhandledRejection` handler, the resume-upload network error, and `setup-wizard.mjs` token validation. Local log files + Telegram-bound error messages no longer leak the token via fetch-internal `cause` chains.
+- **F-H3: `fs.renameSync` not atomic on NTFS when destination exists.** `config-rw.mjs#atomicWrite` got an EPERM/EACCES/EBUSY retry loop with 50/100/150/200 ms backoff and unique tmp-file suffix. Phase 2 layered `proper-lockfile` advisory locking on top via `lockedUpdateJsonSync` so concurrent writers serialize cleanly. Cross-process integration test (3 children × 30 writes) confirms zero lost updates.
+- **F-H4: HMAC keying defaults to literal `'no-token'` if missing.** `callback-router.mjs#requireToken` throws if the token is missing or < 10 chars; `parseAndVerify` returns `{ok:false}` for missing tokens instead of trusting a fallback-keyed sig.
+- **F-H5: Browser context not closed on `scrape()` / `resolveAll()` failure.** Both wrapped in `try/finally` with `ctx.close().catch(() => {})` in `finally`. A page-1 navigation failure no longer leaves a Chromium LevelDB lockfile that blocks the next run.
+- **F-H6: `unhandledRejection` handler brittle if `TG_TOKEN` undefined.** Defensive `SCRUB(s)` checks `TG_TOKEN` truthiness before `replace`; eliminates the `String.replace(undefined, …)` substring-replace failure mode.
+- **F-H7: `loadAppliedHrefs()` case-sensitive viewjob ID regex.** Added `/i` flag + `.toLowerCase()` normalization at the boundary so an upstream ID-case shift doesn't silently re-show applied jobs. Same for `/history` callback URL parsing.
+- **F-H8: `/forget last` writes seen-jobs without atomic.** Now goes through `atomicWriteJson(seenPath, seen)` — no more torn-write window where a concurrent scrape's `saveSeenStore` clobbers the user's `/forget last`.
+- **F-H9: `addProfile` produces a broken first batch.** When `addProfile(slug, opts)` runs, it now copies `cv-parsed.json` from the source profile so the new persona inherits a working CV. `daily-batch.mjs` checks for an empty CV at startup and pings Telegram with a `/resume` nudge instead of running an all-zeros batch.
+- **F-M1: `escHtml(e.message)` at 4 sites** that interpolated raw error text into `parse_mode:'HTML'` replies (weather / settings / geocoding / forget last).
+- **F-M2: HMAC sig comparison uses `crypto.timingSafeEqual`** instead of `===`. Flagged for cryptographic-primitive correctness even though the practical timing-oracle risk is essentially nil here.
+- **F-M3: `KNOWN_ACTIONS` whitelist** gates `makeCallback` and `parseAndVerify` before the HMAC compute.
+- **F-M5: Decay-then-add race in `saveSeenStore`.** Dropped the belt-and-suspenders `blockedSet` rewrite that reset `firstSeenAt` for near-expired entries. The documented "60-day decay since first sighting" promise now actually holds — preserves original `firstSeenAt` by reading the pre-decay store.
+- **F-M6: Watchdog cmdline regex anchored to `telegram-bot\.mjs`** (was a bare substring match — could collateral-kill an editor process whose CLI happened to contain "telegram-bot"). Same anchor fix in `uninstall.mjs#killBot`.
+- **F-M7: Watchdog only counts a successful restart** toward `MAX_RESTARTS`. A transient scheduler failure no longer burns one of the three retry slots when no restart actually happened.
+- **F-M10: Profile-store migration rename failure** now `console.error`s instead of silently swallowing — stranded data files would have looked like an empty new install after migration.
+- **F-M13: `/jobs add` fallback slug for non-Latin terms.** Empty key would silently collide with another non-Latin query in `results[key]`; now derives `q<timestamp>` if the slug collapses to empty.
+
+### Removed
+
+- `setup-tasks.ps1` legacy `career-ops-*` Task Scheduler migration block (was gated on "until v1.x"; we are now v1.x). Anyone upgrading from v0.1 must `schtasks /delete /tn career-ops-*` by hand. The block was a no-op on every install ≥ v0.2.
+
+### Added — Dependencies
+
+- `proper-lockfile@^4.0.0` — single new prod dep (~30 KB), used for advisory file locking around `config.json` + per-profile JSON writes.
+
+---
+
+## [1.0.0] (post-release patches — superseded by v1.1)
+
 ### Fixed — v1.0 post-release patch
 
 - **Daily batch was running only the 3 default queries instead of the user's full list (and weather + filters were silently disabled).** Regression introduced by E5 multi-profile migration: `daily-batch.mjs`, `batch-missed-watcher.mjs`, and `setup-tasks.ps1` had their own raw `JSON.parse(fs.readFileSync('config.json'))` reads that didn't know about the new `{active_profile, profiles: {<slug>: {...}}}` schema. After migration, `CFG.queries` / `CFG.weather` / `CFG.filters` / `CFG.scoring` resolved to `undefined`, which fell through to hardcoded defaults — 3 queries (`IAM Engineer`, `Cloud Security Engineer`, `Cybersecurity Engineer`) and the weather-unavailable fallback. Fixed by routing all three through `readActiveConfig()` (in `daily-batch.mjs` and `batch-missed-watcher.mjs`) and adding a profile-aware schedule lookup in `setup-tasks.ps1`. Verified end-to-end: live `/scrape` now fires all 16 of this dev's queries (raw=409 vs the 116 the bug produced) and surfaces 38 fresh jobs with weather + dropTitlePatterns + skipCompanies filters all active.

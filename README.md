@@ -1,35 +1,50 @@
 # Automatic Munyun Machine (AMM)
 
-> Wake up to your morning coffee, the Miami weather, and 100 jobs sorted by how well they match your CV — delivered straight to Telegram every weekday at 7am. Apply, save, and track from your phone.
+> Wake up to your morning coffee, your local weather, and 100 jobs sorted by how well they match your CV — delivered straight to Telegram every weekday at 7am. Apply, save, and track from your phone. Runs on Windows, macOS, and Linux.
 
 ## What it does
 
-- **Daily 100-job batch.** Scrapes hiring.cafe across 15 search queries (IAM, Cloud Security, Cybersecurity, M365, Linux, etc.).
+- **Daily 100-job batch.** Scrapes hiring.cafe across as many search queries as you configure (default ships with 16; you `/jobs add` more).
 - **CV-aware ranking.** Parses your resume, scores each job by keyword overlap, sorts top→bottom by match %.
 - **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
-- **Telegram-first.** Push at 7am Mon-Fri, on-demand `/scrape`, plus `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
+- **Telegram-first.** Push at 7am Mon-Fri (configurable), on-demand `/scrape`, plus `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
 - **Downloadable .txt batch every morning.** `jobs(YYYY-MM-DD).txt` arrives as a Telegram attachment alongside the message stream — search-friendly, archivable, pull anytime via `/export`.
 - **Local-first.** Everything runs on your machine. Nothing leaves your computer except the actual Telegram messages.
 
 ## Install
 
-### Option 1 — `.exe` installer (recommended for non-developers)
+### Option 1 — Native installer (recommended for non-developers)
 
-Grab `amm-setup-vX.Y.Z.exe` from the [latest GitHub release](https://github.com/7ustoo/automatic-munyun-machine/releases/latest), double-click, follow the wizard. The installer bundles npm install + `npx playwright install chromium` + the setup wizard. Standard Add/Remove Programs uninstaller works.
+Grab the platform-appropriate artifact from the [latest GitHub release](https://github.com/7ustoo/automatic-munyun-machine/releases/latest):
 
-> The installer is unsigned for v1.0 — Windows SmartScreen will warn "Unknown Publisher." Click *More info* → *Run anyway*. Code signing arrives in v1.1.
+| Platform | Artifact | Verify |
+|---|---|---|
+| Windows | `amm-setup-vX.Y.Z.exe` | Right-click → Properties → Digital Signatures (signed via Microsoft Trusted Signing when available) |
+| macOS | `amm-vX.Y.Z.dmg` | `spctl --assess --type install <amm.dmg>` (notarized via Apple Developer ID when available) |
+| Linux (Debian/Ubuntu) | `amm_X.Y.Z_all.deb` | `dpkg-sig --verify` against `keys/amm-release.gpg` |
+| Linux (any distro) | `amm-vX.Y.Z-x86_64.AppImage` | `gpg --verify amm-vX.Y.Z-x86_64.AppImage.sig amm-vX.Y.Z-x86_64.AppImage` |
 
-### Option 2 — One-line install (for developers / power users)
+Download, double-click (or `sudo dpkg -i amm_X.Y.Z_all.deb` on Linux), follow the wizard.
 
+> If signing keys aren't configured for a release, artifacts ship unsigned. Windows SmartScreen says "Unknown Publisher" → *More info* → *Run anyway*. macOS Gatekeeper says "unverified developer" → right-click → Open. Functionality is identical.
+
+### Option 2 — One-line install
+
+**Windows (PowerShell):**
 ```powershell
 iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.ps1 | iex
 ```
 
-This:
-1. Installs Node.js + Git (via winget) if missing
-2. Clones the repo to `%LOCALAPPDATA%\automatic-munyun-machine\`
-3. Installs npm deps + Chromium (for Playwright)
-4. Launches the interactive setup wizard
+**macOS / Linux (bash):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.sh | bash
+```
+
+Both:
+1. Install Node.js + Git (via winget / brew / apt / dnf) if missing
+2. Clone the repo to the platform-appropriate dir (`%LOCALAPPDATA%\automatic-munyun-machine\` on Windows, `~/Library/Application Support/automatic-munyun-machine/` on macOS, `~/.local/share/automatic-munyun-machine/` on Linux)
+3. Install npm deps + Chromium (for Playwright)
+4. Launch the interactive setup wizard
 
 ### Option 3 — Manual install
 
@@ -178,7 +193,7 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 
 ## Requirements
 
-- Windows 10 / 11 (Mac and Linux support is on the roadmap)
+- Windows 10 / 11, macOS 14+ (Sonoma), or any reasonably modern Linux (Ubuntu 22.04+, Fedora 40+, etc.)
 - ~500 MB disk (mostly Chromium)
 - Always-on machine for the 7am push (or use `/daily` on demand)
 - A Telegram account
@@ -186,14 +201,13 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 
 ## Roadmap
 
-- ✅ **v0.2** — Setup wizard, install one-liner, configurable everything
-- ✅ **v0.3** — 18 new bot commands, 10-step wizard, smart resume parsing, `/forms` filter, `/jobs suggest`, `/why N`
-- ✅ **v0.4** — Downloadable `.txt` batch attachment + `/export` command
-- ✅ **v0.4.1** — Native Windows file picker for resume step, Telegram-only setup path, fixed PowerShell PATH crash, libuv assertion fix, transient-outage resilience
-- ✅ **v0.5** *(current)* — `/update` command, `/version` command, update notifications on startup + daily, version-aware bot startup ping
-- **v0.6** — Mac + Linux support, plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby)
-- **v1.0** — Tauri desktop GUI with dashboard, history calendar, application Kanban
-- **v2.0** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension
+- ✅ **v0.2–v0.5** — Setup wizard, 30+ bot commands, smart resume parsing, downloadable `.txt` batch, native file picker, `/update` + `/version`, transient-outage resilience.
+- ✅ **v1.0** — Multi-profile support, inline callback buttons + HMAC sig replay defense, phrase-proximity + role-cluster scoring, out-of-process watchdog, Inno Setup installer, Cloudflare-bypass scraping (no hiring.cafe auth required), pagination + target-driven cross-query early stop.
+- ✅ **v1.1** *(current)* — **Cross-platform.** macOS (launchd) + Linux (systemd) ports, unified `install.sh`, native file pickers (osascript / zenity / kdialog), `os-paths.mjs` abstraction layer, atomic IO via `proper-lockfile`, `.dmg` / `.deb` / `.AppImage` builders, GitHub Actions CI matrix, code signing scripts (Microsoft Trusted Signing / Apple Developer ID notarization / GPG). Plus 9 HIGH bug fixes from the v1.0 code review and 41 new unit tests (24 → 65 total).
+- **v1.2** — Scam-listing detection + salary database. Plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby).
+- **v2.0** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension.
+
+(Tauri desktop GUI was permanently cut in v1.0 — Telegram-first stays the thesis.)
 
 ## License
 
@@ -202,9 +216,9 @@ MIT — do whatever you want with it.
 ## Contributing
 
 Pull requests welcome. Likely-needed contributions:
-- Mac/Linux equivalents of `setup-tasks.ps1`, `start-bot.cmd`, etc.
 - Selectors for new ATS providers in `daily-batch.mjs`
 - Additional keyword domains in `scripts/cv-keywords.json` (data eng, software, design)
+- macOS / Linux distro testing — the v1.1 ports are functionally complete but each new distro/version surfaces small things (especially around launchd plist quirks and systemd user-unit linger semantics)
 
 ## Troubleshooting
 
