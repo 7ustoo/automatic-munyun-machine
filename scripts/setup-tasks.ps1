@@ -10,7 +10,21 @@ $ErrorActionPreference = 'Stop'
 
 $ROOT = Split-Path -Parent $PSScriptRoot
 $RUN_BATCH_CMD = Join-Path $ROOT 'scripts\run-daily-batch.cmd'
+# v1.2: the bot is now launched via the AMM.exe wrapper (Go binary at
+# wrapper/dist/AMM.exe) instead of start-bot.cmd's minimized cmd window.
+# The wrapper owns the system tray icon + supervises the node child.
+# Falls back to start-bot.cmd if the wrapper binary hasn't been built yet
+# (e.g. fresh source checkout without `cd wrapper && make build`).
+$WRAPPER_EXE   = Join-Path $ROOT 'wrapper\dist\AMM.exe'
 $START_BOT_CMD = Join-Path $ROOT 'scripts\start-bot.cmd'
+if (Test-Path $WRAPPER_EXE) {
+  $BOT_LAUNCHER = $WRAPPER_EXE
+  Write-Host "[v1.2] Using tray-wrapper binary: $BOT_LAUNCHER"
+} else {
+  $BOT_LAUNCHER = $START_BOT_CMD
+  Write-Host "[v1.2] Wrapper not built yet — falling back to start-bot.cmd."
+  Write-Host "       Build it later with: cd wrapper && make build"
+}
 
 # Read time + days from config.json if present.
 # v1.0 E5+ : schedule lives at profiles.<active>.schedule (post-migration).
@@ -49,12 +63,16 @@ $set7     = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnB
 Register-ScheduledTask -TaskName 'munyun-daily-batch' -Action $action7 -Trigger $trigger7 -Settings $set7 -Description "AMM daily 100-job batch ($time, $($days -join ','))" -Force | Out-Null
 Write-Host "[OK] Registered: munyun-daily-batch ($time, $($days -join ','))"
 
-# Bot listener at logon
-$actionB  = New-ScheduledTaskAction -Execute $START_BOT_CMD
+# Bot listener at logon. v1.2: launches AMM.exe (tray wrapper) which then
+# supervises the node bot as a child process. The wrapper owns the
+# system-tray icon, so the user sees a real "AMM is running" indicator
+# instead of a minimized cmd window. Falls back to start-bot.cmd if the
+# wrapper binary hasn't been built (see $BOT_LAUNCHER resolution above).
+$actionB  = New-ScheduledTaskAction -Execute $BOT_LAUNCHER -WorkingDirectory $ROOT
 $triggerB = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $setB     = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 1) -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries
-Register-ScheduledTask -TaskName 'munyun-bot' -Action $actionB -Trigger $triggerB -Settings $setB -Description "AMM Telegram bot listener (polls /daily etc.)" -Force | Out-Null
-Write-Host "[OK] Registered: munyun-bot (At logon, auto-restart on crash)"
+Register-ScheduledTask -TaskName 'munyun-bot' -Action $actionB -Trigger $triggerB -Settings $setB -Description "AMM Telegram bot listener (tray wrapper supervises node child)" -Force | Out-Null
+Write-Host "[OK] Registered: munyun-bot (At logon, auto-restart on crash) → $BOT_LAUNCHER"
 
 # Watchdog every 5 minutes — restarts the bot if its heartbeat is stale.
 # Runs `node scripts/watchdog.mjs` via cmd.exe so it inherits PATH; the

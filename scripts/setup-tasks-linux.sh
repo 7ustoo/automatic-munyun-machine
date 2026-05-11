@@ -64,15 +64,27 @@ write_unit() {
 }
 
 # ---- bot.service — long-running ----
+# v1.2: launches the AMM tray wrapper (Go binary) which supervises the
+# node bot internally and owns the StatusNotifier tray icon. Falls back
+# to direct node invocation if the wrapper hasn't been built yet.
+if [[ -x "$ROOT/wrapper/dist/amm-tray" ]]; then
+  BOT_EXEC_START="$ROOT/wrapper/dist/amm-tray"
+  echo "[v1.2] Using tray-wrapper binary: $BOT_EXEC_START"
+else
+  BOT_EXEC_START="$NODE $ROOT/scripts/telegram-bot.mjs"
+  echo "[v1.2] Wrapper not built yet — falling back to direct node invocation."
+  echo "       Build it later with: cd wrapper && make build"
+fi
+
 write_unit "munyun-bot.service" "[Unit]
 Description=Automatic Munyun Machine — Telegram bot listener
-After=network-online.target
+After=network-online.target graphical-session.target
 Wants=network-online.target
 
 [Service]
 Type=simple
 WorkingDirectory=$ROOT
-ExecStart=$NODE $ROOT/scripts/telegram-bot.mjs
+ExecStart=$BOT_EXEC_START
 Restart=on-failure
 RestartSec=10
 StandardOutput=append:$ROOT/data/telegram-bot.stdout.log

@@ -285,6 +285,31 @@ export const INSTALL_DIR_HINT = IS_WIN32
   : (IS_DARWIN ? '~/Library/Application Support/automatic-munyun-machine'
                 : '~/.local/share/automatic-munyun-machine');
 
+// v1.2: path to the AMM tray-wrapper binary. Used by setup scripts (when
+// registering the scheduled task) and by /status to verify the wrapper is
+// installed. Returns null if the binary doesn't exist (fresh checkout
+// without `cd wrapper && make build`).
+import fs from 'node:fs';
+export function wrapperBinaryPath(installDir) {
+  const candidates = IS_WIN32
+    ? [path.join(installDir, 'wrapper', 'dist', 'AMM.exe')]
+    : IS_DARWIN
+      ? [path.join(installDir, 'wrapper', 'dist', 'AMM-darwin-arm64'),
+         path.join(installDir, 'wrapper', 'dist', 'AMM-darwin-amd64')]
+      : [path.join(installDir, 'wrapper', 'dist', 'amm-tray')];
+  for (const p of candidates) {
+    try { if (fs.statSync(p).isFile()) return p; } catch {}
+  }
+  return null;
+}
+
+// User-facing tray-wrapper helper-name string. Used in Telegram messages
+// when the wrapper is referenced (e.g. "Build the wrapper with: cd wrapper && make build").
+export const WRAPPER_DOC = IS_WIN32
+  ? 'wrapper\\dist\\AMM.exe'
+  : (IS_DARWIN ? 'wrapper/dist/AMM-darwin-{arm64|amd64}'
+                : 'wrapper/dist/amm-tray');
+
 // Quick-verify export — useful for tests + a `node -e "import(...)"` sanity probe.
 export function platformSummary() {
   return {

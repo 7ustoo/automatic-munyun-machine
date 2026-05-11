@@ -67,19 +67,21 @@ function killBot() {
     }
     console.log(`  killed PID ${pid}`);
   }
-  // Cmdline-match cleanup, branched per platform.
+  // Cmdline-match cleanup, branched per platform. v1.2: also kill the
+  // AMM.exe / amm-tray wrapper if it's running so uninstall fully cleans up.
   if (IS_WIN32) {
-    const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
+    const cmd = `Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs' -or $_.ProcessName -eq 'AMM') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
     spawnSync(POWERSHELL, ['-NoProfile', '-Command', cmd], {
       stdio: 'ignore', timeout: 10000, windowsHide: true
     });
   } else {
-    // POSIX: pgrep -f matches the cmdline; pipe to xargs kill.
+    // POSIX: pgrep -f matches the cmdline; pipe to xargs kill. AMM-darwin-*
+    // and amm-tray binaries are matched by their basename.
     spawnSync('/bin/sh', ['-c',
-      `pgrep -f 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs' | xargs -r kill -9 2>/dev/null || true`
+      `pgrep -f 'telegram-bot\\.mjs|watchdog\\.mjs|batch-missed-watcher\\.mjs|daily-batch\\.mjs|AMM-darwin|amm-tray' | xargs -r kill -9 2>/dev/null || true`
     ], { stdio: 'ignore', timeout: 10000 });
   }
-  console.log('  cleaned bot orphans');
+  console.log('  cleaned bot orphans (incl. tray wrapper)');
 }
 
 // 2. Unregister all four scheduler entries — Win32 schtasks, Mac launchd,

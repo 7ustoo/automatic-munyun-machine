@@ -113,7 +113,11 @@ function killBot(hb) {
   // Anchor the match to the actual script filename — bare 'telegram-bot' would
   // also match e.g. an editor process whose CLI happens to include the string
   // (rare in production, but the substring match was unanchored).
-  const cmd = `Get-Process node -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
+  //
+  // v1.2: also kill orphaned AMM.exe wrapper processes (whose node child died
+  // but the wrapper somehow didn't notice). The wrapper's supervisor should
+  // normally handle this, but the watchdog is the last line of defense.
+  const cmd = `Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $cl = (Get-CimInstance Win32_Process -Filter "ProcessId=$($_.Id)" -ErrorAction SilentlyContinue).CommandLine; if ($cl -match 'telegram-bot\\.mjs' -or $_.ProcessName -eq 'AMM') { Stop-Process -Id $_.Id -Force -ErrorAction SilentlyContinue } }`;
   const r2 = spawnSync(POWERSHELL, ['-NoProfile', '-Command', cmd], {
     stdio: 'ignore', timeout: 10000, windowsHide: true
   });

@@ -93,6 +93,27 @@ bootstrap() {
 }
 
 # ---- com.amm.bot — long-running, KeepAlive ----
+# v1.2: launches the AMM menubar wrapper (Go binary) which supervises the
+# node bot internally. Falls back to direct node invocation if the
+# wrapper hasn't been built yet (fresh source checkout).
+if [[ -x "$ROOT/wrapper/dist/AMM-darwin-arm64" ]]; then
+  BOT_LAUNCHER_BIN="$ROOT/wrapper/dist/AMM-darwin-arm64"
+elif [[ -x "$ROOT/wrapper/dist/AMM-darwin-amd64" ]]; then
+  BOT_LAUNCHER_BIN="$ROOT/wrapper/dist/AMM-darwin-amd64"
+else
+  BOT_LAUNCHER_BIN=""
+fi
+
+if [[ -n "$BOT_LAUNCHER_BIN" ]]; then
+  echo "[v1.2] Using tray-wrapper binary: $BOT_LAUNCHER_BIN"
+  PROGRAM_ARGUMENTS="    <string>$BOT_LAUNCHER_BIN</string>"
+else
+  echo "[v1.2] Wrapper not built yet — falling back to direct node invocation."
+  echo "       Build it later with: cd wrapper && make build"
+  PROGRAM_ARGUMENTS="    <string>$NODE</string>
+    <string>$ROOT/scripts/telegram-bot.mjs</string>"
+fi
+
 write_plist "com.amm.bot" "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
 <!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">
 <plist version=\"1.0\">
@@ -100,8 +121,7 @@ write_plist "com.amm.bot" "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
   <key>Label</key><string>com.amm.bot</string>
   <key>ProgramArguments</key>
   <array>
-    <string>$NODE</string>
-    <string>$ROOT/scripts/telegram-bot.mjs</string>
+$PROGRAM_ARGUMENTS
   </array>
   <key>WorkingDirectory</key><string>$ROOT</string>
   <key>RunAtLoad</key><true/>
