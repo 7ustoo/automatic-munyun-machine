@@ -8,6 +8,7 @@
 - **CV-aware ranking.** Parses your resume, scores each job by keyword overlap, sorts top→bottom by match %.
 - **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
 - **Telegram-first.** Push at 7am Mon-Fri (configurable), on-demand `/scrape`, plus `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
+- **Visible "is it running?" UX.** A small system-tray icon (Windows tray / macOS menubar / Linux indicator) shows real-time bot health — green when alive, yellow when stale, red when dead. Right-click for Status / Pause / Run scrape / Open Telegram / View logs / Restart / Quit. No more wondering whether the bot is still going.
 - **Downloadable .txt batch every morning.** `jobs(YYYY-MM-DD).txt` arrives as a Telegram attachment alongside the message stream — search-friendly, archivable, pull anytime via `/export`.
 - **Local-first.** Everything runs on your machine. Nothing leaves your computer except the actual Telegram messages.
 
@@ -203,8 +204,9 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 
 - ✅ **v0.2–v0.5** — Setup wizard, 30+ bot commands, smart resume parsing, downloadable `.txt` batch, native file picker, `/update` + `/version`, transient-outage resilience.
 - ✅ **v1.0** — Multi-profile support, inline callback buttons + HMAC sig replay defense, phrase-proximity + role-cluster scoring, out-of-process watchdog, Inno Setup installer, Cloudflare-bypass scraping (no hiring.cafe auth required), pagination + target-driven cross-query early stop.
-- ✅ **v1.1** *(current)* — **Cross-platform.** macOS (launchd) + Linux (systemd) ports, unified `install.sh`, native file pickers (osascript / zenity / kdialog), `os-paths.mjs` abstraction layer, atomic IO via `proper-lockfile`, `.dmg` / `.deb` / `.AppImage` builders, GitHub Actions CI matrix, code signing scripts (Microsoft Trusted Signing / Apple Developer ID notarization / GPG). Plus 9 HIGH bug fixes from the v1.0 code review and 41 new unit tests (24 → 65 total).
-- **v1.2** — Scam-listing detection + salary database. Plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby).
+- ✅ **v1.1** — **Cross-platform.** macOS (launchd) + Linux (systemd) ports, unified `install.sh`, native file pickers (osascript / zenity / kdialog), `os-paths.mjs` abstraction layer, atomic IO via `proper-lockfile`, `.dmg` / `.deb` / `.AppImage` builders, GitHub Actions CI matrix, code signing scripts. Plus 9 HIGH bug fixes from the v1.0 code review and 41 new unit tests (24 → 65 total).
+- ✅ **v1.2** *(current)* — **AMM as a real app.** Small Go tray-wrapper binary (~3.6 MB stripped) shows up as `AMM.exe` / `AMM.app` / `amm-tray` in Task Manager + Start menu + Apps & Features. Owns a system-tray icon with heartbeat-driven color (green/yellow/red) and a right-click menu (Status/Pause/Scrape/Telegram/Logs/Restart/Quit). Supervises the node bot as a child process with the same 3-strikes/hour respawn throttle as the watchdog.
+- **v1.3** — Scam-listing detection + salary database. Plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby).
 - **v2.0** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension.
 
 (Tauri desktop GUI was permanently cut in v1.0 — Telegram-first stays the thesis.)

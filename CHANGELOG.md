@@ -10,6 +10,58 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.2.0] — 2026-05-11
+
+> **"AMM as a real app."** v1.1 made AMM cross-platform; v1.2 makes it visible. The bot no longer launches as a minimized cmd window — it runs under a small Go wrapper (`AMM.exe` / `AMM-darwin-{arm64,amd64}` / `amm-tray`) that owns a system-tray icon, supervises the node bot as a child process, and shows up as a real app in Task Manager / Start menu / Apps & Features / Mac menubar / Linux app launchers.
+
+### Added — Tray wrapper (Go binary)
+
+- **`wrapper/`** — new Go module (single dep: `fyne.io/systray@v1.12.1`) producing a small native executable that owns the user-facing UX:
+  - **System tray icon** with heartbeat-driven color: 🟢 green (< 5 min since last heartbeat), 🟡 yellow (5–10 min, stale-warning), 🔴 red (≥ 10 min, dead), ⚫ gray (initial). Staleness thresholds match `scripts/watchdog.mjs` so wrapper + watchdog agree on "dead."
+  - **Tray menu**: Status (read-only label with pid / uptime / poll-fail count), Run scrape now, Pause/Resume daily batch, Open Telegram chat, View logs, Open install folder, Restart bot, Quit AMM.
+  - **Supervises node bot as child process** with 3-strikes-per-hour respawn throttle, mirroring `watchdog.mjs:42-44` semantics. On exhausted budget the wrapper exits cleanly; the platform scheduler restarts it.
+  - **Single-instance lock** at `data/wrapper.lock` (PID-based, cross-platform liveness probe via `Signal(0)`) prevents double-tray-icons when the scheduler races with a healthy wrapper.
+  - **No console window** on Windows (`-H windowsgui` ldflag + `CREATE_NO_WINDOW` for child node spawns) — the user sees a clean tray icon instead of a flashing cmd window.
+- **`wrapper/Makefile`** with `build`, `build-win`, `build-mac` (arm64 + amd64), `build-linux` targets. Auto-detects host platform on bare `make build`. Documents the CGO requirement for Mac/Linux (Cocoa + GTK native bindings — cross-compilation from Windows alone doesn't work; CI matrix handles it).
+- **`wrapper/README.md`** — architecture, file layout, build instructions, single-instance lock semantics, the CGO/cross-compile caveat.
+- **`package.json#scripts.build:wrapper`** convenience target → `cd wrapper && make build`.
+
+### Changed — Scheduler launchers
+
+- **Windows** (`scripts/setup-tasks.ps1`): `munyun-bot` scheduled task now launches `wrapper\dist\AMM.exe` (the tray wrapper), with a fallback to `scripts\start-bot.cmd` if the wrapper hasn't been built yet (fresh source checkout). The wrapper internally spawns node.
+- **macOS** (`scripts/setup-tasks-mac.sh`): `com.amm.bot` LaunchAgent's `ProgramArguments` picks `AMM-darwin-arm64` → `amd64` → direct node, in that order.
+- **Linux** (`scripts/setup-tasks-linux.sh`): `munyun-bot.service` `ExecStart` picks `wrapper/dist/amm-tray` if executable, else direct node. Adds `graphical-session.target` to `After=` so the tray has a desktop to live on.
+
+### Changed — Installers + CI
+
+- **Inno Setup** (`installer/amm.iss`): `MyAppVersion` → `1.2.0`; `MyAppExeName` → `AMM.exe` (was `node.exe`); Start menu + desktop shortcuts launch `AMM.exe` with the wrapper's own icon; `UninstallDisplayIcon` → `AMM.exe`. New preprocess-time `#error` if `wrapper\dist\AMM.exe` is missing so `iscc` fails loud instead of producing a broken installer.
+- **macOS .dmg** (`scripts/build/mac.sh`): rsync exclude switched from `dist/` to `/dist/` so wrapper/dist/ binaries pass through. Auto-builds via `make build-mac` if not pre-built. Both arm64 + amd64 wrappers bundled.
+- **Linux .deb** (`scripts/build/deb.sh`): same exclude fix. New `/usr/share/applications/automatic-munyun-machine.desktop` so GNOME/KDE app launchers list AMM. `/usr/local/bin/amm` wrapper gets a new `tray` subcommand.
+- **Linux .AppImage** (`scripts/build/appimage.sh`): same exclude fix + auto-build. `AppRun` bare-call now launches the tray wrapper.
+- **`.github/workflows/release.yml`**: each platform job sets up Go and runs `make build-{win,mac,linux}` before the installer step. AMM.exe is signed via `sign-windows.ps1` BEFORE Inno Setup packs it so the installer contains a signed inner .exe (required for SmartScreen reputation). Ubuntu job installs `gcc + libgtk-3-dev + libayatana-appindicator3-dev` for the systray CGO build.
+- **`.github/workflows/ci.yml`**: smoke-test matrix now compiles + runs the wrapper's `--version` flag on every PR so CGO header / SDK issues surface at PR time instead of release time.
+
+### Changed — Orphan cleanup
+
+- **`scripts/watchdog.mjs`**: cmdline-match regex extended so an orphan `AMM.exe` (whose supervisor lost its node child without cleaning up) gets killed as a last-resort. Defense-in-depth — the wrapper's own supervisor + single-instance lock handle this in practice.
+- **`scripts/uninstall.mjs`**: same regex extension on both Win32 (`ProcessName -eq 'AMM'`) and POSIX (`AMM-darwin|amm-tray`). Uninstall now fully cleans up tray-wrapper processes too.
+
+### Architecture note
+
+The v1.1 watchdog (`scripts/watchdog.mjs`) is **unchanged** and still works. It reads `data/heartbeat.json` (written by the node child) and restarts the scheduled task on stale heartbeat. The wrapper supervises its own child; the watchdog supervises the wrapper. Two layers, neither redundant — the wrapper handles fast respawn (node crashes within seconds), the watchdog handles wrapper-level death (whole process tree gone).
+
+### Dependencies
+
+Added Go ≥ 1.21 as a **build-time** prerequisite (not runtime — the compiled binary has no runtime deps). End users installing via the `.exe` / `.dmg` / `.deb` / `.AppImage` never need Go.
+
+### Risks acknowledged
+
+- **Linux tray icon depends on desktop environment.** GNOME requires the "AppIndicator and KStatusNotifierItem Support" extension; KDE works out of the box; minimal X11/Wayland window managers (i3, sway) may not show tray icons at all. If tray init fails, the wrapper still spawns the bot and writes logs — degrades to "invisible but functional," same UX as v1.1.
+- **Wrapper updates require re-running the installer.** The bot's `/update` command (git pull + npm install + restart task) still works for JS-only changes. Wrapper binary changes need a fresh installer download.
+- **Unsigned macOS wrapper hits Gatekeeper.** Until Apple Developer ID is configured, Mac users will see "AMM cannot be opened" on first launch — workaround is right-click → Open. Same friction as the unsigned .dmg in v1.1; v1.2 just shifts the surface one level inward.
+
+---
+
 ## [1.1.0] — 2026-05-08
 
 > **"Cross-platform + hardened."** Two parallel tracks bundled into one release: every HIGH-severity bug from the v1.0 code review closed, and Mac launchd + Linux systemd ports landed alongside a GitHub Actions release pipeline. Ships as one PR — no per-phase branches.

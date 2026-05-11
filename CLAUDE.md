@@ -32,7 +32,23 @@ Start-ScheduledTask -TaskName 'munyun-bot'
 
 ## Architecture
 
-Three independent processes share one filesystem — there is no shared memory, no IPC, no daemon. State lives in `config.json` and `data/*.json`.
+Since v1.2 there are **four** independent processes total (one of them — the wrapper — supervises another, but they coordinate via filesystem like the rest). State lives in `config.json` and `data/*.json`.
+
+```
+Task Scheduler / launchd / systemd
+   ↓ at logon
+AMM.exe (wrapper/ — Go binary, ~3.6 MB)         ← v1.2 added
+   ↓ spawns + supervises as child
+node scripts/telegram-bot.mjs                    ← long-running bot
+   ↓
+data/heartbeat.json
+   ↑ also read by
+scripts/watchdog.mjs (every 5 min, independent)
+```
+
+Plus `scripts/daily-batch.mjs` (one-shot scraper, fired by its own scheduled task or by the bot/wrapper on demand).
+
+The wrapper code lives in `wrapper/` (its own Go module, build with `cd wrapper && make build`). It's a small native shell around the JS payload, not a replacement for it. All bot logic stays in `scripts/telegram-bot.mjs`.
 
 1. **`scripts/daily-batch.mjs`** — the scraper. Launches a persistent-profile Playwright Chromium, runs each `config.queries[]` term against hiring.cafe, scores results against `data/cv-parsed.json`, resolves direct ATS apply URLs, and pushes the top 100 to Telegram (chunked messages + a `jobs(YYYY-MM-DD).txt` attachment). Triggered by Task Scheduler `munyun-daily-batch` weekdays at 07:00, by `/scrape` from the bot, or manually via `npm run daily`. Writes `data/last-batch.json` so `/why N` can explain a score after the fact.
 

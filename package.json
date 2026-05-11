@@ -1,6 +1,6 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Daily 100-job Telegram batch ranked by CV match. Local-first, free, runs on Windows + macOS + Linux.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",
@@ -14,7 +14,8 @@
     "bot": "node scripts/telegram-bot.mjs",
     "login": "node scripts/login-once.mjs",
     "parse-resume": "node scripts/resume-parser.mjs",
-    "test": "node --test scripts/__tests__/*.test.mjs"
+    "test": "node --test scripts/__tests__/*.test.mjs",
+    "build:wrapper": "cd wrapper && make build"
   },
   "keywords": [
     "job-search",
