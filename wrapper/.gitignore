@@ -1,0 +1,5 @@
+# Wrapper build outputs — don't commit binaries.
+dist/
+
+# Go module cache (always gitignored upstream, but local IDEs may resurrect it)
+vendor/
