@@ -38,7 +38,7 @@ rsync -a \
   --exclude '.git/' \
   --exclude 'node_modules/' \
   --exclude 'data/' \
-  --exclude 'dist/' \
+  --exclude '/dist/' \
   --exclude '.env' \
   --exclude 'config.json' \
   --exclude 'cv.*' \
@@ -46,19 +46,34 @@ rsync -a \
   --exclude '.claude/' \
   "$ROOT/" "$APPDIR/usr/lib/automatic-munyun-machine/"
 
+# v1.2: build the wrapper if absent
+if [[ ! -x "$APPDIR/usr/lib/automatic-munyun-machine/wrapper/dist/amm-tray" ]]; then
+  if command -v go >/dev/null 2>&1; then
+    (cd "$ROOT/wrapper" && make build-linux)
+    mkdir -p "$APPDIR/usr/lib/automatic-munyun-machine/wrapper/dist"
+    cp "$ROOT/wrapper/dist/amm-tray" "$APPDIR/usr/lib/automatic-munyun-machine/wrapper/dist/" 2>/dev/null || true
+  fi
+fi
+
 # 3. AppRun + .desktop + icon (minimal — AppImage spec requirements)
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/usr/bin/env bash
 HERE="$(dirname "$(readlink -f "$0")")"
 export PATH="$HERE/usr/bin:$PATH"
 INSTALL_DIR="$HERE/usr/lib/automatic-munyun-machine"
+TRAY_BIN="$INSTALL_DIR/wrapper/dist/amm-tray"
 case "${1:-}" in
   setup)   exec node "$INSTALL_DIR/scripts/setup-wizard.mjs" ;;
   daily)   exec node "$INSTALL_DIR/scripts/daily-batch.mjs" ;;
   bot)     exec node "$INSTALL_DIR/scripts/telegram-bot.mjs" ;;
+  tray)
+    if [[ -x "$TRAY_BIN" ]]; then exec "$TRAY_BIN"; else exec node "$INSTALL_DIR/scripts/telegram-bot.mjs"; fi ;;
   login)   exec node "$INSTALL_DIR/scripts/login-once.mjs" ;;
   uninstall) exec node "$INSTALL_DIR/scripts/uninstall.mjs" --mode="${2:-pause}" ;;
-  *)       exec node "$INSTALL_DIR/scripts/setup-wizard.mjs" ;;
+  *)
+    # No subcommand → launch the tray wrapper (default app behavior).
+    # Falls back to wizard on first run if tray binary is missing.
+    if [[ -x "$TRAY_BIN" ]]; then exec "$TRAY_BIN"; else exec node "$INSTALL_DIR/scripts/setup-wizard.mjs"; fi ;;
 esac
 EOF
 chmod +x "$APPDIR/AppRun"

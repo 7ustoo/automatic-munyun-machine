@@ -28,13 +28,25 @@ rsync -a \
   --exclude '.git/' \
   --exclude 'node_modules/' \
   --exclude 'data/' \
-  --exclude 'dist/' \
+  --exclude '/dist/' \
   --exclude '.env' \
   --exclude 'config.json' \
   --exclude 'cv.*' \
   --exclude '.planning/' \
   --exclude '.claude/' \
   "$ROOT/" "$STAGE/opt/automatic-munyun-machine/"
+
+# v1.2: build the wrapper if it isn't already present in the staged tree.
+if [[ ! -x "$STAGE/opt/automatic-munyun-machine/wrapper/dist/amm-tray" ]]; then
+  echo "→ Wrapper binary missing — running `make build-linux`…"
+  if command -v go >/dev/null 2>&1; then
+    (cd "$ROOT/wrapper" && make build-linux)
+    mkdir -p "$STAGE/opt/automatic-munyun-machine/wrapper/dist"
+    cp "$ROOT/wrapper/dist/amm-tray" "$STAGE/opt/automatic-munyun-machine/wrapper/dist/" 2>/dev/null || true
+  else
+    echo "⚠️ Go not installed — .deb will ship without tray wrapper (falls back to direct node invocation)."
+  fi
+fi
 
 # /usr/local/bin/amm wrapper — proxies to the install dir.
 cat > "$STAGE/usr/local/bin/amm" <<'EOF'
@@ -44,12 +56,28 @@ case "${1:-}" in
   setup)   exec node "$INSTALL_DIR/scripts/setup-wizard.mjs" ;;
   daily)   exec node "$INSTALL_DIR/scripts/daily-batch.mjs" ;;
   bot)     exec node "$INSTALL_DIR/scripts/telegram-bot.mjs" ;;
+  tray)    exec "$INSTALL_DIR/wrapper/dist/amm-tray" ;;
   login)   exec node "$INSTALL_DIR/scripts/login-once.mjs" ;;
   uninstall) exec node "$INSTALL_DIR/scripts/uninstall.mjs" --mode="${2:-pause}" ;;
-  *)       echo "Usage: amm {setup|daily|bot|login|uninstall [--mode=pause|wipe]}" ; exit 2 ;;
+  *)       echo "Usage: amm {setup|daily|bot|tray|login|uninstall [--mode=pause|wipe]}" ; exit 2 ;;
 esac
 EOF
 chmod 755 "$STAGE/usr/local/bin/amm"
+
+# .desktop file for GNOME/KDE app launchers — the tray wrapper shows here
+# so users can find AMM in their applications grid.
+mkdir -p "$STAGE/usr/share/applications"
+cat > "$STAGE/usr/share/applications/automatic-munyun-machine.desktop" <<'EOF'
+[Desktop Entry]
+Name=Automatic Munyun Machine
+Comment=Daily 100-job Telegram batch ranked by CV match
+Exec=/opt/automatic-munyun-machine/wrapper/dist/amm-tray
+Icon=automatic-munyun-machine
+Terminal=false
+Type=Application
+Categories=Utility;Office;
+StartupNotify=false
+EOF
 
 # control file
 cat > "$STAGE/DEBIAN/control" <<EOF
