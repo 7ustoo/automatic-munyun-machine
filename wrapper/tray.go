@@ -17,8 +17,10 @@ type trayState struct {
 	sup        *supervisor
 	installDir string
 	botPath    string
+	needsSetup bool // true when launched without .env/config.json
 
 	// Menu items — captured on init so the heartbeat poller can update labels.
+	miSetup    *systray.MenuItem // v1.2: visible only when needsSetup; click → wizard
 	miStatus   *systray.MenuItem
 	miScrape   *systray.MenuItem
 	miPause    *systray.MenuItem
@@ -50,20 +52,40 @@ const (
 
 // onTrayReady is called by systray.Run once the tray icon is mounted.
 // Build the menu, fire the heartbeat poller, register click handlers.
-func onTrayReady(sup *supervisor, installDir, botPath string) {
+//
+// v1.2: `needsSetup` controls whether the "Run setup wizard" item is at
+// the top of the menu and whether the initial tooltip/status reflects
+// the unconfigured state.
+func onTrayReady(sup *supervisor, installDir, botPath string, needsSetup bool) {
 	systray.SetTitle("AMM")
-	systray.SetTooltip(fmt.Sprintf("Automatic Munyun Machine v%s", AMMVersion))
+	if needsSetup {
+		systray.SetTooltip(fmt.Sprintf("Automatic Munyun Machine v%s — setup required", AMMVersion))
+	} else {
+		systray.SetTooltip(fmt.Sprintf("Automatic Munyun Machine v%s", AMMVersion))
+	}
 
 	state := &trayState{
 		sup:        sup,
 		installDir: installDir,
 		botPath:    botPath,
+		needsSetup: needsSetup,
 	}
 	state.setIcon(iconGray) // initial state until first heartbeat read
 
 	// --- Menu layout ---
+	// Setup item ONLY visible when configuration is missing — keeps the menu
+	// clean for the common case where everything's already set up.
+	if needsSetup {
+		state.miSetup = systray.AddMenuItem("⚙️ Run setup wizard", "Opens the AMM setup wizard in a new terminal window")
+		systray.AddSeparator()
+	}
+
 	// 🟢 Status: alive / 12m uptime / pid 1234   (read-only label)
-	state.miStatus = systray.AddMenuItem("Status: starting…", "Bot liveness — based on data/heartbeat.json")
+	statusInitial := "Status: starting…"
+	if needsSetup {
+		statusInitial = "Status: setup required — click 'Run setup wizard'"
+	}
+	state.miStatus = systray.AddMenuItem(statusInitial, "Bot liveness — based on data/heartbeat.json")
 	state.miStatus.Disable() // info-only
 
 	systray.AddSeparator()
@@ -83,13 +105,22 @@ func onTrayReady(sup *supervisor, installDir, botPath string) {
 	state.miRestart = systray.AddMenuItem("Restart bot", "Kills the node child; supervisor respawns it")
 	state.miQuit = systray.AddMenuItem("Quit AMM", "Stops the bot and exits the tray")
 
+	// When in needs-setup mode, disable the action items that depend on a
+	// running bot — they'd just produce errors otherwise.
+	if needsSetup {
+		state.miScrape.Disable()
+		state.miPause.Disable()
+		state.miTelegram.Disable()
+		state.miRestart.Disable()
+	}
+
 	// --- Click handlers ---
 	go state.handleClicks()
 
 	// --- Heartbeat poller ---
 	go state.pollHeartbeat()
 
-	log.Printf("tray: ready (platform=%s)", runtime.GOOS)
+	log.Printf("tray: ready (platform=%s, needsSetup=%t)", runtime.GOOS, needsSetup)
 }
 
 // onTrayExit fires when systray.Quit() is called (from the Quit menu item or
@@ -104,9 +135,20 @@ func onTrayExit(sup *supervisor) {
 
 // handleClicks blocks reading from each menu item's ClickedCh in a select.
 // One goroutine handles all clicks so the menu code in onTrayReady stays linear.
+//
+// Setup item only exists when needsSetup=true; we plumb it through a nilable
+// channel so the select doesn't deadlock on a nil ClickedCh.
 func (s *trayState) handleClicks() {
+	// nilable setup channel — select on nil channel never fires, which is
+	// exactly what we want when miSetup isn't present.
+	var setupCh <-chan struct{}
+	if s.miSetup != nil {
+		setupCh = s.miSetup.ClickedCh
+	}
 	for {
 		select {
+		case <-setupCh:
+			actionRunSetup(s.sup, s.installDir)
 		case <-s.miScrape.ClickedCh:
 			actionRunScrape(s.installDir)
 		case <-s.miPause.ClickedCh:
@@ -130,14 +172,51 @@ func (s *trayState) handleClicks() {
 // pollHeartbeat reads data/heartbeat.json every 10s and updates the icon
 // color + status label accordingly. Same staleness thresholds as
 // scripts/watchdog.mjs.
+//
+// v1.2: also handles the needsSetup→configured transition. On each tick,
+// if we're in needsSetup mode AND isConfigured() now returns true, we:
+//   - hide the Setup menu item
+//   - enable the previously-disabled action items
+//   - update tooltip
+//   - spawn the supervisor (which starts the node bot)
+//   - exit needsSetup mode
+// After that, normal heartbeat tracking takes over.
 func (s *trayState) pollHeartbeat() {
 	ticker := time.NewTicker(heartbeatPollInterval)
 	defer ticker.Stop()
 
 	for {
-		s.refreshHeartbeat()
+		if s.needsSetup {
+			if isConfigured(s.installDir) {
+				s.exitNeedsSetupMode()
+			} else {
+				// Still waiting on setup. Keep the icon gray + status label
+				// pointed at the Setup menu item.
+				s.setStatus(iconGray, "Status: setup required — click 'Run setup wizard'")
+			}
+		} else {
+			s.refreshHeartbeat()
+		}
 		<-ticker.C
 	}
+}
+
+// exitNeedsSetupMode transitions the tray out of the first-run waiting state
+// once setup is detected. Called from pollHeartbeat when isConfigured()
+// flips from false → true.
+func (s *trayState) exitNeedsSetupMode() {
+	log.Printf("tray: setup detected — exiting needsSetup mode, starting supervisor")
+	s.needsSetup = false
+	systray.SetTooltip(fmt.Sprintf("Automatic Munyun Machine v%s", AMMVersion))
+	if s.miSetup != nil {
+		s.miSetup.Hide()
+	}
+	s.miScrape.Enable()
+	s.miPause.Enable()
+	s.miTelegram.Enable()
+	s.miRestart.Enable()
+	// Kick off the supervisor — the node bot now has its config and can run.
+	go s.sup.runForever()
 }
 
 // heartbeat mirrors the bot's writeHeartbeat shape (telegram-bot.mjs:120-130).

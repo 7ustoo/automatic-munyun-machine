@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -14,6 +15,69 @@ import (
 
 // Menu-action handlers. Each is a small function that shells out to the
 // existing JS scripts so we never reimplement bot logic in Go.
+
+// actionRunSetup spawns the setup wizard in a visible terminal window. The
+// wizard (scripts/setup-wizard.mjs) is a 10-step interactive prompt that
+// writes .env + config.json. Once it finishes, the heartbeat poller in
+// tray.go detects isConfigured() flipping to true and starts the bot.
+//
+// Spawned detached + visible (Start, not Run) so the wrapper stays
+// responsive. If the terminal-spawn fails on this platform, log it and
+// leave a clear hint — the user can always `npm run setup` manually.
+func actionRunSetup(sup *supervisor, installDir string) {
+	wizardPath := filepath.Join(installDir, "scripts", "setup-wizard.mjs")
+	if _, err := os.Stat(wizardPath); err != nil {
+		log.Printf("action.setup: wizard not found at %s — install may be corrupted", wizardPath)
+		return
+	}
+	log.Printf("action.setup: spawning wizard in visible terminal")
+
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		// cmd /c start "Title" cmd /c "node ... & pause"
+		// `start` detaches into a new visible cmd window. The inner cmd /c
+		// runs the wizard, then `pause` lets the user read final messages
+		// before the window closes. We Start() (not Run()) so the wrapper
+		// doesn't block.
+		cmd = exec.Command("cmd", "/c", "start", "AMM Setup", "cmd", "/c",
+			fmt.Sprintf("node \"%s\" & echo. & echo. & echo Setup window. Press any key to close. & pause >nul", wizardPath))
+	case "darwin":
+		// AppleScript: open a new Terminal.app window running the wizard.
+		script := fmt.Sprintf(
+			`tell application "Terminal" to do script "cd '%s' && node scripts/setup-wizard.mjs"`,
+			installDir)
+		cmd = exec.Command("osascript", "-e", script)
+	case "linux":
+		// Prefer gnome-terminal, fall back to xterm. Each common DE has a
+		// different terminal emulator; we try the two most universal.
+		if path, _ := exec.LookPath("gnome-terminal"); path != "" {
+			cmd = exec.Command(path, "--", "node", wizardPath)
+		} else if path, _ := exec.LookPath("xterm"); path != "" {
+			cmd = exec.Command(path, "-e", "node", wizardPath)
+		} else if path, _ := exec.LookPath("konsole"); path != "" {
+			cmd = exec.Command(path, "-e", "node", wizardPath)
+		} else {
+			log.Printf("action.setup: no terminal emulator found on Linux — run 'npm run setup' from a terminal manually")
+			return
+		}
+	default:
+		log.Printf("action.setup: unsupported platform %s — run 'npm run setup' manually", runtime.GOOS)
+		return
+	}
+
+	cmd.Dir = installDir
+	if err := cmd.Start(); err != nil {
+		log.Printf("action.setup: spawn failed: %v — run 'npm run setup' from a terminal manually", err)
+		return
+	}
+	log.Printf("action.setup: wizard pid=%d — tray heartbeat poller will detect when setup completes", cmd.Process.Pid)
+	_ = cmd.Process.Release()
+	// No polling goroutine needed here — tray.go's pollHeartbeat already
+	// re-checks isConfigured() every 10s and transitions out of needs-setup
+	// mode automatically once .env + config.json are present.
+	_ = sup // silence unused param; kept for API symmetry + future use
+}
 
 // actionRunScrape spawns `node scripts/daily-batch.mjs` as a one-shot
 // detached process. Same effect as /scrape via Telegram, but triggerable

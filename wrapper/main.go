@@ -28,6 +28,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"fyne.io/systray"
 )
@@ -92,22 +93,60 @@ func main() {
 	}
 	defer released()
 
+	// First-run UX (v1.2.0): if the user hasn't completed setup (.env +
+	// config.json absent or empty TG_TOKEN), don't start the supervisor at
+	// all. The tray comes up with a "Run setup wizard" menu item visible
+	// at the top, and the icon stays gray + tooltip says "setup required."
+	// Once the user finishes the wizard (triggered from the tray or run
+	// externally), the wrapper's actionRunSetup → waitForConfigThenStart
+	// goroutine detects the new config and starts the supervisor.
+	needsSetup := !isConfigured(installDir)
+	if needsSetup {
+		log.Printf("config missing or TG_TOKEN empty — entering 'needs setup' state. User must click 'Run setup wizard' from the tray.")
+	}
+
 	// Supervisor runs in its own goroutine. On wrapper shutdown (tray Quit
 	// or signal), it kills the child and returns. The supervisor + tray
 	// share state through the supervisorRef struct.
 	sup := newSupervisor(botPath, installDir)
-	if !*flagNoSpawn {
+	if !*flagNoSpawn && !needsSetup {
 		go sup.runForever()
-	} else {
+	} else if *flagNoSpawn {
 		log.Printf("--no-spawn set: skipping node bot spawn (tray-only test mode)")
 	}
 
 	// Tray init blocks until systray.Quit() is called. Returns when the
 	// user picks Quit from the menu or the OS sends a termination signal.
 	systray.Run(
-		func() { onTrayReady(sup, installDir, botPath) },
+		func() { onTrayReady(sup, installDir, botPath, needsSetup) },
 		func() { onTrayExit(sup) },
 	)
+}
+
+// isConfigured returns true when AMM has completed initial setup.
+// Criteria: .env exists with a non-empty TELEGRAM_BOT_TOKEN, AND config.json
+// exists. Matches the checks telegram-bot.mjs:67-86 does at startup so the
+// wrapper agrees with the bot on "configured."
+func isConfigured(installDir string) bool {
+	envPath := filepath.Join(installDir, ".env")
+	cfgPath := filepath.Join(installDir, "config.json")
+	if _, err := os.Stat(cfgPath); err != nil {
+		return false
+	}
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "TELEGRAM_BOT_TOKEN=") {
+			parts := strings.SplitN(trimmed, "=", 2)
+			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // resolveInstallDir returns the AMM install directory. By default it's the

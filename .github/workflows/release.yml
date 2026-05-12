@@ -74,6 +74,18 @@ jobs:
           name: amm-windows
           path: installer/dist/*.exe
 
+      # v1.2: also ship the bare wrapper as a standalone Release asset.
+      # Use case: power-users / devs who already have AMM installed via the
+      # full installer and just want to drop in the new tray binary without
+      # re-running the wizard. Useless on its own — needs scripts/ +
+      # node_modules/ from a prior install. Documented as such in the
+      # Release body.
+      - name: Upload standalone AMM.exe (wrapper-only, for existing installs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-windows-wrapper-only
+          path: wrapper/dist/AMM.exe
+
   # macOS: build wrapper (arm64 + amd64) → .dmg → notarize.
   build-mac:
     name: Build macOS .dmg
@@ -182,11 +194,27 @@ jobs:
         with:
           path: artifacts/
 
-      - name: Compute SHA256 sums
+      - name: Stage release assets
         run: |
           mkdir -p release
-          find artifacts -type f \( -name '*.exe' -o -name '*.dmg' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.AppImage.sig' \) -exec cp {} release/ \;
+
+          # Full installers (the main user-facing artifacts).
+          find artifacts/amm-windows -type f -name '*.exe' -exec cp {} release/ \;
+          find artifacts/amm-mac -type f -name '*.dmg' -exec cp {} release/ \;
+          find artifacts/amm-linux -type f -name '*.deb' -exec cp {} release/ \;
+          find artifacts/amm-linux -type f -name '*.AppImage' -exec cp {} release/ \;
+          find artifacts/amm-linux -type f -name '*.AppImage.sig' -exec cp {} release/ 2>/dev/null \; || true
+
+          # v1.2: standalone tray wrapper for power-users with existing installs.
+          # Rename so the asset's purpose is obvious in the Release page UI.
+          VERSION="${GITHUB_REF_NAME#v}"
+          if [[ -f artifacts/amm-windows-wrapper-only/AMM.exe ]]; then
+            cp artifacts/amm-windows-wrapper-only/AMM.exe \
+               "release/amm-tray-v${VERSION}-windows-amd64.exe"
+          fi
+
           (cd release && sha256sum * > SHA256SUMS.txt)
+          ls -la release/
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -194,3 +222,20 @@ jobs:
           files: release/*
           generate_release_notes: true
           fail_on_unmatched_files: false
+          body: |
+            ### Install (recommended for non-developers)
+
+            | Platform | Asset | Notes |
+            |---|---|---|
+            | Windows | `amm-setup-v*.exe` | Full installer — wizard + Task Scheduler registration + Chromium install. Run, follow prompts. |
+            | macOS | `amm-v*.dmg` | Drag the AMM folder into your Applications. Double-click "Run Setup.command" on first launch. |
+            | Linux (Debian/Ubuntu) | `amm_*_all.deb` | `sudo dpkg -i amm_*_all.deb && amm setup` |
+            | Linux (any distro) | `amm-v*-x86_64.AppImage` | `chmod +x amm-v*.AppImage && ./amm-v*.AppImage setup` |
+
+            ### Standalone tray wrapper (advanced)
+
+            `amm-tray-v*-windows-amd64.exe` is the bare Go wrapper binary, ~3.6 MB. It only works as a drop-in replacement inside an existing AMM install at `%LOCALAPPDATA%\automatic-munyun-machine\wrapper\dist\AMM.exe`. If you haven't already installed AMM, use the full Windows installer above instead.
+
+            ### Verification
+
+            Checksums for all assets: `SHA256SUMS.txt` attached.
