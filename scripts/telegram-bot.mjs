@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /**
- * Long-running Telegram bot for career-ops.
+ * Long-running Telegram bot for Automatic Munyun Machine.
  *
  * Polls Telegram getUpdates every 3 sec for new messages from your chat.
  * Dispatches commands:
- *   /daily, gm, morning   → run daily batch (weather + 100 jobs)
- *   /jobs                  → 100 jobs only, no weather
- *   /export                → download today's batch as a .txt file
- *   /weather               → Miami weather only
- *   /version               → show bot version + latest GitHub version
- *   /update                → pull latest code from GitHub + restart
- *   /test, /ping           → reply "alive"
- *   /help, /start          → list commands
+ *   /scrape, /daily, gm, morning  → run daily batch (weather + 100 jobs)
+ *   /export                       → download today's batch as a .txt file
+ *   /weather                      → weather only (city from config.json)
+ *   /version                      → show bot version + latest GitHub version
+ *   /update                       → pull latest code from GitHub + restart
+ *   /test, /ping                  → reply "alive"
+ *   /help, /start                 → list commands
+ *   (plus /save, /applied, /why, /resume, /jobs, /yoe, /salary,
+ *    /clearance, /forms, /skip, /city, /schedule, /pause, /resume-bot,
+ *    /forget, /settings, /auth, /reauth, /cancel — see /help in-bot)
  *
- * Started at logon by Task Scheduler entry `career-ops-bot`.
+ * Started at logon by Task Scheduler entry `munyun-bot`.
  * Logs to data/telegram-bot.log.
  */
 
@@ -28,20 +30,41 @@ import {
   markUpdating,
   consumePostUpdateFlag
 } from './update-checker.mjs';
+import {
+  parseAndVerify,
+  makeCallback,
+  makeNavCallback,
+  readCallbackTable
+} from './callback-router.mjs';
+import {
+  migrateIfNeeded,
+  paths as profilePaths,
+  listProfiles,
+  addProfile,
+  setActiveProfile,
+  deleteProfile,
+  getActiveProfile
+} from './profile-store.mjs';
+
+// v1.0 E5: ensure migration ran before any path is resolved.
+migrateIfNeeded();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const VERSION = currentVersion();
 
-// Absolute paths to Windows system binaries. spawn('powershell', ...) and
-// spawn('cmd.exe', ...) rely on PATH lookup, which fails on the
-// stripped-PATH installs we've seen in the wild (Daniel hit this in v0.4
-// during wizard task registration; another tester hit it in v0.5 trying
-// to /pause). Resolving via %SystemRoot% always works on a sane Windows.
-const SYS32      = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-const POWERSHELL = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-const CMD_EXE    = path.join(SYS32, 'cmd.exe');
-const SCHTASKS   = path.join(SYS32, 'schtasks.exe');
+// v1.1 — system binaries + scheduler ops moved into scripts/os-paths.mjs.
+// On Win32 these resolve to absolute %SystemRoot% paths (the stripped-PATH
+// defense from v0.4.1 / v0.5); on Mac/Linux they're null + the runtime
+// branches via runScheduledTask / disableScheduledTask / etc.
+import {
+  IS_WIN32, IS_DARWIN, IS_LINUX, PLATFORM,
+  POWERSHELL, CMD_EXE, SCHTASKS,
+  npmCmd, nodeCmd,
+  runScheduledTask, disableScheduledTask, enableScheduledTask, scheduledTaskExists,
+  LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
+} from './os-paths.mjs';
+import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
 
 // ---------- env ----------
 const ENV_PATH = path.join(ROOT, '.env');
@@ -81,14 +104,43 @@ function log(line) {
 // poll-loop's catch block (e.g., log() failing on a locked file). Catch
 // the kitchen sink so the bot never silently disappears. Token is scrubbed
 // from log lines defensively in case it leaks via a stack trace.
+//
+// Defensive scrubber: if TG_TOKEN is somehow falsy (env reload, future
+// refactor), `String.replace(undefined, …)` would coerce to literal
+// "undefined" and replace stray substrings. Explicitly check truthiness.
+const SCRUB = (s) => {
+  if (s == null) return '';
+  let str = String(s);
+  if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
+  return str;
+};
 process.on('unhandledRejection', (e) => {
   const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
-  log('UNHANDLED REJECTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
+  log('UNHANDLED REJECTION: ' + SCRUB(raw));
 });
 process.on('uncaughtException', (e) => {
   const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
-  log('UNCAUGHT EXCEPTION: ' + raw.replace(TG_TOKEN, '<TOKEN>'));
+  log('UNCAUGHT EXCEPTION: ' + SCRUB(raw));
 });
+
+// ---------- heartbeat ----------
+// Written every poll-loop iteration (success OR failure) so the watchdog can
+// distinguish "process alive but Telegram unreachable" from "process dead."
+// Out-of-process watchdog (scripts/watchdog.mjs) reads this and restarts the
+// bot if ts is stale > 10 min.
+const HEARTBEAT_FILE = path.join(ROOT, 'data', 'heartbeat.json');
+const BOT_STARTED_AT = Date.now();
+function writeHeartbeat(extra = {}) {
+  try {
+    fs.writeFileSync(HEARTBEAT_FILE, JSON.stringify({
+      ts: new Date().toISOString(),
+      pid: process.pid,
+      version: VERSION,
+      startedAt: new Date(BOT_STARTED_AT).toISOString(),
+      ...extra
+    }, null, 2));
+  } catch { /* never let heartbeat write crash the bot */ }
+}
 
 // ---------- offset persistence ----------
 const OFFSET_FILE = path.join(ROOT, 'data', 'bot-offset.json');
@@ -148,6 +200,41 @@ async function reply(chatId, text, opts = {}) {
   }
 }
 
+// v1.0 E4: ack a callback so Telegram stops showing the loading spinner on
+// the user's button. `text` shows as a brief toast; alert=true shows as a
+// modal popup instead. Both optional.
+async function tgAnswerCallback(callbackQueryId, text = '', alert = false) {
+  try {
+    await tgPost('answerCallbackQuery', {
+      callback_query_id: callbackQueryId,
+      ...(text ? { text, show_alert: alert } : {})
+    });
+  } catch (e) {
+    log('answerCallbackQuery failed: ' + e.message);
+  }
+}
+
+// Edit a message in place (used by the paginated browser to re-render the
+// same bubble on prev/next instead of piling up new messages). Returns the
+// API response or throws.
+async function tgEditMessage(chatId, messageId, text, opts = {}) {
+  try {
+    return await tgPost('editMessageText', {
+      chat_id: chatId,
+      message_id: messageId,
+      text,
+      parse_mode: 'HTML',
+      disable_web_page_preview: true,
+      ...opts
+    });
+  } catch (e) {
+    // Telegram throws "message is not modified" when the new text === old text.
+    // That's not really an error from our perspective.
+    if (/not modified/i.test(e.message)) return null;
+    throw e;
+  }
+}
+
 // ---------- weather ----------
 const WMO = { 0: 'clear', 1: 'mostly clear', 2: 'partly cloudy', 3: 'overcast', 45: 'foggy', 48: 'foggy', 51: 'light drizzle', 53: 'drizzle', 55: 'heavy drizzle', 61: 'light rain', 63: 'rain', 65: 'heavy rain', 71: 'light snow', 73: 'snow', 75: 'heavy snow', 80: 'showers', 81: 'showers', 82: 'heavy showers', 95: 'thunderstorm', 96: 'thunderstorm', 99: 'thunderstorm' };
 const WMO_EMOJI = { 0: '☀️', 1: '🌤', 2: '⛅', 3: '☁️', 45: '🌫', 48: '🌫', 51: '🌦', 53: '🌦', 55: '🌧', 61: '🌧', 63: '🌧', 65: '🌧', 71: '🌨', 73: '🌨', 75: '❄️', 80: '🌦', 81: '🌧', 82: '⛈', 95: '⛈', 96: '⛈', 99: '⛈' };
@@ -185,12 +272,23 @@ function runClaudeBatch(chatId) {
     return reply(chatId, '⏳ A scrape is already in progress — wait for it to finish.');
   }
   reply(chatId, '🔄 Scraping hiring.cafe… this takes 1–2 min. You\'ll get the batch when it\'s done.');
-  log('Starting daily batch via run-daily-batch.cmd');
-  const child = spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
-    cwd: ROOT,
-    detached: false,
-    windowsHide: true
-  });
+  // v1.1 cross-platform: on Windows we go through cmd /c run-daily-batch.cmd
+  // (preserves the legacy detached-window contract); on Mac/Linux we invoke
+  // node directly with the daily-batch.mjs path. Both inherit cwd=ROOT.
+  let child;
+  if (IS_WIN32) {
+    log('Starting daily batch via run-daily-batch.cmd');
+    child = spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'run-daily-batch.cmd')], {
+      cwd: ROOT, detached: false, windowsHide: true
+    });
+  } else {
+    log('Starting daily batch via node scripts/daily-batch.mjs');
+    child = spawn(nodeCmd(), [path.join(ROOT, 'scripts', 'daily-batch.mjs')], {
+      cwd: ROOT, detached: false
+    });
+  }
+  // (Legacy spawn below replaced — kept signature for the rest of the function.)
+  ;
   runningJob = child;
   let stderr = '';
   child.stderr?.on('data', d => { stderr += d.toString(); });
@@ -270,9 +368,12 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 
 <b>Core actions</b>
 /scrape, /daily, gm  → weather + 100 jobs ranked by CV match
-/save N              → bookmark job N on hiring.cafe
-/applied N           → mark job N applied
+/batch [N]           → tap-friendly browser with Save/Applied/Why buttons
+/save N              → bookmark job locally + on hiring.cafe (if /reauth'd)
+/applied N           → mark applied locally + on hiring.cafe (if /reauth'd)
+/saved [N]           → list locally-bookmarked jobs (paginated)
 /why N               → explain why job N got its match %
+/history [N]         → past applications (paginated)
 /export              → download today's batch as a .txt file
 
 <b>Settings — view + edit from your phone</b>
@@ -284,6 +385,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /jobs suggest        → bot reads your CV and proposes new titles
 /yoe N               → set max years of experience
 /salary N            → set salary floor in $K (e.g. /salary 120)
+/floor N             → minimum match-% to include in batch (default 25)
 /clearance on/off    → toggle gov clearance filter
 /forms all/simple/long → application form filter (Easy Apply etc.)
 /skip &lt;company&gt;      → never show this company again
@@ -291,9 +393,17 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /city &lt;name&gt;         → change weather city
 /schedule HH:MM      → change daily push time
 
+<b>Profiles</b>
+/profile list        → list profiles, mark active
+/profile add &lt;slug&gt;  → new profile (clones active config)
+/profile switch &lt;slug&gt; → switch active profile
+/profile delete &lt;slug&gt; → remove (not active, not last)
+
 <b>Maintenance</b>
-/auth                → check hiring.cafe login
-/reauth              → re-login on your computer
+/status              → bot uptime, last batch, last poll, version, task state
+/diagnose            → why am I getting only N jobs? per-query supply + funnel
+/auth                → check hiring.cafe sign-in (optional; only needed for hiring.cafe-side bookmarking)
+/reauth              → opt-in: sign into hiring.cafe so /save and /applied also click their buttons
 /pause /resume-bot   → stop/start the 7am push
 /forget all          → wipe seen-jobs memory
 /forget last         → un-memorize most recent batch
@@ -302,11 +412,13 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /update              → pull latest from GitHub + restart
 /update skip         → skip notifications about the latest version
 /test, /ping         → bot health check
+/uninstall           → pause or wipe — confirmation via inline buttons
 /help                → this message`;
 
 // Latest batch TSV → array of { idx, id, title, company, yoe, q, url }
 function loadLatestBatch() {
-  const dir = path.join(ROOT, 'data');
+  const dir = profilePaths().dir;
+  if (!fs.existsSync(dir)) return null;
   const files = fs.readdirSync(dir).filter(f => /^today-batch-\d{4}-\d{2}-\d{2}\.tsv$/.test(f)).sort();
   if (!files.length) return null;
   const latest = files[files.length - 1];
@@ -325,6 +437,160 @@ async function spawnAction(action, jobUrl) {
   return { code: r.code, output: (r.output || '').trim(), timeout: r.timeout };
 }
 
+// Format a millisecond duration as a compact "5d 3h 12m" / "47m" / "8s" string.
+function fmtDuration(ms) {
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ${min % 60}m`;
+  const days = Math.floor(hr / 24);
+  return `${days}d ${hr % 24}h`;
+}
+
+function fmtAgo(iso) {
+  if (!iso) return 'never';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 0) return 'just now';
+  return fmtDuration(ms) + ' ago';
+}
+
+// /status — bot health snapshot. Single screen, structured for fast scan.
+async function buildStatusMessage() {
+  const lines = [`<b>🤖 Status — v${VERSION}</b>`, ''];
+
+  // Process uptime
+  lines.push(`<b>Bot</b>`);
+  lines.push(`  Uptime: ${fmtDuration(Date.now() - BOT_STARTED_AT)} (PID ${process.pid})`);
+
+  // Heartbeat (should be very recent)
+  let hb = null;
+  try { hb = JSON.parse(fs.readFileSync(HEARTBEAT_FILE, 'utf8')); } catch {}
+  if (hb) {
+    lines.push(`  Last heartbeat: ${fmtAgo(hb.ts)}` + (hb.lastPollOk === false ? ` ⚠️ poll failing (${hb.consecutiveFailures || 0}× in a row)` : ''));
+  }
+
+  // Last successful batch
+  let lastBatch = null;
+  try { lastBatch = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Last batch</b>`);
+  if (lastBatch) {
+    lines.push(`  ${lastBatch.date} · ${lastBatch.jobs?.length || 0} jobs · ${fmtAgo(lastBatch.generatedAt)}`);
+    if (lastBatch.funnel) {
+      const f = lastBatch.funnel;
+      lines.push(`  Funnel: raw=${f.raw} → kept=${f.keptAfterFilter} → fresh=${f.afterDedup} → sent=${f.sent}`);
+      lines.push(`  Score: top=${f.topPct}% median=${f.medianPct}% bottom=${f.bottomPct}%`);
+    }
+  } else {
+    lines.push(`  none yet`);
+  }
+
+  // Auth state
+  let auth = null;
+  try { auth = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'auth-state.json'), 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Auth</b>`);
+  if (auth) {
+    lines.push(`  Last OK: ${fmtAgo(auth.lastAuthOK)}`);
+    if (auth.lastAuthFail) lines.push(`  ⚠️ Last fail: ${fmtAgo(auth.lastAuthFail)}`);
+  } else {
+    lines.push(`  unknown — run /auth`);
+  }
+
+  // Running batch lock state
+  lines.push('');
+  lines.push(`<b>Activity</b>`);
+  lines.push(`  Batch in progress: ${runningJob ? '✓ yes' : 'no'}`);
+
+  // Scheduled tasks state — platform-aware via os-paths.
+  let tasksLine;
+  try {
+    const exists = scheduledTaskExists('bot');
+    tasksLine = exists ? `  munyun-bot: registered (${PLATFORM})` : `  munyun-bot: not registered`;
+  } catch (e) {
+    tasksLine = `  Scheduled tasks: query failed (${escHtml(e.message)})`;
+  }
+  lines.push(tasksLine);
+
+  return lines.join('\n');
+}
+
+// /diagnose — "why am I getting only N jobs?" Surfaces supply-side health:
+// last batch's funnel, per-query 7-day averages, seen-jobs size.
+function buildDiagnoseMessage() {
+  const lines = [`<b>🔬 Diagnose — supply pipeline</b>`, ''];
+
+  // Funnel from last batch
+  let lastBatch = null;
+  try { lastBatch = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')); } catch {}
+  lines.push(`<b>Last batch funnel</b>`);
+  if (lastBatch?.funnel) {
+    const f = lastBatch.funnel;
+    lines.push(`  Date: ${lastBatch.date}`);
+    lines.push(`  Raw cards scraped: ${f.raw}`);
+    lines.push(`  After filters: ${f.keptAfterFilter} (-${f.raw - f.keptAfterFilter} dropped, ${f.droppedClearance} were clearance)`);
+    lines.push(`  After dedup: ${f.afterDedup} (-${f.keptAfterFilter - f.afterDedup} already seen / applied)`);
+    lines.push(`  Sent to Telegram: ${f.sent}`);
+    lines.push(`  Score band: ${f.bottomPct}% – ${f.topPct}% (median ${f.medianPct}%)`);
+    if (f.afterDedup < 30) {
+      lines.push(`  ⚠️ Below typical 50–80 fresh jobs. Try <code>/forget last</code> or expand <code>/jobs add</code>.`);
+    }
+  } else if (lastBatch) {
+    lines.push(`  (older batch — funnel data added in v1.0; re-run /scrape)`);
+  } else {
+    lines.push(`  no batches yet — run /scrape`);
+  }
+
+  // Seen-jobs size — v1.0 E3 schema is { jobs: { url: { firstSeenAt, lastSeenAt } } }
+  // with 60-day decay. Old v0.x flat `ids` array is auto-migrated by daily-batch
+  // on first load; we read both shapes here for transitional safety.
+  let seen = null;
+  try { seen = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Seen-jobs memory</b>`);
+  const jobCount = seen?.jobs ? Object.keys(seen.jobs).length
+                  : (Array.isArray(seen?.ids) ? seen.ids.length : 0);
+  if (jobCount > 0) {
+    const fd = seen?.freshnessDays ?? 60;
+    lines.push(`  Total: ${jobCount} jobs`);
+    lines.push(`  Last updated: ${fmtAgo(seen.lastUpdated)}`);
+    lines.push(`  Freshness window: ${fd} days (entries decay after; <code>/forget all</code> wipes immediately).`);
+  } else {
+    lines.push(`  empty`);
+  }
+
+  // Per-query 7-day averages
+  let stats = null;
+  try { stats = JSON.parse(fs.readFileSync(profilePaths().queryStats, 'utf8')); } catch {}
+  lines.push('');
+  lines.push(`<b>Per-query supply (7-day avg)</b>`);
+  if (stats?.queries && Object.keys(stats.queries).length) {
+    const rows = Object.entries(stats.queries).map(([term, slot]) => {
+      const cards = (slot.history || []).map(h => h.cards);
+      const avg = cards.length ? Math.round(cards.reduce((a, b) => a + b, 0) / cards.length) : 0;
+      const recent = cards.slice(-3).join('/'); // last 3 days
+      return { term, avg, recent, n: cards.length };
+    });
+    rows.sort((a, b) => a.avg - b.avg); // surface low-supply queries first
+    for (const r of rows) {
+      const flag = r.avg === 0 ? '⚠️ ' : (r.avg < 5 ? '· ' : '  ');
+      lines.push(`${flag}${escHtml(r.term)}: avg ${r.avg}/day (last 3: ${r.recent || '—'})`);
+    }
+    const dryRuns = rows.filter(r => r.avg === 0 && r.n >= 3);
+    if (dryRuns.length) {
+      lines.push('');
+      lines.push(`⚠️ <b>${dryRuns.length}</b> queries averaged 0 cards — likely typos or terms hiring.cafe doesn't index. Edit via <code>/jobs remove</code> + <code>/jobs add</code>.`);
+    }
+  } else {
+    lines.push(`  no history yet — run /scrape a few times`);
+  }
+
+  return lines.join('\n');
+}
+
 async function handleMessage(msg) {
   const chatId = String(msg.chat.id);
   if (chatId !== ALLOWED_CHAT) {
@@ -341,9 +607,128 @@ async function handleMessage(msg) {
   if (/^\/?(test|ping)\b/.test(text)) {
     return reply(chatId, '✅ alive');
   }
+
+  // /status — bot uptime, last batch, last poll, version, scheduled-task state.
+  // The "is the bot alive and well?" command. Read by the user; structured
+  // similarly by the watchdog.
+  if (/^\/?status\b/.test(text)) {
+    return reply(chatId, await buildStatusMessage());
+  }
+
+  // /diagnose — supply-side health: per-query 7-day averages, seen-jobs size,
+  // last batch's funnel (raw → kept → afterDedup → scored). Answers
+  // "why am I getting only N jobs?" directly.
+  if (/^\/?diagnose\b/.test(text)) {
+    return reply(chatId, buildDiagnoseMessage());
+  }
+
+  // /batch [N] — open the inline-button paginated browser for the latest batch.
+  // v1.0 E4. Each page renders one job with [💾 Save] [✅ Applied] [❓ Why]
+  // [🚫 Skip co] action buttons + ⬅️/➡️ navigation.
+  const batchM = text.match(/^\/?batch(?:\s+(\d{1,3}))?\b/);
+  if (batchM) {
+    const page = batchM[1] ? parseInt(batchM[1], 10) : 1;
+    return openBatchBrowser(chatId, page);
+  }
+
+  // /history [N] — paginated application history from data/applications.md.
+  const histM = text.match(/^\/?history(?:\s+(\d{1,3}))?\b/);
+  if (histM) {
+    const page = histM[1] ? parseInt(histM[1], 10) : 1;
+    return showHistory(chatId, page);
+  }
+
+  // /saved [N] — paginated list of locally-bookmarked jobs (saved.md).
+  // v1.0.x: bookmarks are local-first now; hiring.cafe-side bookmarking
+  // is opt-in via /reauth.
+  const savedM = text.match(/^\/?saved(?:\s+(\d{1,3}))?\b/);
+  if (savedM) {
+    const page = savedM[1] ? parseInt(savedM[1], 10) : 1;
+    return showSaved(chatId, page);
+  }
+
+  // /uninstall — v1.0 E6. Two modes (pause / wipe) selected via inline buttons.
+  // Bot can't delete its own dir; for wipe mode, we send the final message,
+  // spawn uninstall.mjs detached, then exit. The detached process does the
+  // actual work after we're gone.
+  if (/^\/?uninstall\b/.test(text)) {
+    const reply_markup = {
+      inline_keyboard: [
+        [{ text: '⚠️ Pause only',     callback_data: makeNavCallback('uni', 1, TG_TOKEN) }],
+        [{ text: '☠️ Wipe everything', callback_data: makeNavCallback('uni', 2, TG_TOKEN) }],
+        [{ text: '✋ Cancel',          callback_data: makeNavCallback('uni', 0, TG_TOKEN) }]
+      ]
+    };
+    return reply(chatId, [
+      '<b>⚠️ Uninstall Automatic Munyun Machine</b>',
+      '',
+      '<b>Pause only</b> — stops the bot and unregisters scheduled tasks. Preserves <code>data/</code>, <code>config.json</code>, <code>.env</code>, browser session. Re-running setup brings everything back.',
+      '',
+      '<b>Wipe everything</b> — pause steps + delete <code>data/</code>, <code>config.json</code>, <code>.env</code>, browser session. Bot token is gone with .env; reinstalling means a fresh wizard run.',
+      '',
+      '<i>Install dir itself is not deleted — remove it by hand if you want the code gone too.</i>'
+    ].join('\n'), { reply_markup });
+  }
+
+  // /profile  /profile list  /profile add <slug>  /profile switch <slug>  /profile delete <slug>
+  // v1.0 E5: multi-profile support. One install, multiple personas. Each
+  // profile has its own CV, queries, filters, and seen-jobs memory. Browser
+  // session is shared (one hiring.cafe account).
+  if (/^\/?profile\b/.test(text)) {
+    const sub = text.match(/^\/?profile(?:\s+(list|add|switch|delete|rm)(?:\s+(\S+))?)?/i);
+    const action = sub?.[1]?.toLowerCase();
+    const slug = sub?.[2];
+
+    if (!action || action === 'list') {
+      const all = listProfiles();
+      const active = getActiveProfile();
+      const lines = [
+        '<b>👤 Profiles</b>',
+        '',
+        ...all.map(s => `${s === active ? '✅' : '  '} <code>${escHtml(s)}</code>${s === active ? ' (active)' : ''}`),
+        '',
+        '<i>/profile add &lt;slug&gt; — add a new profile (clones active config)</i>',
+        '<i>/profile switch &lt;slug&gt; — switch active</i>',
+        '<i>/profile delete &lt;slug&gt; — remove (cannot delete active or only profile)</i>'
+      ];
+      return reply(chatId, lines.join('\n'));
+    }
+    if (action === 'add') {
+      if (!slug) return reply(chatId, '<i>Usage: /profile add &lt;slug&gt;</i>');
+      try {
+        const r = addProfile(slug);
+        return reply(chatId, `✅ Profile <code>${escHtml(r.slug)}</code> created (cloned from <code>${escHtml(r.clonedFrom)}</code>).\n<i>Run /profile switch ${escHtml(r.slug)} then /resume to upload a CV for this persona.</i>`);
+      } catch (e) {
+        return reply(chatId, '❌ ' + escHtml(e.message));
+      }
+    }
+    if (action === 'switch') {
+      if (!slug) return reply(chatId, '<i>Usage: /profile switch &lt;slug&gt;</i>');
+      try {
+        if (runningJob) {
+          return reply(chatId, `⚠️ Batch in progress — switch will apply at next /scrape after this one finishes.`);
+        }
+        setActiveProfile(slug);
+        return reply(chatId, `✅ Switched active profile to <code>${escHtml(slug)}</code>. Next /scrape uses this profile's CV + queries + filters.`);
+      } catch (e) {
+        return reply(chatId, '❌ ' + escHtml(e.message));
+      }
+    }
+    if (action === 'delete' || action === 'rm') {
+      if (!slug) return reply(chatId, '<i>Usage: /profile delete &lt;slug&gt;</i>');
+      try {
+        const r = deleteProfile(slug);
+        return reply(chatId, `🗑️ Deleted profile <code>${escHtml(r.deleted)}</code>. Data dir kept for safety — wipe with <code>Remove-Item</code> if desired.`);
+      } catch (e) {
+        return reply(chatId, '❌ ' + escHtml(e.message));
+      }
+    }
+    return reply(chatId, '<i>Unknown /profile action. Try /profile list.</i>');
+  }
+
   if (/^\/?weather\b/.test(text)) {
     try { return reply(chatId, await getWeather()); }
-    catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + e.message); }
+    catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + escHtml(e.message)); }
   }
   // /scrape (and aliases /daily, gm, morning, update) — run a fresh batch
   if (/^\/?(scrape|daily|gm|morning|update)\b/.test(text) && !/^\/?jobs\b/.test(text)) {
@@ -363,32 +748,40 @@ async function handleMessage(msg) {
       } catch {}
       return reply(chatId, '✅ Logged in to hiring.cafe.' + extra);
     }
-    return reply(chatId, '❌ Not logged in. Run <code>scripts\\login-once.cmd</code> on the laptop to re-auth.');
+    return reply(chatId, `❌ Not logged in. Run <code>${escHtml(LOGIN_HELPER_DOC)}</code> on the laptop to re-auth.`);
   }
 
-  // /pause — disable 7am push
+  // /pause — disable scheduled batch (cross-platform via os-paths)
   if (/^\/?pause\b/.test(text)) {
-    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Disable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
-    if (r.timeout) return reply(chatId, '⏰ Pause command timed out after 30s. Try again.');
-    if (r.code === 0) return reply(chatId, '⏸ Daily 7am push paused. Use /resume-bot to re-enable.');
-    return reply(chatId, `❌ Could not pause (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
+    const r = disableScheduledTask('daily');
+    if (r.ok) return reply(chatId, '⏸ Daily push paused. Use /resume-bot to re-enable.');
+    return reply(chatId, `❌ Could not pause (exit ${r.code}).\n<pre>${escHtml((r.output || '').slice(0, 200))}</pre>`);
   }
-  // /resume-bot — re-enable 7am push
+  // /resume-bot — re-enable scheduled batch
   if (/^\/?resume[-_\s]?bot\b/.test(text)) {
-    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-Command', "Enable-ScheduledTask -TaskName 'munyun-daily-batch'"], 30000);
-    if (r.timeout) return reply(chatId, '⏰ Resume command timed out after 30s. Try again.');
-    if (r.code === 0) return reply(chatId, '▶️ Daily 7am push re-enabled.');
-    return reply(chatId, `❌ Could not resume (exit ${r.code}).${r.error ? '\n<i>spawn error: ' + escHtml(String(r.output || '').slice(0, 200)) + '</i>' : ''}`);
+    const r = enableScheduledTask('daily');
+    if (r.ok) return reply(chatId, '▶️ Daily push re-enabled.');
+    return reply(chatId, `❌ Could not resume (exit ${r.code}).\n<pre>${escHtml((r.output || '').slice(0, 200))}</pre>`);
   }
-  // /reauth — spawn login-once.mjs on the user's machine
+  // /reauth — spawn login-once on the user's machine. Cross-platform:
+  // on Win32 we route through the .cmd wrapper (preserves the visible
+  // window contract); on Mac/Linux we exec node directly.
   if (/^\/?reauth\b/.test(text)) {
-    reply(chatId, '🔓 Opening login window on your computer. Sign into hiring.cafe with Google, then close the window.');
-    spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
-      cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
-    }).unref();
+    reply(chatId, '🔓 Opening Cloudflare warmup window on your computer. Wait for it to finish — no sign-in required.');
+    if (IS_WIN32) {
+      spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
+        cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
+      }).unref();
+    } else {
+      spawn(nodeCmd(), [path.join(ROOT, 'scripts', 'login-once.mjs')], {
+        cwd: ROOT, detached: true, stdio: 'ignore'
+      }).unref();
+    }
     return;
   }
-  // /save N or /applied N
+  // /save N or /applied N — text-mode fallbacks. Both write locally first
+  // (source of truth) then attempt hiring.cafe click as a best-effort.
+  // Exit code 7 from job-action.mjs means "not signed in, skip silently."
   const actionMatch = text.match(/^\/?(save|applied)\s+(\d+)\b/);
   if (actionMatch) {
     const action = actionMatch[1];
@@ -397,19 +790,19 @@ async function handleMessage(msg) {
     if (!batch) return reply(chatId, '❌ No batch on disk yet — run /daily first.');
     const job = batch.rows.find(r => r.idx === n);
     if (!job) return reply(chatId, `❌ Job #${n} not found in latest batch (${batch.rows.length} jobs in ${batch.file}).`);
+
+    // Local write FIRST so the action persists regardless of hiring.cafe outcome.
+    try {
+      const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${job.title} @ ${job.company} — ${job.viewjobUrl}\n`;
+      const target = action === 'save' ? path.join(profilePaths().dir, 'saved.md') : profilePaths().applications;
+      fs.appendFileSync(target, line);
+    } catch (e) { log(`${action} local write failed: ` + e.message); }
+
     reply(chatId, `🔄 ${action === 'save' ? 'Bookmarking' : 'Marking applied'}: <b>${escHtml(job.title)}</b> @ ${escHtml(job.company)}…`);
     const { code, output } = await spawnAction(action, job.viewjobUrl);
-    if (code === 0) {
-      // Bonus: append to applications.md when /applied succeeds
-      if (action === 'applied') {
-        try {
-          const line = `\n| - | ${new Date().toISOString().slice(0, 10)} | ${job.company} | ${job.title} | - | APPLIED | - | - | via /applied | ${job.viewjobUrl} |`;
-          fs.appendFileSync(path.join(ROOT, 'data', 'applications.md'), line);
-        } catch (e) { log('applications.md append failed: ' + e.message); }
-      }
-      return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Applied'} on hiring.cafe.${action === 'applied' ? '\nAlso logged to applications.md.' : ''}`);
-    }
-    return reply(chatId, `❌ ${action} failed.\n<pre>${escHtml(output.slice(0, 400))}</pre>`);
+    if (code === 0) return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Applied'} locally + on hiring.cafe.`);
+    if (code === 7) return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Marked applied'} locally. <i>(Run /reauth to also act on hiring.cafe.)</i>`);
+    return reply(chatId, `✅ ${action === 'save' ? 'Saved' : 'Marked applied'} locally. Hiring.cafe click failed (exit ${code}).\n<pre>${escHtml((output || '').slice(0, 300))}</pre>`);
   }
 
   // ===== v0.3 commands =====
@@ -422,14 +815,19 @@ async function handleMessage(msg) {
     try {
       const cfg = cfgRW.read();
       const cv = (() => {
-        try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'cv-parsed.json'), 'utf8')); }
+        try { return JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8')); }
         catch { return null; }
       })();
       const queries = cfg.queries || [];
       const skip = cfg.filters?.skipCompanies || [];
       const seen = (() => {
-        try { return JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'seen-jobs.json'), 'utf8')).ids?.length || 0; }
-        catch { return 0; }
+        try {
+          const sj = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8'));
+          // v1.0 E3 schema: { jobs: { url: {...} } }; v0.x: { ids: [...] }
+          if (sj.jobs) return Object.keys(sj.jobs).length;
+          if (Array.isArray(sj.ids)) return sj.ids.length;
+          return 0;
+        } catch { return 0; }
       })();
       const lines = [
         '<b>⚙️ Current configuration</b>',
@@ -452,7 +850,7 @@ async function handleMessage(msg) {
       ];
       return reply(chatId, lines.join('\n'));
     } catch (e) {
-      return reply(chatId, '❌ Could not read settings: ' + e.message);
+      return reply(chatId, '❌ Could not read settings: ' + escHtml(e.message));
     }
   }
 
@@ -470,6 +868,18 @@ async function handleMessage(msg) {
     const k = parseInt(salM[1]);
     cfgRW.set('user.salaryFloorUsd', k * 1000);
     return reply(chatId, `✅ Salary floor set to <b>$${k}k</b>.`);
+  }
+
+  // /floor N — set minimum match-percent threshold (jobs below this are
+  // dropped before the top-100 cut). v1.0 E3. Default 25%; lower to 0 to
+  // include filler when supply is low; raise to 50+ to be picky.
+  const floorM = text.match(/^\/?floor\s+(\d{1,3})\b/);
+  if (floorM) {
+    const n = Math.min(100, Math.max(0, parseInt(floorM[1])));
+    cfgRW.set('scoring.matchFloorPercent', n);
+    return reply(chatId, n === 0
+      ? `✅ Match floor set to <b>0%</b> — every scored job will surface (filler included).`
+      : `✅ Match floor set to <b>${n}%</b>. Jobs scoring below this are dropped before the top-100 cut.`);
   }
 
   // /clearance on/off
@@ -530,7 +940,7 @@ async function handleMessage(msg) {
       cfgRW.set('weather.lon', r.lon);
       cfgRW.set('weather.timezone', r.timezone);
       return reply(chatId, `✅ Weather city: <b>${escHtml(r.city)}</b>${r.admin ? `, ${escHtml(r.admin)}` : ''} (${escHtml(r.country)})`);
-    } catch (e) { return reply(chatId, '❌ Geocoding failed: ' + e.message); }
+    } catch (e) { return reply(chatId, '❌ Geocoding failed: ' + escHtml(e.message)); }
   }
 
   // /schedule HH:MM
@@ -540,7 +950,16 @@ async function handleMessage(msg) {
     if (hh > 23 || mm > 59) return reply(chatId, '❌ Invalid time. Use 24-hour HH:MM.');
     const time = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
     cfgRW.set('schedule.time', time);
-    const r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    // Re-register scheduled tasks on the host platform.
+    let r;
+    if (IS_WIN32) {
+      r = await spawnWithTimeout(POWERSHELL, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(ROOT, 'scripts', 'setup-tasks.ps1')], 30000);
+    } else {
+      const setupScript = IS_DARWIN
+        ? path.join(ROOT, 'scripts', 'setup-tasks-mac.sh')
+        : path.join(ROOT, 'scripts', 'setup-tasks-linux.sh');
+      r = await spawnWithTimeout('bash', [setupScript], 30000);
+    }
     if (r.timeout) return reply(chatId, `⏰ Schedule saved but task re-registration timed out after 30s.`);
     return reply(chatId, r.code === 0
       ? `✅ Schedule updated to <b>${time}</b>. Task Scheduler re-registered.`
@@ -556,7 +975,10 @@ async function handleMessage(msg) {
     const addM = rawText.match(/^\/?jobs\s+add\s+["']?(.+?)["']?$/i);
     if (addM) {
       const term = addM[1].trim();
-      const key = term.replace(/[^a-z0-9]/gi, '').slice(0, 20);
+      // F-M13: non-Latin queries (e.g. /jobs add 中文工程师 or /jobs add !!!)
+      // collapse to an empty key, and two empty keys collide silently in
+      // results[key]. Fall back to a timestamp-based slug.
+      const key = (term.replace(/[^a-z0-9]/gi, '').slice(0, 20)) || `q${Date.now().toString(36)}`;
       const r = cfgRW.appendUnique('queries', { key, term });
       return reply(chatId, r.added
         ? `✅ Added "<b>${escHtml(term)}</b>" — now searching ${r.list.length} job titles.`
@@ -576,7 +998,7 @@ async function handleMessage(msg) {
     // /jobs suggest
     if (/^\/?jobs\s+suggest\b/i.test(text)) {
       try {
-        const cv = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'cv-parsed.json'), 'utf8'));
+        const cv = JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8'));
         const suggestions = suggestRoles(cv, { max: 12 });
         if (!suggestions.length) {
           return reply(chatId, '❌ No suggestions. Your CV may be too sparse — try /resume to upload a fuller version.');
@@ -628,7 +1050,7 @@ async function handleMessage(msg) {
   if (whyM) {
     const n = parseInt(whyM[1]);
     try {
-      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const last = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
       const job = last.jobs.find(j => j.idx === n);
       if (!job) return reply(chatId, `❌ Job #${n} not found in last batch (${last.jobs.length} jobs).`);
       const lines = [
@@ -639,7 +1061,7 @@ async function handleMessage(msg) {
         `<b>Search query that found it:</b> ${escHtml(job.q)}`,
         job.matched.length ? `<b>Matched keywords (${job.matched.length}):</b>\n${job.matched.map(escHtml).join(' · ')}` : '<i>No CV keywords matched — score is from search relevance only.</i>',
         '',
-        `<a href="${job.directUrl || job.viewjobUrl}">Open job →</a>`
+        `<a href="${escHtmlAttr(job.directUrl || job.viewjobUrl)}">Open job →</a>`
       ];
       return reply(chatId, lines.join('\n'));
     } catch {
@@ -650,7 +1072,7 @@ async function handleMessage(msg) {
   // /forget all
   if (/^\/?forget\s+all\b/.test(text)) {
     try {
-      fs.unlinkSync(path.join(ROOT, 'data', 'seen-jobs.json'));
+      fs.unlinkSync(profilePaths().seenJobs);
       return reply(chatId, '🗑 Wiped seen-jobs memory. Next /scrape treats every job as fresh.');
     } catch {
       return reply(chatId, '<i>No memory to wipe — you\'re already at a clean slate.</i>');
@@ -713,13 +1135,13 @@ async function handleMessage(msg) {
     const pullR = await spawnWithTimeout('git', ['pull', 'origin', 'main'], 60000);
     if (pullR.timeout) return reply(chatId, '❌ git pull timed out after 60s. Cancelling update.');
     if (pullR.code !== 0) {
-      return reply(chatId, `❌ git pull failed (exit ${pullR.code}):\n<pre>${escHtml((pullR.output || '').slice(0, 800))}</pre>\n\n<i>Likely cause: uncommitted local changes. Update the bot manually:\n<code>cd %LOCALAPPDATA%\\automatic-munyun-machine; git stash; git pull origin main; npm install</code></i>`);
+      return reply(chatId, `❌ git pull failed (exit ${pullR.code}):\n<pre>${escHtml((pullR.output || '').slice(0, 800))}</pre>\n\n<i>Likely cause: uncommitted local changes. Update manually:\n<code>cd ${escHtml(INSTALL_DIR_HINT)}; git stash; git pull origin main; npm install</code></i>`);
     }
 
     await reply(chatId, '📦 <i>Installing dependencies…</i>');
-    // npm.cmd on Windows — passing 'npm' to spawn() without shell:true won't find it
-    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm';
-    const npmR = await spawnWithTimeout(npmCmd, ['install', '--no-audit', '--no-fund', '--loglevel=error'], 120000);
+    // Resolve npm absolutely via os-paths (handles Win32 stripped-PATH +
+    // Mac/Linux PATH lookup uniformly).
+    const npmR = await spawnWithTimeout(npmCmd(), ['install', '--no-audit', '--no-fund', '--loglevel=error'], 120000);
     if (npmR.timeout) return reply(chatId, '❌ npm install timed out after 2min. Bot left in old state — restart manually.');
     if (npmR.code !== 0) {
       return reply(chatId, `❌ npm install failed (exit ${npmR.code}):\n<pre>${escHtml((npmR.output || '').slice(0, 800))}</pre>`);
@@ -730,16 +1152,26 @@ async function handleMessage(msg) {
 
     await reply(chatId, '👋 <b>Restarting bot to apply update…</b>\nBack online in ~10 seconds.');
 
-    // Detached restarter: waits 4s for this bot to exit, then runs schtasks
-    // to start a fresh bot from the (now updated) code on disk.
-    // Absolute paths used everywhere — if PATH is stripped (which is exactly
-    // the kind of environment that needs auto-update most), this still works.
-    const TIMEOUT = path.join(SYS32, 'timeout.exe');
-    const restartCmd = `"${TIMEOUT}" /t 4 /nobreak >nul && "${SCHTASKS}" /run /tn munyun-bot`;
-    const restarter = spawn(CMD_EXE, ['/c', restartCmd], {
-      detached: true, stdio: 'ignore', windowsHide: true
-    });
-    restarter.unref();
+    // Detached restarter: waits 4s for this bot to exit, then asks the
+    // platform scheduler to start a fresh bot from the (now updated) code.
+    // Cross-platform via os-paths.runScheduledTask — internally branches
+    // schtasks (Win32) / launchctl kickstart (Mac) / systemctl --user start (Linux).
+    if (IS_WIN32) {
+      const TIMEOUT = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'timeout.exe');
+      const restartCmd = `"${TIMEOUT}" /t 4 /nobreak >nul && "${SCHTASKS}" /run /tn munyun-bot`;
+      spawn(CMD_EXE, ['/c', restartCmd], {
+        detached: true, stdio: 'ignore', windowsHide: true
+      }).unref();
+    } else {
+      // POSIX: a tiny detached shell sleeps 4s then runs the scheduler call.
+      // Shell-out is the simplest portable way to detach + sleep + invoke.
+      const sleepThenStart = IS_DARWIN
+        ? `sleep 4 && launchctl kickstart -k gui/$(id -u)/com.amm.bot`
+        : `sleep 4 && systemctl --user start munyun-bot.service`;
+      spawn('/bin/sh', ['-c', sleepThenStart], {
+        detached: true, stdio: 'ignore'
+      }).unref();
+    }
 
     // Give Telegram ~1s to deliver the "restarting" message before we exit
     await new Promise(r => setTimeout(r, 1500));
@@ -771,23 +1203,295 @@ async function handleMessage(msg) {
     }
   }
 
-  // /forget last
+  // /forget last — schema-aware (v1.0 E3 jobs map vs v0.x ids array)
   if (/^\/?forget\s+last\b/.test(text)) {
     try {
-      const seenPath = path.join(ROOT, 'data', 'seen-jobs.json');
-      const last = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'last-batch.json'), 'utf8'));
+      const seenPath = profilePaths().seenJobs;
+      const last = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
       const seen = JSON.parse(fs.readFileSync(seenPath, 'utf8'));
-      const remove = new Set(last.jobs.map(j => j.viewjobUrl));
-      const before = seen.ids.length;
-      seen.ids = seen.ids.filter(id => !remove.has(id));
-      fs.writeFileSync(seenPath, JSON.stringify(seen, null, 2));
-      return reply(chatId, `✅ Forgot ${before - seen.ids.length} jobs from the last batch. They'll come back next /scrape.`);
+      const remove = new Set((last.jobs || []).map(j => j.viewjobUrl));
+      let before = 0, after = 0;
+      if (seen.jobs) {
+        before = Object.keys(seen.jobs).length;
+        for (const url of remove) delete seen.jobs[url];
+        after = Object.keys(seen.jobs).length;
+      } else if (Array.isArray(seen.ids)) {
+        before = seen.ids.length;
+        seen.ids = seen.ids.filter(id => !remove.has(id));
+        after = seen.ids.length;
+      }
+      atomicWriteJson(seenPath, seen);
+      return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.`);
     } catch (e) {
-      return reply(chatId, '❌ ' + e.message);
+      return reply(chatId, '❌ ' + escHtml(e.message));
     }
   }
 
   return reply(chatId, `Unknown command. Try /help.`);
+}
+
+// =====================================================================
+//  v1.0 E4 — Inline callback handling, paginated batch browser, /history
+// =====================================================================
+
+// Render one job page from the callbacks table. Returns {text, reply_markup}
+// suitable for sendMessage or editMessageText.
+function renderJobPage(idx, total, item, opts = {}) {
+  const filter = opts.filter || 'all';
+  const co = item.company || '<i>(no company)</i>';
+  const yoe = (item.yoe !== null && item.yoe !== undefined) ? `${item.yoe}+ YOE · ` : '';
+  const q = item.q ? `[${escHtml(item.q)}]` : '';
+  const lines = [
+    `<b>Job ${idx} / ${total}</b>${filter !== 'all' ? `  <i>(filter: ${filter})</i>` : ''}`,
+    '',
+    `<b>${escHtml(item.title || '(untitled)')}</b>`,
+    `${escHtml(co)}  ·  ${item.matchPct}% match  ·  ${yoe}${q}`,
+    '',
+    item.directUrl ? `🔗 <a href="${escHtmlAttr(item.directUrl)}">Apply directly</a>` : '',
+    `🔍 <a href="${escHtmlAttr(item.url)}">View on hiring.cafe</a>`
+  ].filter(Boolean);
+
+  // Action row
+  const actionRow = [
+    { text: '💾 Save',     callback_data: makeCallback('s', idx, item.url, TG_TOKEN) },
+    { text: '✅ Applied',  callback_data: makeCallback('a', idx, item.url, TG_TOKEN) },
+    { text: '❓ Why',      callback_data: makeCallback('w', idx, item.url, TG_TOKEN) },
+    { text: '🚫 Skip co',  callback_data: makeCallback('k', idx, item.url, TG_TOKEN) }
+  ];
+  // Nav row
+  const prevIdx = Math.max(1, idx - 1);
+  const nextIdx = Math.min(total, idx + 1);
+  const navRow = [
+    { text: '⬅️',                 callback_data: makeNavCallback('b', prevIdx, TG_TOKEN) },
+    { text: `${idx} / ${total}`,  callback_data: makeNavCallback('noop', 0, TG_TOKEN) },
+    { text: '➡️',                 callback_data: makeNavCallback('b', nextIdx, TG_TOKEN) }
+  ];
+
+  return {
+    text: lines.join('\n'),
+    reply_markup: { inline_keyboard: [actionRow, navRow] }
+  };
+}
+
+async function openBatchBrowser(chatId, page = 1) {
+  const tbl = readCallbackTable();
+  if (!tbl || !tbl.items?.length) {
+    return reply(chatId, '<i>No batch loaded. Run /scrape first.</i>');
+  }
+  if (tbl.expiresAt && new Date(tbl.expiresAt).getTime() < Date.now()) {
+    return reply(chatId, '<i>Last batch expired (>7 days). Run /scrape for a fresh one.</i>');
+  }
+  const idx = Math.min(Math.max(1, page), tbl.items.length);
+  const item = tbl.items.find(i => i.idx === idx) || tbl.items[0];
+  const view = renderJobPage(item.idx, tbl.items.length, item);
+  return reply(chatId, view.text, { reply_markup: view.reply_markup });
+}
+
+// Show /history — paginated list of jobs from applications.md, 5 per page
+async function showHistory(chatId, page = 1) {
+  const PAGE_SIZE = 5;
+  let entries = [];
+  try {
+    const md = fs.readFileSync(profilePaths().applications, 'utf8');
+    // Extract every viewjob URL + the line above it (assume some metadata)
+    const lines = md.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/hiring\.cafe\/viewjob\/[a-z0-9]+/);
+      if (m) entries.push({ url: 'https://' + m[0], context: lines.slice(Math.max(0, i - 1), i + 2).join(' · ').slice(0, 200) });
+    }
+  } catch {
+    return reply(chatId, '<i>No applications.md yet. Use /applied N to start logging.</i>');
+  }
+  if (!entries.length) return reply(chatId, '<i>No applications logged yet.</i>');
+  entries.reverse(); // newest first
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const slice = entries.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const lines = [`<b>📋 Application history</b>  (page ${p}/${totalPages}, ${entries.length} total)`, ''];
+  for (const [i, e] of slice.entries()) {
+    const num = (p - 1) * PAGE_SIZE + i + 1;
+    lines.push(`<b>${num}.</b> <a href="${escHtmlAttr(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
+    if (e.context) lines.push(`<i>${escHtml(e.context.slice(0, 120))}</i>`);
+    lines.push('');
+  }
+  const navRow = [];
+  if (p > 1)            navRow.push({ text: '⬅️',  callback_data: makeNavCallback('h', p - 1, TG_TOKEN) });
+  navRow.push({ text: `${p}/${totalPages}`, callback_data: makeNavCallback('noop', 0, TG_TOKEN) });
+  if (p < totalPages)   navRow.push({ text: '➡️',  callback_data: makeNavCallback('h', p + 1, TG_TOKEN) });
+  return reply(chatId, lines.join('\n'), { reply_markup: { inline_keyboard: [navRow] } });
+}
+
+// Show /saved — paginated list of locally-bookmarked jobs (saved.md), 5 per page.
+async function showSaved(chatId, page = 1) {
+  const PAGE_SIZE = 5;
+  const savedPath = path.join(profilePaths().dir, 'saved.md');
+  let entries = [];
+  try {
+    const md = fs.readFileSync(savedPath, 'utf8');
+    const lines = md.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i].match(/hiring\.cafe\/viewjob\/[a-z0-9]+/);
+      if (m) entries.push({ url: 'https://' + m[0], context: lines[i].slice(0, 200) });
+    }
+  } catch {
+    return reply(chatId, '<i>No saved jobs yet. Tap [💾 Save] in /batch or use /save N to bookmark.</i>');
+  }
+  if (!entries.length) return reply(chatId, '<i>No saved jobs yet.</i>');
+  entries.reverse();
+  const totalPages = Math.max(1, Math.ceil(entries.length / PAGE_SIZE));
+  const p = Math.min(Math.max(1, page), totalPages);
+  const slice = entries.slice((p - 1) * PAGE_SIZE, p * PAGE_SIZE);
+  const lines = [`<b>💾 Saved jobs</b>  (page ${p}/${totalPages}, ${entries.length} total)`, ''];
+  for (const [i, e] of slice.entries()) {
+    const num = (p - 1) * PAGE_SIZE + i + 1;
+    lines.push(`<b>${num}.</b> <a href="${escHtmlAttr(e.url)}">${escHtml(e.url.replace('https://', ''))}</a>`);
+    if (e.context) lines.push(`<i>${escHtml(e.context.slice(0, 120))}</i>`);
+    lines.push('');
+  }
+  const navRow = [];
+  if (p > 1)            navRow.push({ text: '⬅️',  callback_data: makeNavCallback('sv', p - 1, TG_TOKEN) });
+  navRow.push({ text: `${p}/${totalPages}`, callback_data: makeNavCallback('noop', 0, TG_TOKEN) });
+  if (p < totalPages)   navRow.push({ text: '➡️',  callback_data: makeNavCallback('sv', p + 1, TG_TOKEN) });
+  return reply(chatId, lines.join('\n'), { reply_markup: { inline_keyboard: [navRow] } });
+}
+
+// Central callback dispatcher. Telegram fires this for every inline-button tap.
+async function handleCallback(cq) {
+  const chatId = String(cq.message?.chat?.id || cq.from?.id);
+  if (chatId !== ALLOWED_CHAT) {
+    return tgAnswerCallback(cq.id, 'Not authorized', true);
+  }
+  log(`< callback ${cq.data}`);
+
+  const verified = parseAndVerify(cq.data, TG_TOKEN);
+  if (!verified.ok) {
+    if (verified.expired) {
+      return tgAnswerCallback(cq.id, 'This batch has expired — run /scrape', true);
+    }
+    return tgAnswerCallback(cq.id, 'Invalid or stale button', true);
+  }
+
+  const { action, idx, item } = verified;
+
+  // No-op (counter button)
+  if (action === 'noop') return tgAnswerCallback(cq.id);
+
+  // Batch browser navigation — edit the bubble in place
+  if (action === 'b') {
+    const tbl = readCallbackTable();
+    if (!tbl) return tgAnswerCallback(cq.id, 'Batch not loaded', true);
+    const target = tbl.items.find(i => i.idx === idx);
+    if (!target) return tgAnswerCallback(cq.id, 'Job not found', true);
+    const view = renderJobPage(idx, tbl.items.length, target);
+    await tgEditMessage(chatId, cq.message.message_id, view.text, { reply_markup: view.reply_markup });
+    return tgAnswerCallback(cq.id);
+  }
+
+  // History pagination
+  if (action === 'h') {
+    await tgAnswerCallback(cq.id);
+    return showHistory(chatId, idx);
+  }
+
+  // Saved-jobs pagination (v1.0.x)
+  if (action === 'sv') {
+    await tgAnswerCallback(cq.id);
+    return showSaved(chatId, idx);
+  }
+
+  // Diagnose shortcut
+  if (action === 'diag') {
+    await tgAnswerCallback(cq.id);
+    return reply(chatId, buildDiagnoseMessage());
+  }
+
+  // /uninstall confirmation buttons (idx: 0=cancel, 1=pause, 2=wipe)
+  if (action === 'uni') {
+    if (idx === 0) {
+      await tgAnswerCallback(cq.id, 'Cancelled');
+      return reply(chatId, '✋ Uninstall cancelled. No changes made.');
+    }
+    const mode = idx === 1 ? 'pause' : 'wipe';
+    await tgAnswerCallback(cq.id, mode === 'pause' ? 'Pausing…' : 'Wiping everything…');
+    const finalMsg = mode === 'pause'
+      ? `🛑 <b>Pausing.</b>\nBot exiting; scheduled tasks unregistering. Preserved: data/, config.json, .env. ${escHtml(RESTART_HINT_DOC)}.`
+      : `☠️ <b>Wiping everything.</b>\nBot exiting. data/, config.json, .env, browser session will be deleted by the uninstall process.\n\n<i>Install dir at <code>${escHtml(ROOT)}</code> remains — delete by hand if you want the code gone.</i>`;
+    await reply(chatId, finalMsg);
+    // Spawn uninstall.mjs detached so it survives our exit
+    const uninstallScript = path.join(ROOT, 'scripts', 'uninstall.mjs');
+    const child = spawn('node', [uninstallScript, `--mode=${mode}`], {
+      detached: true, stdio: 'ignore', windowsHide: true, cwd: ROOT
+    });
+    child.unref();
+    log(`Uninstall (${mode}) spawned PID=${child.pid}; bot exiting.`);
+    // Give Telegram time to deliver the final message before we exit
+    await new Promise(r => setTimeout(r, 1500));
+    process.exit(0);
+  }
+
+  // Save / Applied / Why / Skip-company — all require resolved item
+  if (!item) return tgAnswerCallback(cq.id, 'Job context missing — re-run /scrape', true);
+
+  if (action === 's') {
+    await tgAnswerCallback(cq.id, 'Saving…');
+    // v1.0.x: always write to local saved.md first (source of truth for /saved).
+    // Hiring.cafe click is best-effort — exit code 7 means "not signed in,
+    // skip silently and report local-only success."
+    const savedPath = path.join(profilePaths().dir, 'saved.md');
+    try {
+      const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
+      fs.appendFileSync(savedPath, line);
+    } catch (e) { log('saved.md append failed: ' + e.message); }
+    const { code, output, timeout } = await spawnAction('save', item.url);
+    if (timeout) return reply(chatId, `💾 Saved locally for #${idx}; hiring.cafe click timed out (run <code>/reauth</code> to enable hiring.cafe-side bookmarking).`);
+    if (code === 0) return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> locally and on hiring.cafe.`);
+    if (code === 7) return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> locally. <i>(Run /reauth to also bookmark on hiring.cafe.)</i>`);
+    return reply(chatId, `💾 Saved <b>${escHtml(item.title || `job #${idx}`)}</b> locally. Hiring.cafe click failed (exit ${code}); local record is what /saved reads.`);
+  }
+
+  if (action === 'a') {
+    await tgAnswerCallback(cq.id, 'Marking applied…');
+    // Always write to applications.md first (source of truth for /history).
+    try {
+      const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
+      fs.appendFileSync(profilePaths().applications, line);
+    } catch (e) { log('applications.md append failed: ' + e.message); }
+    const { code, output, timeout } = await spawnAction('applied', item.url);
+    if (timeout) return reply(chatId, `✅ Logged applied locally for #${idx}; hiring.cafe click timed out.`);
+    if (code === 0) return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')} (locally + on hiring.cafe).`);
+    if (code === 7) return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')} (locally; <i>/reauth to also mark on hiring.cafe</i>).`);
+    return reply(chatId, `✅ Logged applied locally. Hiring.cafe click failed (exit ${code}).`);
+  }
+
+  if (action === 'w') {
+    await tgAnswerCallback(cq.id);
+    // Reuse the existing /why N path by reading last-batch.json directly.
+    try {
+      const last = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
+      const job = (last.jobs || []).find(j => j.idx === idx);
+      if (!job) return reply(chatId, `<i>Couldn't find job #${idx} in last-batch.json. /scrape may have rotated.</i>`);
+      const matched = (job.matched || []).slice(0, 30).map(escHtml).join(', ') || '<i>(no keyword matches)</i>';
+      return reply(chatId, [
+        `<b>Why job #${idx} matched ${job.matchPct}%</b>`,
+        '',
+        `<b>${escHtml(job.title || '')}</b> @ ${escHtml(job.company || '')}`,
+        '',
+        `<b>Matched terms:</b> ${matched}`,
+        `<b>Raw score:</b> ${job.score}`
+      ].join('\n'));
+    } catch (e) {
+      return reply(chatId, `❌ ${escHtml(e.message)}`);
+    }
+  }
+
+  if (action === 'k') {
+    if (!item.company) return tgAnswerCallback(cq.id, 'No company recorded for this job', true);
+    await tgAnswerCallback(cq.id, `Skipping ${item.company}…`);
+    cfgRW.appendUnique('filters.skipCompanies', item.company);
+    return reply(chatId, `🚫 Added <b>${escHtml(item.company)}</b> to skip list. Future scrapes will ignore them.`);
+  }
+
+  return tgAnswerCallback(cq.id, `Unknown action: ${action}`, true);
 }
 
 // Handle file attachments (for /resume upload flow)
@@ -819,9 +1523,10 @@ async function handleAttachment(msg) {
     try {
       r = await fetch(downloadUrl, { signal: AbortSignal.timeout(30000) });
     } catch (netErr) {
-      // Strip token from any thrown error message before re-raising
-      const safe = String(netErr.message || netErr).replace(TG_TOKEN, '<TOKEN>');
-      throw new Error('Network: ' + safe);
+      // Strip token from any thrown error message before re-raising. The
+      // download URL embeds TG_TOKEN; a fetch-internal error with `cause`
+      // chain can echo the URL.
+      throw new Error('Network: ' + SCRUB(netErr.message || netErr));
     }
     if (!r.ok) throw new Error(`Download HTTP ${r.status}`);
     const buf = Buffer.from(await r.arrayBuffer());
@@ -847,13 +1552,18 @@ async function handleAttachment(msg) {
     ].join('\n'));
   } catch (e) {
     // Defense-in-depth: scrub any token that might have leaked into the error message
-    const safe = String(e.message || e).replace(TG_TOKEN, '<TOKEN>');
+    const safe = SCRUB(e.message || e);
     log('Resume upload failed: ' + safe);
     return reply(chatId, '❌ Resume upload failed: ' + escHtml(safe));
   }
 }
 
 function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+// Attribute-context escaper. Telegram HTML mode honors `"`-delimited href
+// attributes but does NOT auto-escape `"` in text — meaning a hostile job
+// posting could break out of href="…" and inject content. Apply this to
+// every `href=` interpolation; escHtml stays for visible text.
+function escHtmlAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
 
 // ---------- main loop ----------
 let offset = loadOffset();
@@ -899,6 +1609,10 @@ async function notifyIfUpdateAvailable() {
 setTimeout(() => { notifyIfUpdateAvailable(); }, 5000);
 setInterval(() => { notifyIfUpdateAvailable(); }, 24 * 60 * 60 * 1000);
 
+// Initial heartbeat so the watchdog sees us as alive before the first poll
+// completes (Telegram long-poll can take up to 30s to return).
+writeHeartbeat({ lastPollOk: null, consecutiveFailures: 0 });
+
 // Resilient poll loop with exponential backoff + recovery detection.
 // On Telegram outages we used to retry every 5s and silently die if anything
 // in the catch block threw. Now we:
@@ -915,7 +1629,10 @@ let outageStartedAt = null;
 
 while (true) {
   try {
-    const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message']) });
+    const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message', 'callback_query']) });
+
+    // Heartbeat: tell the watchdog we're alive and Telegram-reachable.
+    writeHeartbeat({ lastPollOk: true, consecutiveFailures: 0 });
 
     // Just recovered from a poll-failure streak — note it loudly.
     if (consecutiveFailures > 0) {
@@ -938,6 +1655,8 @@ while (true) {
           } else {
             handleMessage(u.message).catch(e => log('handleMessage error: ' + e.message));
           }
+        } else if (u.callback_query) {
+          handleCallback(u.callback_query).catch(e => log('handleCallback error: ' + e.message));
         }
         offset = u.update_id + 1;
       }
@@ -946,6 +1665,9 @@ while (true) {
   } catch (e) {
     consecutiveFailures++;
     if (consecutiveFailures === 1) outageStartedAt = Date.now();
+    // Heartbeat even when polling failed — process is alive, network is the
+    // issue. Watchdog should not restart us for a Telegram outage.
+    writeHeartbeat({ lastPollOk: false, consecutiveFailures, lastPollError: String(e.message || e).slice(0, 200) });
     const delay = BACKOFF_MS[Math.min(consecutiveFailures - 1, BACKOFF_MS.length - 1)];
     log(`poll error #${consecutiveFailures}: ${e.message} — backing off ${delay / 1000}s`);
     try {

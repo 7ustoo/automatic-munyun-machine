@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { paths } from './profile-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -58,9 +59,33 @@ export async function readResumeText(filePath) {
   throw new Error(`Unsupported resume format: ${ext}. Use PDF, DOCX, MD, or TXT.`);
 }
 
+// Score the CV against each cluster's signal terms. Returns an object mapping
+// cluster name → number of distinct hits. Used to pick `primaryClusters` so
+// scoring in daily-batch.mjs can deemphasize off-domain matches (e.g. a
+// backend dev's handful of IAM matches don't drag their non-IAM jobs).
+export function scoreClusters(text, clusters) {
+  const scores = {};
+  for (const [name, def] of Object.entries(clusters || {})) {
+    if (!def || !Array.isArray(def.terms)) continue;
+    scores[name] = findHits(text, def.terms).length;
+  }
+  return scores;
+}
+
+// Pick the top N clusters by hit count, dropping zeros.
+export function pickPrimaryClusters(clusterScores, n = 2) {
+  return Object.entries(clusterScores)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, n)
+    .map(([name]) => name);
+}
+
 export async function parseResume(filePath) {
   const dict = JSON.parse(fs.readFileSync(path.join(__dirname, 'cv-keywords.json'), 'utf8'));
   const text = await readResumeText(filePath);
+  const clusterScores = scoreClusters(text, dict.clusters);
+  const primaryClusters = pickPrimaryClusters(clusterScores, 2);
   return {
     sourceFile: path.resolve(filePath),
     parsedAt: new Date().toISOString(),
@@ -68,14 +93,17 @@ export async function parseResume(filePath) {
     certs: findHits(text, dict.certs),
     skills: findHits(text, dict.skills),
     compliance: findHits(text, dict.compliance),
+    primaryClusters,
+    clusterScores,
     raw: text.slice(0, 8000) // first 8KB of raw text for debugging / future use
   };
 }
 
-export function writeParsedCV(parsed) {
-  const dir = path.join(ROOT, 'data');
-  fs.mkdirSync(dir, { recursive: true });
-  const outPath = path.join(dir, 'cv-parsed.json');
+export function writeParsedCV(parsed, profileSlug) {
+  // v1.0 E5: writes to data/profiles/<active>/cv-parsed.json by default;
+  // pass an explicit slug to write into a specific profile.
+  const outPath = paths(profileSlug).cvParsed;
+  fs.mkdirSync(path.dirname(outPath), { recursive: true });
   fs.writeFileSync(outPath, JSON.stringify(parsed, null, 2));
   return outPath;
 }
@@ -100,5 +128,10 @@ if (path.resolve(thisFile) === invokedFile) {
   console.log(`  Certs:      ${parsed.certs.length}`);
   console.log(`  Skills:     ${parsed.skills.length}`);
   console.log(`  Compliance: ${parsed.compliance.length}`);
+  if (parsed.primaryClusters?.length) {
+    console.log(`  Primary clusters: ${parsed.primaryClusters.join(', ')}`);
+    const top5 = Object.entries(parsed.clusterScores || {}).sort((a, b) => b[1] - a[1]).slice(0, 5);
+    if (top5.length) console.log(`  Cluster scores:   ${top5.map(([n, c]) => `${n}=${c}`).join(', ')}`);
+  }
   console.log(`  Saved to:   ${out}`);
 }

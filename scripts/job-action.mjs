@@ -54,10 +54,12 @@ try {
     process.exit(ok ? 0 : 1);
   }
 
-  // For save / applied — we need to be authed AND we need to click a UI button on viewjob page.
+  // v1.0.x: auth is OPTIONAL. If not signed into hiring.cafe, we exit with
+  // a benign "skip" code so the bot can record the action locally without
+  // failing loudly. Users who want hiring.cafe-side bookmarking run /reauth.
   if (!await checkAuth()) {
-    console.log('AUTH_FAIL not logged in');
-    process.exit(1);
+    console.log('AUTH_OPTIONAL not signed in — bot will record locally only');
+    process.exit(7); // bot interprets 7 as "skip hiring.cafe action, succeed locally"
   }
 
   await page.goto(jobUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });

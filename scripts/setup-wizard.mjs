@@ -21,14 +21,47 @@ import { suggestRoles } from './role-suggester.mjs';
 import { geocode } from './geocode.mjs';
 import * as cfgRW from './config-rw.mjs';
 import { pickResumeFile } from './file-picker.mjs';
+import { IS_WIN32, IS_DARWIN, IS_LINUX, POWERSHELL, runScheduledTask } from './os-paths.mjs';
 
-// Absolute path to powershell.exe so spawn() doesn't depend on PATH.
-// PATH lookup fails on stripped-down Windows installs (we hit ENOENT
-// crashing the wizard at task registration in v0.4).
-const POWERSHELL_EXE = path.join(
-  process.env.SystemRoot || 'C:\\Windows',
-  'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe'
-);
+// Absolute path to powershell.exe (Win32 only; null elsewhere) — exported
+// here for backward-compat with any code reading POWERSHELL_EXE; new code
+// should import POWERSHELL from os-paths directly.
+const POWERSHELL_EXE = POWERSHELL;
+
+// Helper: invoke the platform-appropriate setup script. Returns
+// { code, out } in the same shape the wizard's PS spawn used.
+function registerSchedulerForPlatform() {
+  return new Promise((resolve) => {
+    let cmd, args, useShell = false;
+    if (IS_WIN32) {
+      cmd = POWERSHELL_EXE;
+      args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'setup-tasks.ps1')];
+    } else if (IS_DARWIN) {
+      cmd = 'bash';
+      args = [path.join(__dirname, 'setup-tasks-mac.sh')];
+    } else if (IS_LINUX) {
+      cmd = 'bash';
+      args = [path.join(__dirname, 'setup-tasks-linux.sh')];
+    } else {
+      return resolve({ code: -1, out: `Unsupported platform: ${process.platform}` });
+    }
+    const child = spawn(cmd, args, { cwd: ROOT, windowsHide: true });
+    let out = '';
+    child.stdout.on('data', d => { out += d.toString(); });
+    child.stderr.on('data', d => { out += d.toString(); });
+    child.on('exit', code => resolve({ code, out }));
+    child.on('error', e => resolve({ code: -1, out: 'spawn failed: ' + e.message }));
+  });
+}
+
+// Helper: ask the platform scheduler to start the bot now (post-registration).
+async function startBotForPlatform() {
+  const r = runScheduledTask('bot');
+  if (!r.ok) {
+    console.log(fail(`Could not auto-start bot: ${r.output}`));
+    console.log(`${c.dim}It will start at next login. Or run the bot manually with: npm run bot${c.reset}`);
+  }
+}
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -96,6 +129,10 @@ async function step1Token() {
     const tok = (await ask(arrow('Paste bot token: '))).trim();
     if (!tok) continue;
     process.stdout.write(arrow('Validating… '));
+    // Local scrubber — wizard transcripts (screen recordings, terminal scroll-
+    // back) are a token-leak vector if a fetch error message echoes the URL
+    // (which contains the token). Match the bot's discipline.
+    const scrub = (s) => (s == null ? '' : String(s).split(tok).join('<TOKEN>'));
     try {
       const r = await fetch(`https://api.telegram.org/bot${tok}/getMe`);
       const j = await r.json();
@@ -104,9 +141,9 @@ async function step1Token() {
         writeEnv({ TELEGRAM_BOT_TOKEN: tok });
         return tok;
       }
-      console.log(fail(`Telegram says: ${j.description || 'invalid token'}`));
+      console.log(fail(`Telegram says: ${scrub(j.description || 'invalid token')}`));
     } catch (e) {
-      console.log(fail('Network error: ' + e.message));
+      console.log(fail('Network error: ' + scrub(e.message)));
     }
   }
 }
@@ -152,11 +189,15 @@ async function step2ChatId(token) {
   throw new Error('Timed out waiting for a Telegram message. Send any message to your bot and re-run setup.');
 }
 
-// ---- step 3: hiring.cafe login ----
+// ---- step 3: hiring.cafe Cloudflare warmup (no login required) ----
 async function step3Login() {
-  step(3, 10, 'hiring.cafe login');
-  console.log(`${c.dim}A Chromium window will open at hiring.cafe. Sign in with Google.${c.reset}`);
-  console.log(`${c.dim}When you see your profile picture top-right, close the window.${c.reset}\n`);
+  step(3, 10, 'hiring.cafe browser warmup');
+  console.log(`${c.dim}A Chromium window will open at hiring.cafe. No login required —${c.reset}`);
+  console.log(`${c.dim}we are just clearing Cloudflare's bot challenge.${c.reset}`);
+  console.log(`${c.dim}Wait until you see job listings (~20–30 seconds), then close the window.${c.reset}`);
+  console.log(`${c.dim}(Optional: if you sign into hiring.cafe inside that window, the bot's${c.reset}`);
+  console.log(`${c.dim}/save and /applied commands will also click those buttons on hiring.cafe.${c.reset}`);
+  console.log(`${c.dim}Skip the sign-in for the simplest setup.)${c.reset}\n`);
   await ask(arrow('Press Enter to open the browser… '));
 
   // Spawn login-once.mjs and wait for it to exit (window closed)
@@ -167,8 +208,10 @@ async function step3Login() {
     child.on('exit', code => code === 0 ? resolve() : reject(new Error('login-once exited ' + code)));
   });
 
-  // Verify auth landed
-  process.stdout.write(arrow('Verifying login… '));
+  // Verify hiring.cafe is browsable (Cloudflare cleared). Auth is optional;
+  // job-action.mjs returns AUTH_FAIL when not signed in but we don't treat
+  // that as a setup failure anymore.
+  process.stdout.write(arrow('Verifying hiring.cafe browsable… '));
   const r = await new Promise((resolve) => {
     const child = spawn('node', [path.join(__dirname, 'job-action.mjs'), 'auth'], {
       cwd: ROOT, windowsHide: true
@@ -178,11 +221,13 @@ async function step3Login() {
     child.on('exit', code => resolve({ code, out }));
   });
   if (r.code === 0) {
-    console.log(ok('Logged in to hiring.cafe.'));
-    return true;
+    console.log(ok('Hiring.cafe is browsable AND you signed in (full feature set).'));
+  } else {
+    // The new login-once warmed Cloudflare without requiring sign-in. The
+    // browsable check inside daily-batch will confirm at scrape time.
+    console.log(ok('Hiring.cafe browsable (no sign-in — /save and /applied will record locally).'));
   }
-  console.log(fail('Could not verify login. You can re-run /reauth on the bot later.'));
-  return false;
+  return true;
 }
 
 // ---- step 4: resume upload ----
@@ -352,27 +397,13 @@ async function step10Finalize(token, chatId, resumeSkipped) {
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2));
   console.log(ok('Wrote config.json'));
 
-  // Register Task Scheduler entries.
-  // POWERSHELL_EXE is the absolute path; falling back to PATH-lookup
-  // 'powershell' crashes the wizard on stripped-down Windows installs
-  // (we hit ENOENT in v0.4 — see scripts/file-picker.mjs comment).
-  process.stdout.write(arrow('Registering Windows Task Scheduler… '));
-  const r = await new Promise((resolve) => {
-    const child = spawn(POWERSHELL_EXE, [
-      '-NoProfile', '-ExecutionPolicy', 'Bypass',
-      '-File', path.join(__dirname, 'setup-tasks.ps1')
-    ], { cwd: ROOT, windowsHide: true });
-    let out = '';
-    child.stdout.on('data', d => { out += d.toString(); });
-    child.stderr.on('data', d => { out += d.toString(); });
-    child.on('exit', code => resolve({ code, out }));
-    child.on('error', e => resolve({ code: -1, out: 'spawn failed: ' + e.message }));
-  });
-  if (r.code === 0) console.log(ok('Tasks registered (daily 7am + bot autostart).'));
+  // Register scheduler entries (cross-platform via os-paths).
+  process.stdout.write(arrow(`Registering scheduler (${process.platform})… `));
+  const r = await registerSchedulerForPlatform();
+  if (r.code === 0) console.log(ok('Tasks registered.'));
   else {
     console.log(fail('Task registration failed:\n' + r.out));
-    console.log(`${c.dim}You can register manually later by running:${c.reset}`);
-    console.log(`${c.dim}  ${POWERSHELL_EXE} -ExecutionPolicy Bypass -File "${path.join(__dirname, 'setup-tasks.ps1')}"${c.reset}`);
+    console.log(`${c.dim}You can register manually later by running the platform-appropriate setup script.${c.reset}`);
   }
 
   // Start the bot.
@@ -385,9 +416,7 @@ async function step10Finalize(token, chatId, resumeSkipped) {
   // `stdio: 'ignore'` drops those refs entirely; `.unref()` is belt-and-
   // suspenders so the loop exits even if the child is still spawning.
   process.stdout.write(arrow('Starting bot… '));
-  const botProc = spawn(POWERSHELL_EXE, ['-Command', "Start-ScheduledTask -TaskName 'munyun-bot'"],
-    { cwd: ROOT, windowsHide: true, detached: true, stdio: 'ignore' });
-  botProc.unref();
+  await startBotForPlatform();
   await new Promise(r2 => setTimeout(r2, 3000));
   console.log(ok('Bot started.'));
 

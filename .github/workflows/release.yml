@@ -1,0 +1,226 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build (e.g. v1.1.0). Leave blank for current branch."
+        required: false
+
+jobs:
+  # Windows: build wrapper.exe (Go) → Inno Setup .exe → (optionally) sign.
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.21' }
+      - run: npm ci
+      - run: npm test
+
+      - name: Build AMM.exe (tray wrapper)
+        shell: bash
+        working-directory: wrapper
+        run: make build-win
+
+      - name: Sign AMM.exe (best-effort)
+        if: env.AZURE_CLIENT_ID != ''
+        shell: powershell
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+          AZURE_TS_PROFILE: ${{ secrets.AZURE_TS_PROFILE }}
+        run: |
+          dotnet tool install --global azuresigntool
+          pwsh scripts/build/sign-windows.ps1 wrapper/dist/AMM.exe
+
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Build .exe via Inno Setup
+        shell: powershell
+        run: |
+          $iss = "installer/amm.iss"
+          if (-not (Test-Path $iss)) { Write-Error "Missing $iss"; exit 1 }
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" $iss
+          # Inno Setup writes to installer/dist/ by default
+          Get-ChildItem installer/dist/ -Filter '*.exe'
+
+      - name: Sign .exe (best-effort)
+        if: env.AZURE_CLIENT_ID != ''
+        shell: powershell
+        env:
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TS_ACCOUNT: ${{ secrets.AZURE_TS_ACCOUNT }}
+          AZURE_TS_PROFILE: ${{ secrets.AZURE_TS_PROFILE }}
+        run: |
+          dotnet tool install --global azuresigntool
+          $exe = (Get-ChildItem installer/dist/*.exe | Select-Object -First 1).FullName
+          pwsh scripts/build/sign-windows.ps1 $exe
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-windows
+          path: installer/dist/*.exe
+
+  # macOS: build wrapper (arm64 + amd64) → .dmg → notarize.
+  build-mac:
+    name: Build macOS .dmg
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.21' }
+      - run: npm ci
+      - run: npm test
+
+      - name: Build AMM-darwin-* (tray wrapper, arm64 + amd64)
+        working-directory: wrapper
+        run: make build-mac
+
+      - name: Build .dmg
+        run: bash scripts/build/mac.sh
+
+      - name: Notarize .dmg (best-effort)
+        if: env.APPLE_ID != ''
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          DMG=$(ls dist/*.dmg | head -1)
+          bash scripts/build/notarize-mac.sh "$DMG"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-mac
+          path: dist/*.dmg
+
+  # Linux: build wrapper (amm-tray) → .deb + .AppImage → GPG-sign both.
+  build-linux:
+    name: Build Linux .deb + .AppImage
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.21' }
+      - run: npm ci
+      - run: npm test
+
+      - name: Install build prereqs (incl. GTK headers for systray CGO)
+        run: |
+          sudo apt-get update -qq
+          # dpkg-sig was dropped from Ubuntu 24.04's default repos —
+          # scripts/build/sign-linux.sh probes for it at runtime and skips
+          # .deb signing gracefully when absent. The signing path only
+          # runs if GPG_PRIVATE_KEY secret is set anyway.
+          sudo apt-get install -y dpkg-dev fakeroot \
+            gcc libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Build amm-tray (tray wrapper)
+        working-directory: wrapper
+        run: make build-linux
+
+      - name: Build .deb
+        run: bash scripts/build/deb.sh
+
+      - name: Build .AppImage
+        run: bash scripts/build/appimage.sh
+
+      - name: Import GPG key (best-effort)
+        if: env.GPG_PRIVATE_KEY != ''
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | base64 -d | gpg --batch --import
+          echo "GPG_KEY_ID=$(gpg --list-secret-keys --keyid-format SHORT | awk '/^sec/ {gsub(\".*/\", \"\", $2); print $2; exit}')" >> "$GITHUB_ENV"
+
+      - name: Sign artifacts (best-effort)
+        if: env.GPG_KEY_ID != ''
+        run: |
+          DEB=$(ls dist/*.deb | head -1)
+          APP=$(ls dist/*.AppImage | head -1)
+          bash scripts/build/sign-linux.sh "$DEB" "$APP"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: amm-linux
+          path: |
+            dist/*.deb
+            dist/*.AppImage
+            dist/*.AppImage.sig
+
+  # Combine artifacts into a GitHub Release.
+  publish:
+    name: Publish Release
+    needs: [build-windows, build-mac, build-linux]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts/
+
+      - name: Stage release assets
+        run: |
+          mkdir -p release
+
+          # Full installers are the only Windows/Mac/Linux artifacts —
+          # one-click setup is the only path we advertise. (The bare Go
+          # wrapper is intentionally NOT shipped as a separate Release
+          # asset; it'd be too easy to download by mistake.)
+          find artifacts/amm-windows -type f -name '*.exe' -exec cp {} release/ \;
+          find artifacts/amm-mac -type f -name '*.dmg' -exec cp {} release/ \;
+          find artifacts/amm-linux -type f -name '*.deb' -exec cp {} release/ \;
+          find artifacts/amm-linux -type f -name '*.AppImage' -exec cp {} release/ \;
+          find artifacts/amm-linux -type f -name '*.AppImage.sig' -exec cp {} release/ 2>/dev/null \; || true
+
+          (cd release && sha256sum * > SHA256SUMS.txt)
+          ls -la release/
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          body: |
+            ## Download the installer for your OS
+
+            One-click setup. Download, double-click, follow the 10-step wizard.
+
+            | Platform | Asset | How to install |
+            |---|---|---|
+            | Windows | `amm-setup-v*.exe` | Double-click, accept the SmartScreen prompt, follow the wizard. Sets up Telegram bot, CV parsing, scheduled batch — fully automatic. |
+            | macOS | `amm-v*.dmg` | Open the DMG, drag the AMM folder into your Applications. Double-click "Run Setup.command" on first launch. |
+            | Linux (Debian/Ubuntu) | `amm_*_all.deb` | `sudo dpkg -i amm_*_all.deb && amm setup` |
+            | Linux (any distro) | `amm-v*-x86_64.AppImage` | `chmod +x amm-v*.AppImage && ./amm-v*.AppImage setup` |
+
+            ### Verification
+
+            Checksums for all assets are in `SHA256SUMS.txt`.

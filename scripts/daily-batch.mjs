@@ -1,55 +1,91 @@
 #!/usr/bin/env node
 /**
  * Daily 100-job batch.
- *   1. Connects to your already-running Chrome via CDP (port 9222).
- *   2. Runs 7 hiring.cafe searches, extracts/filters cards, takes top 100.
- *   3. Resolves each viewjob URL to its direct ATS URL (parallel fetch).
- *   4. Pulls Miami weather from open-meteo.
- *   5. Sends formatted message(s) to Telegram.
- *   6. Writes data/today-batch-{date}.tsv on disk.
+ *   1. Launches a headless Chromium with the persistent profile (Cloudflare
+ *      cookies live there); warmup probe verifies hiring.cafe is browsable.
+ *   2. Runs every configured hiring.cafe search (default 16), paginates to
+ *      maxPagesPerQuery (default 50), with target-driven cross-query early
+ *      stop once running fresh estimate ≥ targetJobsPerBatch × 1.5.
+ *   3. Filters (clearance, skip-companies, drop-titles, max YOE), dedups,
+ *      subtracts applied + previously-seen, scores against the parsed CV.
+ *   4. Slices top targetJobsPerBatch (default 100) above matchFloorPercent.
+ *   5. Resolves each viewjob URL to its direct ATS URL via 5-page browser
+ *      pool (Cloudflare blocks plain Node fetch; browser nav works).
+ *   6. Pulls weather from open-meteo (lat/lon/city are user-configurable).
+ *   7. Sends chunked HTML messages + jobs(<DATE>).txt attachment + inline
+ *      callback CTA to Telegram. Persists seen-jobs only after delivery.
  *
- * Prereq: Chrome must be running with --remote-debugging-port=9222 (your
- * normal Chrome, Default profile, has been launched this way already).
+ * Prereq: persistent Chromium profile (created on first run / login-once
+ * warmup). No CDP, no remote debugging port. Local-first.
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
+import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
+import { atomicWriteJson } from './io-helpers.mjs';
+
+// v1.0 E5: ensure config + data layout are profile-aware before we read anything.
+migrateIfNeeded();
+const PP = profilePaths(); // resolved once at startup; switching profiles requires bot/batch restart
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 const DATE = new Date().toISOString().slice(0, 10);
 
+// CLI vs imported-as-module check. Used to gate side-effects (Playwright launch,
+// Telegram send) so test files can import scoreJob/parseSalaryK without
+// triggering a real scrape. v1.0 E3.
+const _thisFile = fileURLToPath(import.meta.url);
+const _invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+const IS_CLI = path.resolve(_thisFile) === _invokedFile;
+
 // ---------- env ----------
 const ENV_PATH = path.join(ROOT, '.env');
-if (!fs.existsSync(ENV_PATH)) {
+if (!fs.existsSync(ENV_PATH) && IS_CLI) {
   console.error('❌ Missing .env file at ' + ENV_PATH);
   console.error('   Run: node scripts/setup-wizard.mjs');
   process.exit(1);
 }
-const env = Object.fromEntries(
-  fs.readFileSync(ENV_PATH, 'utf8')
-    .split('\n')
-    .filter(l => l && !l.startsWith('#') && l.includes('='))
-    .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
-);
+const env = fs.existsSync(ENV_PATH)
+  ? Object.fromEntries(
+      fs.readFileSync(ENV_PATH, 'utf8')
+        .split('\n')
+        .filter(l => l && !l.startsWith('#') && l.includes('='))
+        .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
+    )
+  : {};
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = env.TELEGRAM_CHAT_ID;
-const CDP_PORT = env.CHROME_DEBUG_PORT || '9222';
 
-// ---------- config (config.json) ----------
+// Token scrubber for everything that lands in logs or user-visible error
+// messages. Telegram URL is `…/bot<TOKEN>/sendMessage`; if a fetch failure
+// surfaces the URL via `cause` chain, the token can leak into log files
+// users routinely paste publicly when asking for help. Mirror the bot's
+// pattern so the discipline is uniform across all entrypoints.
+const SCRUB = (s) => {
+  if (s == null) return '';
+  let str = String(s);
+  if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
+  return str;
+};
+
+// ---------- config (profile-aware after v1.0 E5) ----------
+// Returns the ACTIVE profile's contents flattened to top level (CFG.queries,
+// CFG.weather, CFG.filters, ...) so consumers below don't need to know about
+// the profiles wrapper. Without this, a raw read of config.json after the E5
+// migration leaves CFG.queries undefined → fallback to 3 default queries +
+// no weather + no filters. (Regression caught 2026-05-07.)
 function loadConfig() {
-  const userPath = path.join(ROOT, 'config.json');
-  const examplePath = path.join(ROOT, 'config.example.json');
-  const src = fs.existsSync(userPath) ? userPath : examplePath;
-  return JSON.parse(fs.readFileSync(src, 'utf8'));
+  return readActiveConfig();
 }
 const CFG = loadConfig();
 
-// ---------- parsed CV (data/cv-parsed.json, written by resume-parser.mjs) ----------
+// ---------- parsed CV (per-profile, written by resume-parser.mjs) ----------
 function loadParsedCV() {
-  const p = path.join(ROOT, 'data', 'cv-parsed.json');
+  const p = PP.cvParsed;
   if (!fs.existsSync(p)) return { titles: [], certs: [], skills: [], compliance: [] };
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
@@ -58,19 +94,30 @@ const CV = loadParsedCV();
 // ---------- helpers ----------
 function log(line) {
   const stamp = new Date().toISOString();
-  const msg = `[${stamp}] ${line}`;
+  const msg = `[${stamp}] ${SCRUB(line)}`;
   console.log(msg);
-  fs.appendFileSync(path.join(ROOT, 'data', `daily-batch-${DATE}.log`), msg + '\n');
+  try {
+    fs.appendFileSync(path.join(ROOT, 'data', `daily-batch-${DATE}.log`), msg + '\n');
+  } catch { /* never let log writes crash the scrape */ }
 }
 
-async function tg(text) {
-  const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true })
-  });
+async function tg(text, opts = {}) {
+  const body = { chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true };
+  if (opts.reply_markup) body.reply_markup = opts.reply_markup;
+  let res;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  } catch (netErr) {
+    // fetch-level error (DNS, connection, timeout). The error's cause chain
+    // can include the full URL (with TOKEN) — scrub before re-throwing.
+    throw new Error('Telegram fetch failed: ' + SCRUB(netErr.message || netErr));
+  }
   const json = await res.json();
-  if (!json.ok) throw new Error('Telegram error: ' + JSON.stringify(json));
+  if (!json.ok) throw new Error('Telegram error: ' + SCRUB(JSON.stringify(json)));
   return json.result.message_id;
 }
 
@@ -80,9 +127,14 @@ async function tgDocument(filePath, caption) {
   fd.append('chat_id', TG_CHAT);
   if (caption) { fd.append('caption', caption); fd.append('parse_mode', 'HTML'); }
   fd.append('document', new Blob([buf]), path.basename(filePath));
-  const res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+  let res;
+  try {
+    res = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/sendDocument`, { method: 'POST', body: fd });
+  } catch (netErr) {
+    throw new Error('Telegram sendDocument fetch failed: ' + SCRUB(netErr.message || netErr));
+  }
   const json = await res.json();
-  if (!json.ok) throw new Error('Telegram sendDocument error: ' + JSON.stringify(json));
+  if (!json.ok) throw new Error('Telegram sendDocument error: ' + SCRUB(JSON.stringify(json)));
   return json.result.message_id;
 }
 
@@ -123,6 +175,17 @@ const QUERIES = (CFG.queries && CFG.queries.length)
   : [['IAM', 'IAM Engineer'], ['CloudSec', 'Cloud Security Engineer'], ['Cyber', 'Cybersecurity Engineer']];
 
 const EXTRACT_FN = `(() => {
+  // Reject candidate titles that are actually metadata bleed (e.g. the line
+  // "Full Time" or "Remote, US" got picked up because of a quirky card
+  // layout). v1.0 E3 fix — was returning these as titles previously, which
+  // poisoned scoring and made /why N's explanations confusing.
+  const NON_TITLE_RX = /^(full[- ]?time|part[- ]?time|remote|hybrid|onsite|contract|w2|c2c|us only|usa|united states|saved|save|apply|applied|view|new|featured)$/i;
+  const isPlausibleTitle = (s) => {
+    if (!s || s.length < 3 || s.length > 100) return false;
+    if (NON_TITLE_RX.test(s.trim())) return false;
+    if (/^\\$|^\\d+\\+\\s*YOE|^[\\d,–—-]+$/.test(s)) return false;
+    return true;
+  };
   const seen = new Set(); const out = [];
   document.querySelectorAll('a[href^="/viewjob/"]').forEach(a => {
     if (seen.has(a.href)) return; seen.add(a.href);
@@ -130,10 +193,17 @@ const EXTRACT_FN = `(() => {
     const cardText = card.innerText || '';
     const lines = cardText.split('\\n').map(l => l.trim()).filter(Boolean);
     const ageIdx = lines.findIndex(l => /^\\d+[wdhmoy]+$/.test(l));
-    let title = ageIdx >= 0 ? (lines[ageIdx + 1] || '') : (lines[0] || '');
-    if (!title || ageIdx < 0) {
-      title = lines.find(l => l.length > 5 && !/Remote|Full Time|Contract|United States|YOE|\\$|Save|Apply/.test(l)) || '';
+    // Try the post-age line, then the first line, then a heuristic search
+    // — but validate each candidate before accepting.
+    const candidates = [];
+    if (ageIdx >= 0 && lines[ageIdx + 1]) candidates.push(lines[ageIdx + 1]);
+    if (lines[0]) candidates.push(lines[0]);
+    for (const l of lines) {
+      if (l.length > 5 && !/Remote|Full Time|Contract|United States|YOE|\\$|Save|Apply|Hybrid|Onsite/.test(l)) {
+        candidates.push(l);
+      }
     }
+    let title = candidates.find(isPlausibleTitle) || '';
     const yoeM = lines.find(l => /^\\d+\\+\\s*YOE/i.test(l));
     const yoe = yoeM ? parseInt(yoeM) : null;
     const compM = lines.find(l => /^[A-Z][^:]+:.{10,}/.test(l));
@@ -165,37 +235,60 @@ async function launchBrowser() {
   });
 }
 
-// Returns true if the persistent profile is logged into hiring.cafe.
-// Strategy: navigate to /saved (auth-required). If the page loads without
-// redirecting back to home or showing a sign-in CTA, we're authed.
-async function checkLogin(page) {
-  await page.goto('https://hiring.cafe/saved', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(2500);
-  const finalUrl = page.url();
-  // Sign of LOGGED OUT: redirected away from /saved, OR a sign-in button is visible
-  if (!finalUrl.includes('/saved')) return false;
-  const signInVisible = await page.locator('button:has-text("Sign in"), button:has-text("Log in"), a:has-text("Sign in"):not(:has-text("Sign in with"))').first().isVisible().catch(() => false);
-  if (signInVisible) return false;
-  // Sign of LOGGED IN: any localStorage key or cookie suggesting auth, OR no sign-in CTA at all
-  return true;
+// v1.0.x: scraping is auth-OPTIONAL. Hiring.cafe lets logged-out users
+// browse jobs; the only blocker historically was Cloudflare's bot challenge,
+// which the persistent profile clears after the warmup pass.
+//
+// checkBrowsable() returns true if the search UI renders job cards — that's
+// the only thing the scraper actually needs. If it doesn't render, run
+// scripts/login-once.mjs to warm Cloudflare on this profile.
+async function checkBrowsable(page) {
+  const probe = { searchQuery: 'engineer', workplaceTypes: ['Remote'] };
+  const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(probe));
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+      // Cloudflare can take a while; wait up to 25s for cards to appear
+      for (let i = 0; i < 12; i++) {
+        await page.waitForTimeout(2000);
+        const count = await page.locator('a[href*="viewjob"]').count().catch(() => 0);
+        if (count > 0) return true;
+      }
+    } catch { /* retry once */ }
+  }
+  return false;
 }
 
 async function scrape() {
   log(`Launching headless Chromium with persistent profile…`);
   const ctx = await launchBrowser();
+  try {
+    return await _scrapeWith(ctx);
+  } finally {
+    // Always close — leaked Chromium leaves a LevelDB lockfile in
+    // data/browser-profile/ that blocks the next run.
+    await ctx.close().catch(() => {});
+  }
+}
+
+async function _scrapeWith(ctx) {
   const page = ctx.pages()[0] || await ctx.newPage();
 
-  // Auth gate — if logged out, abort cleanly so we don't poison the seen-jobs store.
-  log('Verifying hiring.cafe login state…');
-  const loggedIn = await checkLogin(page);
-  if (!loggedIn) {
-    await ctx.close();
-    const e = new Error('Hiring.cafe session expired or never authenticated. Run scripts\\login-once.cmd to re-auth.');
+  // Browsability gate — Cloudflare may not have cleared yet on a fresh
+  // profile. If cards never render, abort cleanly so we don't poison the
+  // seen-jobs store. (Renamed from "auth" gate; v1.0.x scraping is unauth.)
+  log('Verifying hiring.cafe is browsable (Cloudflare cleared)…');
+  const browsable = await checkBrowsable(page);
+  if (!browsable) {
+    const e = new Error('Hiring.cafe not yet browsable from this profile. Run the login-once helper to clear the Cloudflare challenge — no sign-in required.');
     e.unauth = true;
     throw e;
   }
-  log('✓ logged in');
-  recordAuthOk();
+  log('✓ browsable');
+  // NOTE: recordAuthOk() deliberately deferred until AFTER the scrape loop
+  // produces at least one card. /saved loading is necessary but not sufficient
+  // — if every query then returns 0 cards the user is effectively broken and
+  // /status / /diagnose should not display "auth OK" as if everything's fine.
   const results = {};
   // Map config's applicationFormEase → hiring.cafe URL filter
   const formEase = (CFG.filters?.applicationFormEase || 'all').toLowerCase();
@@ -203,23 +296,44 @@ async function scrape() {
                         : formEase === 'long'  ? ['TimeConsuming']
                         : null; // 'all' or anything else → no filter
 
+  // v1.0.x: pagination. Hiring.cafe shows ~40 cards per page. We click the
+  // "Next" link (a[aria-label*="next"]) up to MAX_PAGES_PER_QUERY-1 times to
+  // pull additional pages. Stops early if Next disappears/disables OR new
+  // page returns no fresh cards (already seen this query).
+  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 50;
+
+  // v1.0.x: target-driven cross-query early stop. After each query's
+  // pagination, we compute the running fresh-after-dedup count. If it
+  // exceeds the target with some headroom for floor losses, we stop
+  // scraping additional queries — saves time on heavy-supply days.
+  const TARGET_JOBS = SCORING.targetJobsPerBatch ?? 100;
+  const _appliedSet  = loadAppliedHrefs();
+  const _blockedSet  = loadBlockedSeen();
+  const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
+  let runningFreshEstimate = 0;
+
   for (const [key, query] of QUERIES) {
     const searchState = {
       searchQuery: query,
-      workplaceTypes: ['Remote'],
-      hideJobTypes: ['Saved', 'Applied', 'Viewed']
+      workplaceTypes: ['Remote']
+      // v1.0.x: dropped hideJobTypes — that field only takes effect for
+      // logged-in users, and we now scrape unauth. Local seen-jobs.json +
+      // applications.md cover the dedup we actually need.
     };
     if (formEaseFilter) searchState.applicationFormEase = formEaseFilter;
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
-    let rows = [];
+    const seenInQuery = new Set();
+    const allRows = [];
+
+    // Page 1 — initial navigation, retry up to 3 times on failure.
+    let firstPageRows = [];
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        // Wait for at least one card anchor or 8s max — whichever comes first
         await page.waitForSelector('a[href^="/viewjob/"]', { timeout: 8000 }).catch(() => {});
-        await page.waitForTimeout(2000); // settle
-        rows = await page.evaluate(EXTRACT_FN);
+        await page.waitForTimeout(2000);
+        firstPageRows = await page.evaluate(EXTRACT_FN);
         break;
       } catch (e) {
         log(`  attempt ${attempt} failed: ${e.message.split('\n')[0]}`);
@@ -227,11 +341,91 @@ async function scrape() {
         await page.waitForTimeout(2000);
       }
     }
-    results[key] = rows;
-    log(`  → ${rows.length} cards`);
+    for (const r of firstPageRows) {
+      if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); }
+    }
+    log(`  page 1 → ${firstPageRows.length} cards (running total: ${allRows.length})`);
+
+    // Pages 2..N — click Next until cap, button disappears, or no new cards.
+    for (let pageNum = 2; pageNum <= MAX_PAGES_PER_QUERY; pageNum++) {
+      const nextBtn = page.locator('a[aria-label*="next" i], button[aria-label*="next" i]').first();
+      const visible = await nextBtn.isVisible().catch(() => false);
+      const enabled = visible && await nextBtn.isEnabled().catch(() => false);
+      if (!visible || !enabled) {
+        log(`  no more pages after ${pageNum - 1} (Next not available)`);
+        break;
+      }
+      try {
+        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
+        await nextBtn.click({ timeout: 5000 });
+        await page.waitForTimeout(2500);
+        const pageRows = await page.evaluate(EXTRACT_FN);
+        let newCards = 0;
+        for (const r of pageRows) {
+          if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); newCards++; }
+        }
+        log(`  page ${pageNum} → ${pageRows.length} cards (${newCards} new, running total: ${allRows.length})`);
+        if (newCards === 0) {
+          log(`  stopping pagination — page ${pageNum} returned no new cards`);
+          break;
+        }
+      } catch (e) {
+        log(`  page ${pageNum} failed: ${e.message.split('\n')[0]} — stopping pagination`);
+        break;
+      }
+    }
+
+    results[key] = allRows;
+
+    // Cross-query running-fresh estimate. We don't run the full scoring
+    // mid-scrape (too expensive); we just count how many of THIS query's
+    // rows aren't already blocked + haven't been seen earlier this run.
+    for (const r of allRows) {
+      if (_crossQuerySeen.has(r.href)) continue;
+      _crossQuerySeen.add(r.href);
+      if (!_appliedSet.has(r.href) && !_blockedSet.has(r.href)) runningFreshEstimate++;
+    }
+    // 50% headroom for filter+floor losses — stop scraping once we have
+    // ~1.5x the target candidate cards. Conservative; usually means we'll
+    // end up delivering close to TARGET_JOBS after filters trim.
+    if (runningFreshEstimate >= TARGET_JOBS * 1.5) {
+      log(`  ✓ target hit early — running fresh estimate ${runningFreshEstimate} ≥ ${Math.round(TARGET_JOBS * 1.5)} (target ${TARGET_JOBS} × 1.5 headroom). Skipping remaining queries.`);
+      break;
+    }
   }
-  await ctx.close();
+
+  // Persist per-query 7-day rolling supply history. Surfaces in /diagnose
+  // so a user can see "Detection Engineer has averaged 0 cards/day for a
+  // week" and act on it — typo, niche term, or hiring.cafe simply doesn't
+  // have that kind of role indexed.
+  recordQueryStats(results);
+
+  // Auth state is "OK" only if we both passed /saved AND extracted at least
+  // one card across all queries. If every query returned zero, something
+  // upstream is wrong even though /saved loaded — don't lie to /status.
+  const totalCards = Object.values(results).reduce((s, rows) => s + rows.length, 0);
+  if (totalCards > 0) recordAuthOk();
   return results;
+}
+
+// Per-query rolling 7-day card-count history. Read by /diagnose. Per-profile.
+const QUERY_STATS_PATH = PP.queryStats;
+function recordQueryStats(byQuery) {
+  let store = { lastUpdated: null, queries: {} };
+  try { store = JSON.parse(fs.readFileSync(QUERY_STATS_PATH, 'utf8')); } catch {}
+  const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  for (const [key, rows] of Object.entries(byQuery)) {
+    const q = QUERIES.find(([k]) => k === key);
+    const term = q ? q[1] : key;
+    const slot = store.queries[term] || { history: [] };
+    // Replace today's entry if it already exists (handles intra-day reruns)
+    slot.history = slot.history.filter(h => h.date !== DATE && h.date >= cutoff);
+    slot.history.push({ date: DATE, cards: rows.length });
+    slot.history.sort((a, b) => a.date.localeCompare(b.date));
+    store.queries[term] = slot;
+  }
+  store.lastUpdated = new Date().toISOString();
+  atomicWriteJson(QUERY_STATS_PATH, store);
 }
 
 // ---------- filter ----------
@@ -247,13 +441,32 @@ const SKIP_CO = SKIP_COMPANIES.length
   ? new RegExp('^(' + SKIP_COMPANIES.map(escRx).join('|') + ')', 'i')
   : /(?!.*)/;
 
-// ---------- CV keyword scoring (Option B: calibrated percentage) ----------
+// ---------- CV keyword scoring ----------
 // Pulled from data/cv-parsed.json (written by resume-parser.mjs at setup-time).
 // To regenerate: node scripts/resume-parser.mjs <path-to-resume>
 const CV_TITLES     = CV.titles     || [];
 const CV_CERTS      = CV.certs      || [];
 const CV_SKILLS     = CV.skills     || [];
 const CV_COMPLIANCE = CV.compliance || [];
+
+// v1.0 E3: cluster-aware scoring. The CV's primary clusters narrow which
+// matches count at full weight — non-cluster matches still count but at
+// half weight. Kills the IAM-bias problem for backend/data-leaning users.
+const CV_PRIMARY_CLUSTERS = CV.primaryClusters || [];
+const CLUSTER_TERMS = (() => {
+  const set = new Set();
+  if (!CV_PRIMARY_CLUSTERS.length) return set; // no filter — everything full weight
+  let dict = {};
+  try { dict = JSON.parse(fs.readFileSync(path.join(__dirname, 'cv-keywords.json'), 'utf8')).clusters || {}; } catch {}
+  for (const c of CV_PRIMARY_CLUSTERS) {
+    for (const t of (dict[c]?.terms || [])) set.add(t.toLowerCase());
+  }
+  return set;
+})();
+function clusterMultiplier(term) {
+  if (CLUSTER_TERMS.size === 0) return 1.0;            // no clusters → flat weights
+  return CLUSTER_TERMS.has(term.toLowerCase()) ? 1.0 : 0.5;
+}
 
 const SCORING = CFG.scoring || {};
 const W_TITLE       = SCORING.titleWeight       ?? 10;
@@ -263,18 +476,69 @@ const W_COMPLIANCE  = SCORING.complianceWeight  ?? 2;
 const SALARY_BONUS  = SCORING.salaryBonus       ?? 5;
 const SALARY_PENALTY= SCORING.salaryPenalty     ?? -10;
 const SALARY_FLOOR_K= Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
+const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 25;
+const TF_CAP        = 3; // count term occurrences up to this many times
 
-function scoreJob(job) {
+// Parse salary numbers from text. Handles ranges, dashes (-, –, —), commas,
+// optional "K"/"k", and "USD"/"$" prefixes. Returns array of numbers in $K.
+//   "$120k–$160K"        → [120, 160]
+//   "$120,000-$160,000"  → [120, 160]
+//   "USD 120K - 160K"    → [120, 160]
+//   "Salary: $135K"      → [135]
+//   "competitive"        → []
+// v1.0 E3 — was previously /\$(\d{2,3})\s*[kK](?!\w)/g which accidentally
+// worked for many ranges by extracting digits, but failed on em-dashes
+// (Windows console encoding) and never parsed comma-separated thousands.
+export function parseSalaryK(text) {
+  const out = [];
+  // Pattern A: $XXXk style. Captures number + optional K. Supports en/em dashes between two patterns.
+  const reA = /(?:USD\s*|\$|€|£)?\s*(\d{2,4}(?:[.,]\d{3})?)\s*[kK](?!\w)/g;
+  let m;
+  while ((m = reA.exec(text)) !== null) {
+    const n = parseFloat(m[1].replace(/,/g, ''));
+    if (!isNaN(n) && n >= 30 && n <= 999) out.push(Math.round(n));
+  }
+  // Pattern B: $120,000 style (no K suffix). Convert to K.
+  const reB = /\$\s*(\d{2,3}),(\d{3})(?!\d)/g;
+  while ((m = reB.exec(text)) !== null) {
+    const n = parseFloat(m[1] + m[2]) / 1000;
+    if (!isNaN(n) && n >= 30 && n <= 999) out.push(Math.round(n));
+  }
+  return out;
+}
+
+// Phrase-proximity helper: for multi-token CV phrases that aren't found as
+// an exact word-boundary match, fall back to "all tokens present anywhere
+// in the text" → half credit. Means "AWS … RDS" gets some credit even if
+// not adjacent. v1.0 E3.
+function tokensAllPresent(jdText, phrase) {
+  const tokens = phrase.toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length < 2) return false;
+  return tokens.every(t => new RegExp('\\b' + escRx(t) + '\\b', 'i').test(jdText));
+}
+
+export function scoreJob(job) {
   const text = ((job.title || '') + '\n' + (job.cardText || ''));
   let score = 0;
   const matched = [];
   const seen = new Set();
-  const tryMatch = (term, weight) => {
+  const tryMatch = (term, baseWeight) => {
     if (seen.has(term.toLowerCase())) return;
-    // Word-boundary match, case-insensitive
-    if (new RegExp('\\b' + escRx(term) + '\\b', 'i').test(text)) {
-      score += weight;
-      matched.push(term);
+    const weight = baseWeight * clusterMultiplier(term);
+    // Exact phrase / word-boundary match. Term-frequency cap: count up to TF_CAP.
+    const re = new RegExp('\\b' + escRx(term) + '\\b', 'gi');
+    const matches = text.match(re);
+    if (matches && matches.length > 0) {
+      const tf = Math.min(matches.length, TF_CAP);
+      score += weight * tf;
+      matched.push(tf > 1 ? `${term} ×${tf}` : term);
+      seen.add(term.toLowerCase());
+      return;
+    }
+    // Multi-token phrase that didn't match exactly — try tokens-anywhere fallback
+    if (term.includes(' ') && tokensAllPresent(text, term)) {
+      score += weight * 0.5;
+      matched.push(`${term} (partial)`);
       seen.add(term.toLowerCase());
     }
   };
@@ -283,7 +547,7 @@ function scoreJob(job) {
   for (const s of CV_SKILLS)     tryMatch(s, W_SKILL);
   for (const c of CV_COMPLIANCE) tryMatch(c, W_COMPLIANCE);
   // Salary check — if visible and any number ≥ floor (in $K), bonus; else penalty
-  const salaryNums = [...text.matchAll(/\$(\d{2,3})\s*[kK](?!\w)/g)].map(m => parseInt(m[1]));
+  const salaryNums = parseSalaryK(text);
   if (salaryNums.length) {
     if (Math.max(...salaryNums) >= SALARY_FLOOR_K) score += SALARY_BONUS;
     else score += SALARY_PENALTY;
@@ -331,63 +595,205 @@ function filterAndDedupe(byQuery) {
 
 function loadAppliedHrefs() {
   try {
-    const apps = fs.readFileSync(path.join(ROOT, 'data', 'applications.md'), 'utf8');
-    return new Set([...apps.matchAll(/hiring\.cafe\/viewjob\/([a-z0-9]+)/g)].map(m => 'https://hiring.cafe/viewjob/' + m[1]));
+    const apps = fs.readFileSync(PP.applications, 'utf8');
+    // Case-insensitive match + lowercase normalization. hiring.cafe IDs are
+    // lowercase today, but treating them as a case-sensitive contract was
+    // the kind of brittleness that bites silently if the upstream shifts.
+    return new Set([...apps.matchAll(/hiring\.cafe\/viewjob\/([a-z0-9]+)/gi)]
+      .map(m => 'https://hiring.cafe/viewjob/' + m[1].toLowerCase()));
   } catch { return new Set(); }
 }
 
-// Persistent set of every viewjob URL we've ever surfaced via Telegram.
-// Combined with applications.md, this is what guarantees fresh jobs each run.
-const SEEN_PATH = path.join(ROOT, 'data', 'seen-jobs.json');
-function loadSeenIds() {
-  try { return new Set(JSON.parse(fs.readFileSync(SEEN_PATH, 'utf8')).ids || []); }
-  catch { return new Set(); }
+// Persistent map of every viewjob URL we've ever surfaced via Telegram, with
+// firstSeen / lastSeen timestamps. Combined with applications.md, this is
+// what guarantees fresh jobs each run.
+//
+// v1.0 E3 — schema upgraded from `{ids: string[]}` (boolean has-seen) to
+// `{jobs: {url: {firstSeenAt, lastSeenAt}}}`. Old entries auto-migrate on
+// first load. Decay rule: drop entries with `lastSeenAt > N days ago` so
+// jobs that didn't get applied to come back into rotation after the window
+// (default 60 days). Applied jobs are blocked separately via applications.md.
+const SEEN_PATH = PP.seenJobs;
+const SEEN_FRESHNESS_DAYS = SCORING.seenJobsFreshnessDays ?? 60;
+
+function loadSeenStore() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SEEN_PATH, 'utf8'));
+    // Migrate old flat schema if encountered.
+    if (Array.isArray(raw.ids) && !raw.jobs) {
+      log(`Migrating seen-jobs.json: ${raw.ids.length} entries → new schema (firstSeenAt/lastSeenAt).`);
+      const stamp = raw.lastUpdated || new Date().toISOString();
+      const jobs = {};
+      for (const url of raw.ids) jobs[url] = { firstSeenAt: stamp, lastSeenAt: stamp };
+      return { lastUpdated: stamp, jobs, _migrated: true };
+    }
+    return { lastUpdated: raw.lastUpdated || null, jobs: raw.jobs || {} };
+  } catch {
+    return { lastUpdated: null, jobs: {} };
+  }
 }
-function saveSeenIds(set) {
-  const obj = { lastUpdated: new Date().toISOString(), ids: [...set].sort() };
-  fs.writeFileSync(SEEN_PATH, JSON.stringify(obj, null, 2));
+
+function decaySeenStore(store) {
+  const cutoff = Date.now() - SEEN_FRESHNESS_DAYS * 24 * 60 * 60 * 1000;
+  let dropped = 0;
+  const fresh = {};
+  for (const [url, meta] of Object.entries(store.jobs)) {
+    const lastSeen = new Date(meta.lastSeenAt || meta.firstSeenAt || 0).getTime();
+    if (lastSeen >= cutoff) fresh[url] = meta;
+    else dropped++;
+  }
+  return { fresh, dropped };
+}
+
+// Returns the set of URLs currently considered "blocked by previous-seen."
+// Decayed entries are NOT in this set — they're back in the supply pool.
+function loadBlockedSeen() {
+  const store = loadSeenStore();
+  const { fresh, dropped } = decaySeenStore(store);
+  if (dropped > 0) log(`Decayed ${dropped} seen entries past ${SEEN_FRESHNESS_DAYS}-day freshness window.`);
+  return new Set(Object.keys(fresh));
+}
+
+// Persist the seen store. Called only after Telegram delivery succeeds for
+// the batch — see "Persist seen IDs" block below. v1.0 E3 race fix: was
+// previously written before sendDocument retries, so a Telegram outage
+// mid-attachment could mark jobs seen that the user never received.
+function saveSeenStore(blockedSet, top) {
+  const store = loadSeenStore();
+  const { fresh } = decaySeenStore(store);
+  const now = new Date().toISOString();
+  // F-M5: only record what was actually shown today. Preserve the original
+  // firstSeenAt (looking up the pre-decay store, not just `fresh`) so a
+  // job that was about to age out but got re-shown keeps its real
+  // first-seen timestamp instead of being reset to `now`. That used to
+  // bump near-expired entries back to day 0 every batch — meaning the
+  // 60-day decay window was effectively "60 days since last sighting,"
+  // not the documented "60 days since first sighting." The old belt-
+  // and-suspenders rewrite of `blockedSet` is dropped — it was the bug.
+  for (const r of top) {
+    const existing = fresh[r.href] || store.jobs[r.href];
+    fresh[r.href] = {
+      firstSeenAt: existing?.firstSeenAt || now,
+      lastSeenAt: now
+    };
+  }
+  const out = {
+    lastUpdated: now,
+    freshnessDays: SEEN_FRESHNESS_DAYS,
+    jobs: fresh
+  };
+  atomicWriteJson(SEEN_PATH, out);
 }
 
 // Track when the bot last confirmed a healthy hiring.cafe session.
 // Used by the periodic re-auth nag and by the /auth bot command.
 const AUTH_PATH = path.join(ROOT, 'data', 'auth-state.json');
 function recordAuthOk() {
-  fs.writeFileSync(AUTH_PATH, JSON.stringify({
+  atomicWriteJson(AUTH_PATH, {
     lastAuthOK: new Date().toISOString(),
     lastAuthFail: null
-  }, null, 2));
+  });
 }
 function recordAuthFail() {
   let prev = {};
   try { prev = JSON.parse(fs.readFileSync(AUTH_PATH, 'utf8')); } catch {}
-  fs.writeFileSync(AUTH_PATH, JSON.stringify({
+  atomicWriteJson(AUTH_PATH, {
     lastAuthOK: prev.lastAuthOK || null,
     lastAuthFail: new Date().toISOString()
-  }, null, 2));
+  });
 }
 
-async function resolveOne(viewjobUrl) {
+// v1.0.x: Cloudflare bot-blocks plain Node fetch on viewjob URLs (returns
+// 403 even with auth cookies via APIRequestContext). Real-browser navigation
+// works. This re-launches the persistent profile (auth cookies preserved),
+// spawns a small page pool, and parallel-fetches each viewjob page,
+// extracting "apply_url" from the rendered HTML.
+async function resolveOnePage(page, viewjobUrl) {
   try {
-    const r = await fetch(viewjobUrl, { signal: AbortSignal.timeout(15000) });
-    const html = await r.text();
+    await page.goto(viewjobUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
+    // Settle so JSON payload renders into HTML
+    await page.waitForTimeout(1500);
+    const html = await page.content();
     const m = html.match(/"apply_url":"([^"]+)"/);
-    return m ? m[1] : null;
+    if (!m) return null;
+    const u = m[1];
+    // Sanity check — `apply_url` is attacker-controllable (whatever the job
+    // poster typed into hiring.cafe). Reject anything that isn't a plain
+    // http(s) URL with no embedded HTML/quote characters before we let it
+    // through to a Telegram <a href="…"> interpolation. Defense layered with
+    // escHtmlAttr() at the message-build site (see buildMessage / F-H1).
+    if (!/^https?:\/\/[^\s<>"']+$/i.test(u)) return null;
+    return u;
   } catch { return null; }
 }
+
 async function resolveAll(rows) {
-  const PAR = 20;
-  const out = new Array(rows.length); let i = 0;
-  await Promise.all(Array.from({ length: PAR }, async () => {
-    while (true) {
-      const idx = i++;
-      if (idx >= rows.length) break;
-      out[idx] = await resolveOne(rows[idx].href);
+  if (!rows.length) return [];
+  log(`Launching browser for direct-URL resolution (${rows.length} jobs)…`);
+  const ctx = await launchBrowser();
+  try {
+    const PAR = 5; // 5 concurrent pages — balances speed vs bot-detection risk
+    const pages = [];
+    for (let i = 0; i < PAR; i++) {
+      pages.push(i === 0 ? (ctx.pages()[0] || await ctx.newPage()) : await ctx.newPage());
     }
-  }));
-  return out;
+    const out = new Array(rows.length);
+    let i = 0;
+    let resolved = 0;
+    await Promise.all(pages.map(async (p) => {
+      while (true) {
+        const idx = i++;
+        if (idx >= rows.length) break;
+        out[idx] = await resolveOnePage(p, rows[idx].href);
+        if (out[idx]) resolved++;
+      }
+    }));
+    return out;
+  } finally {
+    await ctx.close().catch(() => {});
+  }
 }
 
+// Telegram HTML mode recognizes & < > as syntax. For text contexts that's
+// enough; for attribute contexts (href="…"), `"` can break out of the
+// attribute and Telegram does NOT auto-escape it. escHtmlAttr is the
+// attribute-safe variant — use it for every `href=` interpolation.
 function escHtml(s) { return (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function escHtmlAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
+
+// v1.0 E3: prepend supply-side warnings to the batch when something's off.
+// (1) afterDedup < 30 → low supply, suggest /forget last + /jobs add
+// (2) any query has 3+ consecutive zero-card days → likely typo, suggest /jobs remove + /jobs add
+function buildSupplyBanner({ funnel, byQuery }) {
+  const warnings = [];
+  if (funnel.afterDedup < 30) {
+    warnings.push(`⚠️ <b>Limited supply today: ${funnel.afterDedup} fresh jobs</b> (typical: 50–80).`);
+    const tips = [];
+    // Dedup-pressure diagnostic: if filter pass-through was healthy but
+    // dedup ate most of it, the freshness window is the real lever.
+    const dedupPressure = funnel.keptAfterFilter > 0 ? Math.round((1 - funnel.afterDedup / funnel.keptAfterFilter) * 100) : 0;
+    if (dedupPressure >= 50 && funnel.keptAfterFilter >= 50) {
+      tips.push(`<b>${dedupPressure}% of today's filter-passing cards were already seen</b> in the past ${SEEN_FRESHNESS_DAYS} days. Lower this in <code>config.json</code>: <code>profiles.&lt;active&gt;.scoring.seenJobsFreshnessDays</code> (try 14). Or run <code>/forget all</code> for a clean slate.`);
+    }
+    if (funnel.droppedBelowFloor > 0) tips.push(`Lower the match floor with <code>/floor 0</code> (currently ${funnel.matchFloorPercent}%) — would surface ${funnel.droppedBelowFloor} more.`);
+    tips.push(`<code>/forget last</code> to revisit yesterday's batch.`);
+    tips.push(`<code>/jobs add "Title"</code> to widen your queries.`);
+    warnings.push(tips.join('\n'));
+  }
+  // Dry-query detection — read the freshly-written stats and find queries
+  // averaging zero across the most recent 3+ runs.
+  let stats = null;
+  try { stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'query-stats.json'), 'utf8')); } catch {}
+  const dryQueries = [];
+  for (const [term, slot] of Object.entries(stats?.queries || {})) {
+    const recent = (slot.history || []).slice(-3);
+    if (recent.length >= 3 && recent.every(h => h.cards === 0)) dryQueries.push(term);
+  }
+  if (dryQueries.length) {
+    warnings.push(`⚠️ <b>Dry queries (3+ days at 0 cards):</b>\n${dryQueries.map(q => '  · ' + escHtml(q)).join('\n')}\nLikely typos or terms hiring.cafe doesn't index. Edit via <code>/jobs remove</code> + <code>/jobs add</code>.`);
+  }
+  return warnings.length ? warnings.join('\n\n') : null;
+}
 function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const filterBits = [];
@@ -410,7 +816,12 @@ function buildMessage(weather, top, directUrls, stats) {
     const pct = `${r.matchPct ?? 0}% match`;
     const matchedTop = (r.matched || []).slice(0, 5).map(escHtml).join(' · ');
     const matchedLine = matchedTop ? `\n✓ ${matchedTop}` : '';
-    lines.push(`<b>${i + 1}.</b> ${title}${yoe} · <b>${pct}</b>\n<i>${co}</i>${matchedLine}\n<a href="${url}">${url}</a>`);
+    // F-H1: attacker-controllable URL inside HTML attribute + text. Use
+    // escHtmlAttr for the href value (escapes "), escHtml for the visible
+    // anchor text.
+    const safeHref = escHtmlAttr(url);
+    const safeText = escHtml(url);
+    lines.push(`<b>${i + 1}.</b> ${title}${yoe} · <b>${pct}</b>\n<i>${co}</i>${matchedLine}\n<a href="${safeHref}">${safeText}</a>`);
     lines.push('');
   });
   return lines.join('\n');
@@ -450,16 +861,15 @@ function buildBatchTxt(top, directUrls, weather, stats) {
 }
 
 function writeBatchTxt(top, directUrls, weather, stats) {
-  const dir = path.join(ROOT, 'data');
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, `jobs(${DATE}).txt`);
+  // Per-profile location so /profile switch doesn't show another persona's batch.
+  fs.mkdirSync(PP.dir, { recursive: true });
+  const file = path.join(PP.dir, `jobs(${DATE}).txt`);
   fs.writeFileSync(file, buildBatchTxt(top, directUrls, weather, stats));
   return file;
 }
 
-function writeBatchTsv(top, directUrls) {
-  const dir = path.join(ROOT, 'data');
-  fs.mkdirSync(dir, { recursive: true });
+function writeBatchTsv(top, directUrls, funnel) {
+  fs.mkdirSync(PP.dir, { recursive: true });
   const tsv = top.map((r, i) => {
     const id = r.href.split('/').pop();
     const url = directUrls[i] || '';
@@ -468,13 +878,19 @@ function writeBatchTsv(top, directUrls) {
     const yoe = r.yoe ?? '';
     return `${i + 1}\t${id}\t${title}\t${co}\t${yoe}\t${r.q}\t${url}`;
   }).join('\n');
-  fs.writeFileSync(path.join(dir, `today-batch-${DATE}.tsv`), tsv + '\n');
-  fs.writeFileSync(path.join(dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
+  // TSV + direct-URLs files are write-once-per-day artifacts; not contended,
+  // plain writes are fine. last-batch.json IS contended (bot's /forget last
+  // can mutate while a scrape is mid-run), so use atomicWriteJson for it.
+  fs.writeFileSync(path.join(PP.dir, `today-batch-${DATE}.tsv`), tsv + '\n');
+  fs.writeFileSync(path.join(PP.dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
 
-  // Rich per-job match details, used by the bot's /why N command
+  // Rich per-job match details, used by the bot's /why N command.
+  // Funnel data is read by /diagnose to show the supply pipeline.
   const lastBatch = {
     date: DATE,
+    profile: PP.dir.split(/[/\\]/).pop(),
     generatedAt: new Date().toISOString(),
+    funnel: funnel || null,
     jobs: top.map((r, i) => ({
       idx: i + 1,
       id: r.href.split('/').pop(),
@@ -489,20 +905,38 @@ function writeBatchTsv(top, directUrls) {
       viewjobUrl: r.href
     }))
   };
-  fs.writeFileSync(path.join(dir, 'last-batch.json'), JSON.stringify(lastBatch, null, 2));
+  atomicWriteJson(PP.lastBatch, lastBatch);
 }
 
-(async () => {
+// Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation
+// at the top of the file). Skipped on `import`, so test files can pull
+// scoreJob / parseSalaryK without triggering a real scrape.
+if (IS_CLI) (async () => {
   try {
     log(`=== daily-batch ${DATE} ===`);
+
+    // F-H9: a freshly-added profile starts with an empty CV (no /resume
+    // upload yet). Every job scores 0 → all dropped by match floor → user
+    // gets a confusing empty batch. Fail loud with a Telegram nudge instead.
+    if (!CV.titles?.length && !CV.skills?.length && !CV.certs?.length && !CV.compliance?.length) {
+      const msg = '⚠️ <b>This profile has no parsed CV.</b>\n\nEvery job will score 0% until you upload one. Run <code>/resume</code> in the bot, then <code>/scrape</code>.';
+      log('Empty CV detected — aborting batch with user nudge.');
+      try { await tg(msg); } catch {}
+      return;
+    }
+
     let byQuery;
     try {
       byQuery = await scrape();
     } catch (e) {
       if (e.unauth) {
         recordAuthFail();
-        log('AUTH FAIL: ' + e.message);
-        await tg('⚠️ <b>Hiring.cafe session expired.</b>\nRun <code>scripts\\login-once.cmd</code> to re-auth — the bot will resume normally on the next /daily.');
+        log('AUTH FAIL: ' + SCRUB(e.message));
+        // Cross-platform-aware help string. The bot stamps the right helper
+        // path per OS in v1.1; for the scraper's failure path we point at
+        // the platform-neutral "login-once helper" + npm-script form so the
+        // message renders correctly on Mac/Linux too.
+        await tg('⚠️ <b>Hiring.cafe session expired.</b>\nRun the login-once helper (<code>npm run login</code>) to clear Cloudflare — the bot will resume normally on the next /daily.');
         return; // exit clean, don't propagate as crash
       }
       throw e;
@@ -510,14 +944,14 @@ function writeBatchTsv(top, directUrls) {
     const { all, kept, droppedClearance } = filterAndDedupe(byQuery);
     log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance})`);
     const applied = loadAppliedHrefs();
-    const seen = loadSeenIds();
-    // Combined block-list: applications.md URLs + every job we've previously surfaced.
-    const blocked = new Set([...applied, ...seen]);
-    const fresh = kept.filter(r => !blocked.has(r.href));
-    const skippedApplied = kept.length - fresh.length;
-    log(`afterDedup=${fresh.length} (skipped ${skippedApplied}: ${applied.size} applied + ${seen.size} previously seen)`);
+    const blockedSeen = loadBlockedSeen(); // decayed: jobs > freshness window are no longer blocked
+    const blockAll = new Set([...applied, ...blockedSeen]);
+    const fresh = kept.filter(r => !blockAll.has(r.href));
+    const skippedApplied = kept.filter(r => applied.has(r.href)).length;
+    const skippedSeen    = kept.filter(r => !applied.has(r.href) && blockedSeen.has(r.href)).length;
+    log(`afterDedup=${fresh.length} (skipped ${kept.length - fresh.length}: ${skippedApplied} applied + ${skippedSeen} previously seen, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
-    // Score every fresh job against your CV, sort by match quality, take top 100.
+    // Score every fresh job against your CV, sort by match quality.
     for (const r of fresh) {
       const s = scoreJob(r);
       r.score = s.score;
@@ -525,31 +959,45 @@ function writeBatchTsv(top, directUrls) {
       r.matchPct = scoreToPercent(s.score);
     }
     fresh.sort((a, b) => b.score - a.score);
-    const top = fresh.slice(0, 100);
-    log(`scored: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%`);
+    // v1.0 E3: match floor — drop jobs below threshold BEFORE slicing top 100,
+    // so the bot never ships 0% filler to fill out the batch.
+    const aboveFloor = fresh.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
+    const droppedBelowFloor = fresh.length - aboveFloor.length;
+    const top = aboveFloor.slice(0, 100);
+    log(`scored: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%  (floor=${MATCH_FLOOR_PCT}%, dropped ${droppedBelowFloor} below)`);
     log(`Resolving ${top.length} direct ATS URLs in parallel…`);
     const directUrls = await resolveAll(top);
     log(`resolved=${directUrls.filter(Boolean).length}/${top.length}`);
-    writeBatchTsv(top, directUrls);
+    const funnel = {
+      raw: all.length,
+      keptAfterFilter: kept.length,
+      droppedClearance,
+      afterDedup: fresh.length,
+      scored: fresh.length,
+      droppedBelowFloor,
+      matchFloorPercent: MATCH_FLOOR_PCT,
+      sent: top.length,
+      topPct: top[0]?.matchPct ?? 0,
+      medianPct: top[Math.floor(top.length / 2)]?.matchPct ?? 0,
+      bottomPct: top[top.length - 1]?.matchPct ?? 0
+    };
+    writeBatchTsv(top, directUrls, funnel);
     const weather = await getWeather();
-    const message = buildMessage(weather, top, directUrls, {
+    const banner = buildSupplyBanner({ funnel, byQuery });
+    let message = buildMessage(weather, top, directUrls, {
       raw: all.length,
       kept: kept.length,
       droppedClearance,
-      skippedApplied: applied.size === 0 ? 0 : kept.filter(r => applied.has(r.href)).length,
-      skippedSeen: seen.size === 0 ? 0 : kept.filter(r => !applied.has(r.href) && seen.has(r.href)).length
+      skippedApplied,
+      skippedSeen
     });
+    if (banner) message = banner + '\n\n' + message;
     const chunks = await tgChunked(message);
     log(`Telegram sent in ${chunks} chunk(s)`);
 
     // Build + attach the downloadable .txt as the final message of the batch.
     // Failure here is non-fatal — messages already went through.
-    const txtStats = {
-      raw: all.length,
-      droppedClearance,
-      skippedApplied: applied.size === 0 ? 0 : kept.filter(r => applied.has(r.href)).length,
-      skippedSeen: seen.size === 0 ? 0 : kept.filter(r => !applied.has(r.href) && seen.has(r.href)).length
-    };
+    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen };
     try {
       const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
       await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
@@ -558,17 +1006,44 @@ function writeBatchTsv(top, directUrls) {
       log(`Batch .txt attach failed (non-fatal): ${e.message}`);
     }
 
-    // Only persist seen IDs *after* successful Telegram delivery —
+    // Only persist seen-jobs *after* successful Telegram delivery —
     // so a failed run doesn't burn jobs we never actually surfaced.
-    for (const r of top) seen.add(r.href);
-    saveSeenIds(seen);
-    log(`Persisted ${seen.size} seen IDs to data/seen-jobs.json`);
+    saveSeenStore(blockedSeen, top);
+    log(`Persisted seen-jobs.json (${top.length} new, freshness=${SEEN_FRESHNESS_DAYS}d)`);
+
+    // v1.0 E4: write per-batch callback table + send a final "Open batch
+    // browser" CTA. The callback table maps idx → {url, company, ...} so
+    // the bot can resolve inline-button taps for the next 7 days.
+    try {
+      const items = top.map((r, i) => ({
+        idx: i + 1,
+        viewjobUrl: r.href,
+        title: r.title,
+        company: r.company,
+        directUrl: directUrls[i] || '',
+        matchPct: r.matchPct,
+        score: r.score,
+        yoe: r.yoe,
+        q: r.q
+      }));
+      writeCallbackTable(items);
+      const reply_markup = {
+        inline_keyboard: [[
+          { text: '📋 Open batch browser', callback_data: makeNavCallback('b', 1, TG_TOKEN) },
+          { text: '📊 Diagnose supply',     callback_data: makeNavCallback('diag', 0, TG_TOKEN) }
+        ]]
+      };
+      await tg('🎯 <b>Tap to act on this batch.</b>\n<i>Each job in the browser has Save / Applied / Why / Skip-company buttons. Browser stays usable for 7 days.</i>', { reply_markup });
+      log('Sent batch CTA + wrote callback table');
+    } catch (e) {
+      log(`CTA / callback table write failed (non-fatal): ${e.message}`);
+    }
 
     log('=== done ===');
   } catch (e) {
-    const msg = '❌ daily-batch failed: ' + (e.message || e);
+    const msg = '❌ daily-batch failed: ' + SCRUB(e.message || e);
     log(msg);
-    try { await tg(msg); } catch {}
+    try { await tg(msg); } catch (tgErr) { log(`(also: tg failed: ${SCRUB(tgErr.message || tgErr)})`); }
     process.exit(1);
   }
 })();

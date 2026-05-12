@@ -1,0 +1,111 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main, "v*"]
+  push:
+    branches: [main, "v*"]
+
+jobs:
+  test:
+    name: Test (${{ matrix.os }} / Node ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: [18, 20]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node ${{ matrix.node }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
+        # The cross-process test in io-helpers.test.mjs spawns child node
+        # processes that import io-helpers.mjs. Skip on CI runners that
+        # don't tolerate sub-process file-locking — none of ours do, but
+        # the env override is here in case a future runner needs it.
+        env:
+          AMM_SKIP_CROSS_PROCESS: ""
+
+  smoke-test:
+    name: Smoke (${{ matrix.os }})
+    needs: test
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+      - uses: actions/setup-go@v5
+        with: { go-version: '1.21' }
+      - run: npm ci
+
+      - name: Verify os-paths exports work on this platform
+        shell: bash
+        run: |
+          node -e "
+            import('./scripts/os-paths.mjs').then(m => {
+              const s = m.platformSummary();
+              console.log(JSON.stringify(s, null, 2));
+              if (!s.platform) process.exit(1);
+            });
+          "
+
+      - name: Verify daily-batch.mjs imports cleanly (no scrape)
+        shell: bash
+        run: |
+          node -e "
+            import('./scripts/daily-batch.mjs').then(m => {
+              if (typeof m.scoreJob !== 'function') process.exit(1);
+              if (typeof m.parseSalaryK !== 'function') process.exit(1);
+              console.log('exports OK');
+            });
+          "
+
+      # v1.2: smoke-build the Go wrapper on each platform so CGO-dependent
+      # build failures (GTK headers missing, Cocoa SDK mismatch, etc.) surface
+      # at PR time instead of release time. Doesn't ship the artifact —
+      # just verifies it compiles.
+      - name: Install GTK headers (Linux only)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Build wrapper (host platform)
+        working-directory: wrapper
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            make build-win
+            ls dist/AMM.exe
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            make build-mac
+            ls dist/AMM-darwin-arm64 dist/AMM-darwin-amd64
+          else
+            make build-linux
+            ls dist/amm-tray
+          fi
+
+      - name: Verify wrapper --version
+        shell: bash
+        working-directory: wrapper
+        run: |
+          if [[ "$RUNNER_OS" == "Windows" ]]; then
+            ./dist/AMM.exe --version
+          elif [[ "$RUNNER_OS" == "macOS" ]]; then
+            ./dist/AMM-darwin-arm64 --version || ./dist/AMM-darwin-amd64 --version
+          else
+            ./dist/amm-tray --version
+          fi

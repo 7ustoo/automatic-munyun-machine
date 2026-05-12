@@ -1,6 +1,55 @@
 {
   "_comment": "Curated keyword dictionary used by resume-parser.mjs to extract structured CV data. Each term is matched against the user's resume text with word-boundary regex (case-insensitive). Edit/extend for your domain.",
 
+  "_clustersComment": "Clusters define role-domain signal terms. Resume parser scores the CV against each cluster's `terms` array; top-2 clusters become `primaryClusters` in cv-parsed.json and drive cluster-aware scoring in daily-batch.mjs (kills the IAM-bias problem for backend/data users).",
+
+  "clusters": {
+    "iam": {
+      "label": "Identity & Access Management",
+      "terms": ["IAM Engineer","Cloud IAM Engineer","Identity Engineer","Identity Architect","IAM Administrator","Identity Administrator","PAM Engineer","IGA Engineer","Identity Governance Engineer","Privileged Access Engineer","Okta","CyberArk","SailPoint","Saviynt","IdentityIQ","IdentityNow","Ping Identity","PingFederate","ForgeRock","Auth0","Entra ID","Azure AD","Azure Active Directory","Active Directory","RBAC","ABAC","PBAC","OIDC","SAML","OAuth","JWT","PIM","Conditional Access","FIDO2","SCIM","JML","Joiner Mover Leaver","SC-300","Microsoft Certified Identity and Access Administrator"]
+    },
+    "cloudsec": {
+      "label": "Cloud Security",
+      "terms": ["Cloud Security Engineer","Cloud Security Architect","CSPM","Cloud Security Posture Management","CWPP","Cloud Workload Protection","AWS Security Hub","GuardDuty","AWS GuardDuty","AWS Config","Prisma Cloud","Aqua Security","Microsoft Sentinel","Azure Sentinel","Defender for Cloud","Microsoft Defender for Cloud","Zscaler","ZTNA","Zero Trust","Zero Trust Network Access","AWS Certified Security","GCP Professional Cloud Security Engineer","Microsoft Certified Azure Security Engineer","SC-100","SC-200"]
+    },
+    "m365": {
+      "label": "Microsoft 365 / Modern Workplace",
+      "terms": ["M365 Engineer","M365 Administrator","Microsoft 365 Engineer","Microsoft 365 Administrator","M365","Microsoft 365","Exchange Online","SharePoint Online","SharePoint","Microsoft Teams","Teams Admin","Microsoft Intune","Intune","Microsoft Purview","Purview","Defender for Endpoint","MDE","Defender for Identity","Defender for Cloud Apps","MCAS","Sensitivity Labels","Information Governance","Microsoft Graph","Power Automate","Power Apps","MS-100","MS-101","MS-102","MS-700","AZ-104","AZ-500","Microsoft Certified Azure Administrator"]
+    },
+    "devops": {
+      "label": "DevOps / SRE / Platform",
+      "terms": ["DevOps Engineer","Site Reliability Engineer","Platform Engineer","Infrastructure Engineer","Cloud Engineer","Cloud Operations Engineer","DevSecOps Engineer","DevSecOps","Terraform","Pulumi","Kubernetes","K8s","Docker","Helm","Helm Charts","Istio","Service Mesh","ArgoCD","FluxCD","GitOps","GitHub Actions","GitLab CI","Jenkins","CircleCI","Azure DevOps","Ansible","PowerShell DSC","Prometheus","Grafana","Datadog","CloudFormation","ARM Templates","Bicep","AWS Certified DevOps","AWS Certified SysOps"]
+    },
+    "softwareEng": {
+      "label": "Software Engineering (general)",
+      "terms": ["Software Engineer","Senior Software Engineer","Staff Engineer","Principal Engineer","Backend Engineer","Frontend Engineer","Full Stack Engineer","Full-Stack Engineer","Tech Lead","Technical Lead","JavaScript","TypeScript","Node.js","Deno","Bun","Express","Fastify","NestJS","React","Next.js","Remix","Svelte","SvelteKit","Vue","Nuxt","Angular","Solid","Tailwind","Tailwind CSS","Java","Spring","Spring Boot","Kotlin","Python","Django","Flask","FastAPI","Go","Golang","Rust","C#",".NET","Ruby","Rails","PHP","Laravel","REST API","REST APIs","GraphQL","gRPC","Microservices","Event-Driven","Domain-Driven Design","DDD"]
+    },
+    "data": {
+      "label": "Data / ML / AI",
+      "terms": ["Data Engineer","Senior Data Engineer","Analytics Engineer","Big Data Engineer","Data Architect","Data Scientist","Senior Data Scientist","Machine Learning Engineer","ML Engineer","AI Engineer","Research Engineer","Computer Vision Engineer","NLP Engineer","dbt","Snowflake","BigQuery","Redshift","Databricks","Spark","Apache Spark","PySpark","Pandas","NumPy","scikit-learn","PyTorch","TensorFlow","Keras","Hugging Face","LangChain","LlamaIndex","Airflow","Apache Airflow","Kafka","Apache Kafka","Flink","Apache Flink","Looker","Tableau","Power BI","Mode","Hex","Jupyter","Notebook","ETL","ELT"]
+    },
+    "soc": {
+      "label": "SOC / Detection / IR",
+      "terms": ["SOC Analyst","SOC Engineer","Detection Engineer","Threat Detection Engineer","Incident Response","Security Operations Engineer","Splunk","Splunk ES","Splunk Enterprise Security","Microsoft Sentinel","Sentinel","KQL","Kusto","SOAR","Phantom","Demisto","ELK Stack","ELK","Elasticsearch","Logstash","Kibana","CrowdStrike","CrowdStrike Falcon","SentinelOne","Carbon Black","GIAC","GSEC","GCIH","GCIA","GCFA","CompTIA CySA+","CEH","Certified Ethical Hacker","OSCP"]
+    },
+    "networking": {
+      "label": "Networking / Infrastructure",
+      "terms": ["Network Engineer","Network Administrator","Network Architect","Linux Engineer","Linux Administrator","Linux Sysadmin","Linux System Administrator","Systems Administrator","Cisco","Juniper","BGP","OSPF","MPLS","VPN","Site-to-Site VPN","Point-to-Site VPN","ExpressRoute","AWS Direct Connect","VPC","VNet","Subnet","NSG","Security Group","WAF","Load Balancer","Application Gateway","RHEL","Red Hat Enterprise Linux","CentOS","Ubuntu","Debian","VMware","vSphere","vCenter","ESXi","Hyper-V","Citrix","RHCSA","RHCE","CompTIA Network+","Network+","CCNA","CCNP","JNCIA"]
+    },
+    "design": {
+      "label": "Product Design / UX",
+      "terms": ["Product Designer","UX Designer","UI Designer","Visual Designer","Design Engineer","Figma","Sketch","Adobe XD","Adobe Photoshop","Adobe Illustrator","InVision","Framer","Webflow","Design System","Design Systems","Wireframe","Prototype","Prototyping","User Research","Usability Testing","Accessibility","WCAG","ARIA","Material Design","Human Interface Guidelines","HIG"]
+    },
+    "mobile": {
+      "label": "Mobile Engineering",
+      "terms": ["iOS Engineer","Android Engineer","Mobile Engineer","Swift","SwiftUI","Objective-C","Xcode","Kotlin","Jetpack Compose","Android Studio","React Native","Flutter","Dart","Xamarin","Capacitor","Cordova","Mobile App","App Store","Google Play","TestFlight","Push Notifications","Core Data","Realm"]
+    },
+    "product": {
+      "label": "Product Management",
+      "terms": ["Product Manager","Senior Product Manager","Technical Product Manager","Product Marketing Manager","Engineering Manager","Roadmap","Product Strategy","Product Requirements","PRD","User Stories","Discovery","Jobs to be Done","JTBD","OKRs","KPIs","A/B Testing","Funnel Analysis","Cohort Analysis","Stakeholder Management"]
+    }
+  },
+
   "titles": [
     "IAM Engineer", "Cloud IAM Engineer", "Identity Engineer", "Cloud Security IAM Engineer",
     "M365 Security IAM Engineer", "IAM Administrator", "Identity Administrator", "Identity Architect",

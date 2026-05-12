@@ -8,11 +8,232 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+---
+
+## [1.2.0] — 2026-05-11
+
+> **"AMM as a real app."** v1.1 made AMM cross-platform; v1.2 makes it visible. The bot no longer launches as a minimized cmd window — it runs under a small Go wrapper (`AMM.exe` / `AMM-darwin-{arm64,amd64}` / `amm-tray`) that owns a system-tray icon, supervises the node bot as a child process, and shows up as a real app in Task Manager / Start menu / Apps & Features / Mac menubar / Linux app launchers.
+
+### Added — Tray wrapper (Go binary)
+
+- **`wrapper/`** — new Go module (single dep: `fyne.io/systray@v1.12.1`) producing a small native executable that owns the user-facing UX:
+  - **System tray icon** with heartbeat-driven color: 🟢 green (< 5 min since last heartbeat), 🟡 yellow (5–10 min, stale-warning), 🔴 red (≥ 10 min, dead), ⚫ gray (initial). Staleness thresholds match `scripts/watchdog.mjs` so wrapper + watchdog agree on "dead."
+  - **Tray menu**: Status (read-only label with pid / uptime / poll-fail count), Run scrape now, Pause/Resume daily batch, Open Telegram chat, View logs, Open install folder, Restart bot, Quit AMM.
+  - **Supervises node bot as child process** with 3-strikes-per-hour respawn throttle, mirroring `watchdog.mjs:42-44` semantics. On exhausted budget the wrapper exits cleanly; the platform scheduler restarts it.
+  - **Single-instance lock** at `data/wrapper.lock` (PID-based, cross-platform liveness probe via `Signal(0)`) prevents double-tray-icons when the scheduler races with a healthy wrapper.
+  - **No console window** on Windows (`-H windowsgui` ldflag + `CREATE_NO_WINDOW` for child node spawns) — the user sees a clean tray icon instead of a flashing cmd window.
+- **`wrapper/Makefile`** with `build`, `build-win`, `build-mac` (arm64 + amd64), `build-linux` targets. Auto-detects host platform on bare `make build`. Documents the CGO requirement for Mac/Linux (Cocoa + GTK native bindings — cross-compilation from Windows alone doesn't work; CI matrix handles it).
+- **`wrapper/README.md`** — architecture, file layout, build instructions, single-instance lock semantics, the CGO/cross-compile caveat.
+- **`package.json#scripts.build:wrapper`** convenience target → `cd wrapper && make build`.
+
+### Changed — Scheduler launchers
+
+- **Windows** (`scripts/setup-tasks.ps1`): `munyun-bot` scheduled task now launches `wrapper\dist\AMM.exe` (the tray wrapper), with a fallback to `scripts\start-bot.cmd` if the wrapper hasn't been built yet (fresh source checkout). The wrapper internally spawns node.
+- **macOS** (`scripts/setup-tasks-mac.sh`): `com.amm.bot` LaunchAgent's `ProgramArguments` picks `AMM-darwin-arm64` → `amd64` → direct node, in that order.
+- **Linux** (`scripts/setup-tasks-linux.sh`): `munyun-bot.service` `ExecStart` picks `wrapper/dist/amm-tray` if executable, else direct node. Adds `graphical-session.target` to `After=` so the tray has a desktop to live on.
+
+### Changed — Installers + CI
+
+- **Inno Setup** (`installer/amm.iss`): `MyAppVersion` → `1.2.0`; `MyAppExeName` → `AMM.exe` (was `node.exe`); Start menu + desktop shortcuts launch `AMM.exe` with the wrapper's own icon; `UninstallDisplayIcon` → `AMM.exe`. New preprocess-time `#error` if `wrapper\dist\AMM.exe` is missing so `iscc` fails loud instead of producing a broken installer.
+- **macOS .dmg** (`scripts/build/mac.sh`): rsync exclude switched from `dist/` to `/dist/` so wrapper/dist/ binaries pass through. Auto-builds via `make build-mac` if not pre-built. Both arm64 + amd64 wrappers bundled.
+- **Linux .deb** (`scripts/build/deb.sh`): same exclude fix. New `/usr/share/applications/automatic-munyun-machine.desktop` so GNOME/KDE app launchers list AMM. `/usr/local/bin/amm` wrapper gets a new `tray` subcommand.
+- **Linux .AppImage** (`scripts/build/appimage.sh`): same exclude fix + auto-build. `AppRun` bare-call now launches the tray wrapper.
+- **`.github/workflows/release.yml`**: each platform job sets up Go and runs `make build-{win,mac,linux}` before the installer step. AMM.exe is signed via `sign-windows.ps1` BEFORE Inno Setup packs it so the installer contains a signed inner .exe (required for SmartScreen reputation). Ubuntu job installs `gcc + libgtk-3-dev + libayatana-appindicator3-dev` for the systray CGO build.
+- **`.github/workflows/ci.yml`**: smoke-test matrix now compiles + runs the wrapper's `--version` flag on every PR so CGO header / SDK issues surface at PR time instead of release time.
+
+### Changed — Orphan cleanup
+
+- **`scripts/watchdog.mjs`**: cmdline-match regex extended so an orphan `AMM.exe` (whose supervisor lost its node child without cleaning up) gets killed as a last-resort. Defense-in-depth — the wrapper's own supervisor + single-instance lock handle this in practice.
+- **`scripts/uninstall.mjs`**: same regex extension on both Win32 (`ProcessName -eq 'AMM'`) and POSIX (`AMM-darwin|amm-tray`). Uninstall now fully cleans up tray-wrapper processes too.
+
+### Architecture note
+
+The v1.1 watchdog (`scripts/watchdog.mjs`) is **unchanged** and still works. It reads `data/heartbeat.json` (written by the node child) and restarts the scheduled task on stale heartbeat. The wrapper supervises its own child; the watchdog supervises the wrapper. Two layers, neither redundant — the wrapper handles fast respawn (node crashes within seconds), the watchdog handles wrapper-level death (whole process tree gone).
+
+### Dependencies
+
+Added Go ≥ 1.21 as a **build-time** prerequisite (not runtime — the compiled binary has no runtime deps). End users installing via the `.exe` / `.dmg` / `.deb` / `.AppImage` never need Go.
+
+### Risks acknowledged
+
+- **Linux tray icon depends on desktop environment.** GNOME requires the "AppIndicator and KStatusNotifierItem Support" extension; KDE works out of the box; minimal X11/Wayland window managers (i3, sway) may not show tray icons at all. If tray init fails, the wrapper still spawns the bot and writes logs — degrades to "invisible but functional," same UX as v1.1.
+- **Wrapper updates require re-running the installer.** The bot's `/update` command (git pull + npm install + restart task) still works for JS-only changes. Wrapper binary changes need a fresh installer download.
+- **Unsigned macOS wrapper hits Gatekeeper.** Until Apple Developer ID is configured, Mac users will see "AMM cannot be opened" on first launch — workaround is right-click → Open. Same friction as the unsigned .dmg in v1.1; v1.2 just shifts the surface one level inward.
+
+---
+
+## [1.1.0] — 2026-05-08
+
+> **"Cross-platform + hardened."** Two parallel tracks bundled into one release: every HIGH-severity bug from the v1.0 code review closed, and Mac launchd + Linux systemd ports landed alongside a GitHub Actions release pipeline. Ships as one PR — no per-phase branches.
+
+### Added — Cross-platform support
+
+- **macOS** runs via launchd. New `scripts/setup-tasks-mac.sh` renders four LaunchAgent plists into `~/Library/LaunchAgents/` (`com.amm.bot` with `RunAtLoad`+`KeepAlive(Crashed)`, `com.amm.daily` with `StartCalendarInterval`, `com.amm.watchdog` with `StartInterval=300`, `com.amm.batch-missed` with `StartCalendarInterval`+1h).
+- **Linux** runs via systemd user units. New `scripts/setup-tasks-linux.sh` renders four units into `~/.config/systemd/user/` and enables linger so they fire when the user isn't logged in.
+- **Cross-platform installer** at `install.sh` mirroring `install.ps1`. Auto-detects platform via `uname -s`, installs missing prereqs (git, node ≥ 18) via `brew` / `apt-get` / `dnf`, clones into `~/Library/Application Support/automatic-munyun-machine` (Mac) or `~/.local/share/automatic-munyun-machine` (Linux), runs `npm install` + `npx playwright install chromium`, hands off to the wizard.
+- **Bash launcher trio** (`scripts/start-bot.sh`, `scripts/run-daily-batch.sh`, `scripts/login-once.sh`) symmetric to the existing `.cmd` launchers.
+- **Native file picker on macOS + Linux** via `osascript "choose file"` (Mac) / `zenity` (GNOME) / `kdialog` (KDE), with typed-path fallback when no GUI dialog backend is available.
+- **`scripts/os-paths.mjs`** — single source of truth for system-binary paths (`POWERSHELL`/`CMD_EXE`/`SCHTASKS` on Win32, `BASH`/`LAUNCHCTL`/`SYSTEMCTL`/`OSASCRIPT` on POSIX), `npmCmd()` / `nodeCmd()` resolution, and scheduler abstractions (`runScheduledTask` / `disableScheduledTask` / `enableScheduledTask` / `scheduledTaskExists` / `deleteScheduledTask` — internally branch by `process.platform`). User-facing helper-name strings (`LOGIN_HELPER_DOC`, `SETUP_HELPER_DOC`, `RESTART_HINT_DOC`, `INSTALL_DIR_HINT`) resolve to the right per-platform path so Telegram messages render correctly across all three platforms.
+- **`scripts/io-helpers.mjs`** — atomic write helpers (`atomicWriteText`, `atomicWriteJson`, `atomicUpdateJson`) with NTFS EPERM/EACCES/EBUSY retry, plus `withFileLock` / `lockedUpdateJson` / `lockedUpdateJsonSync` via `proper-lockfile` for cross-process serialization of `config.json` and per-profile JSON file writes.
+
+### Added — Code signing + CI
+
+- **`docs/SIGNING.md`** — maintainer playbook covering Microsoft Trusted Signing (Windows), Apple Developer ID + notarization (macOS), and GPG self-signed (Linux .deb / .AppImage).
+- **`scripts/build/sign-windows.ps1`** — AzureSignTool wrapper.
+- **`scripts/build/notarize-mac.sh`** — `xcrun notarytool submit --wait` + `xcrun stapler staple`.
+- **`scripts/build/sign-linux.sh`** — `dpkg-sig` for `.deb`, detached GPG `.sig` for AppImages.
+- All three signers degrade gracefully: missing secrets log `[skip signing — env:X not set]` and exit 0; releases still ship unsigned-but-functional artifacts.
+- **`scripts/build/mac.sh`** — `hdiutil`-based `.dmg` builder. Stages source tree (excludes `node_modules`/`data`/`.env`/`cv.*`/`.planning`); embeds a "Run Setup.command" double-click target that runs `npm install` + `playwright install` + wizard on first launch.
+- **`scripts/build/deb.sh`** — `dpkg-deb` builder. Installs to `/opt/automatic-munyun-machine` + `/usr/local/bin/amm` wrapper exposing `setup`/`daily`/`bot`/`login`/`uninstall` subcommands. Depends: `nodejs >= 18`, `git`. Recommends: `zenity | kdialog`.
+- **`scripts/build/appimage.sh`** — `appimagetool` builder with a bundled Node 20 runtime so the AppImage works on minimal distros without system Node.
+- **`.github/workflows/ci.yml`** — matrix CI on `(windows-latest, macos-latest, ubuntu-latest) × (Node 18, 20)`. Per-PR + per-push. Runs `npm test` on every leg + an `os-paths` import smoke test.
+- **`.github/workflows/release.yml`** — triggered by `v*.*.*` tag push. Three parallel build jobs. Each runs tests, builds the platform installer, conditionally signs (best-effort), uploads as artifact. Final `publish` job downloads all artifacts, computes `SHA256SUMS.txt`, creates GitHub Release with auto-generated notes.
+
+### Added — Tests
+
+41 new unit tests bringing the total from 24 → 65 (all passing on Windows). Same suite runs on Mac + Linux via the CI matrix.
+
+- **`scripts/__tests__/callback-router.test.mjs`** (18 tests) — `makeCallback` / `parseAndVerify` round-trip, sig determinism, action/idx/token-divergence checks, `requireToken` throw, `KNOWN_ACTIONS` whitelist, timing-safe sig compare via `crypto.timingSafeEqual`, malformed-input handling, full round-trip with `writeCallbackTable` + sig verification, stale-rotation rejection.
+- **`scripts/__tests__/io-helpers.test.mjs`** (16 tests) — atomic write semantics, lock release on success/throw, `withFileLock` serializes `Promise.all` of three incrementers (final v=3, no lost updates), and the cross-process integration test: 3 child node processes × 30 increments each → final v=90 with no lost updates. (Pre-Phase 2 this routinely lost updates on Windows.)
+- **`scripts/__tests__/watchdog.test.mjs`** (7 tests) — healthy heartbeat → no kill; stale → kill + start + recovery alert; F-M7 failed-start does NOT increment restarts; MAX_RESTARTS gives up with single alert; alert is suppressed on second consecutive give-up within 1h window; `pruneRestarts` drops old timestamps; no-heartbeat short-circuit.
+
+### Changed — Cross-platform plumbing
+
+- `telegram-bot.mjs` `/pause` / `/resume-bot` / `/reauth` / `/schedule` / `/update` restart all branch through `os-paths` instead of hardcoding PowerShell + schtasks. `/status` scheduled-tasks probe goes through `scheduledTaskExists`.
+- `setup-wizard.mjs` `registerSchedulerForPlatform()` picks `setup-tasks.ps1` (Win32) / `setup-tasks-mac.sh` (Darwin) / `setup-tasks-linux.sh` (Linux) and `startBotForPlatform()` uses `runScheduledTask('bot')`. `POWERSHELL_EXE` retained as a Win32-only alias.
+- `uninstall.mjs` cross-platform: launchctl bootout + plist removal on Mac, `systemctl --user disable --now` + unit removal on Linux. POSIX `process.kill` + `pgrep -f` cmdline cleanup replaces the PowerShell `Stop-Process` orphan-killer on non-Windows.
+- All `config.json` and per-profile JSON writes (`seen-jobs.json`, `last-batch.json`, `last-batch-callbacks.json`, `auth-state.json`, `query-stats.json`) now route through `atomicWriteJson` / `lockedUpdateJsonSync`. The TOCTOU window in `cfgRW.set` / `appendUnique` / `removeFromArray` is closed.
+- User-facing Telegram strings that referenced `scripts\login-once.cmd` / `scripts\setup-tasks.ps1` / `%LOCALAPPDATA%` now read from the platform-aware `LOGIN_HELPER_DOC` / `SETUP_HELPER_DOC` / `RESTART_HINT_DOC` / `INSTALL_DIR_HINT` constants.
+
+### Fixed — Hardening (v1.0 code review findings)
+
+Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.planning/REVIEW.md`):
+
+- **F-H1: HTML injection via unescaped `directUrl`** in batch + browser + history + saved messages. Added `escHtmlAttr()` helper that escapes `"` for href-attribute contexts (Telegram HTML mode does NOT auto-escape `"`); applied to every `<a href="…">` interpolation. `resolveOnePage` now rejects malformed `apply_url` values upstream via regex sanity check.
+- **F-H2: Token scrubbing missing in `daily-batch.mjs` error paths.** Hoisted `SCRUB(s)` helper that tokenizes `TG_TOKEN` to `<TOKEN>`. Applied to `log()`, `tg()` throws, `tgDocument()` throws, the CLI outer catch, the bot's `unhandledRejection` handler, the resume-upload network error, and `setup-wizard.mjs` token validation. Local log files + Telegram-bound error messages no longer leak the token via fetch-internal `cause` chains.
+- **F-H3: `fs.renameSync` not atomic on NTFS when destination exists.** `config-rw.mjs#atomicWrite` got an EPERM/EACCES/EBUSY retry loop with 50/100/150/200 ms backoff and unique tmp-file suffix. Phase 2 layered `proper-lockfile` advisory locking on top via `lockedUpdateJsonSync` so concurrent writers serialize cleanly. Cross-process integration test (3 children × 30 writes) confirms zero lost updates.
+- **F-H4: HMAC keying defaults to literal `'no-token'` if missing.** `callback-router.mjs#requireToken` throws if the token is missing or < 10 chars; `parseAndVerify` returns `{ok:false}` for missing tokens instead of trusting a fallback-keyed sig.
+- **F-H5: Browser context not closed on `scrape()` / `resolveAll()` failure.** Both wrapped in `try/finally` with `ctx.close().catch(() => {})` in `finally`. A page-1 navigation failure no longer leaves a Chromium LevelDB lockfile that blocks the next run.
+- **F-H6: `unhandledRejection` handler brittle if `TG_TOKEN` undefined.** Defensive `SCRUB(s)` checks `TG_TOKEN` truthiness before `replace`; eliminates the `String.replace(undefined, …)` substring-replace failure mode.
+- **F-H7: `loadAppliedHrefs()` case-sensitive viewjob ID regex.** Added `/i` flag + `.toLowerCase()` normalization at the boundary so an upstream ID-case shift doesn't silently re-show applied jobs. Same for `/history` callback URL parsing.
+- **F-H8: `/forget last` writes seen-jobs without atomic.** Now goes through `atomicWriteJson(seenPath, seen)` — no more torn-write window where a concurrent scrape's `saveSeenStore` clobbers the user's `/forget last`.
+- **F-H9: `addProfile` produces a broken first batch.** When `addProfile(slug, opts)` runs, it now copies `cv-parsed.json` from the source profile so the new persona inherits a working CV. `daily-batch.mjs` checks for an empty CV at startup and pings Telegram with a `/resume` nudge instead of running an all-zeros batch.
+- **F-M1: `escHtml(e.message)` at 4 sites** that interpolated raw error text into `parse_mode:'HTML'` replies (weather / settings / geocoding / forget last).
+- **F-M2: HMAC sig comparison uses `crypto.timingSafeEqual`** instead of `===`. Flagged for cryptographic-primitive correctness even though the practical timing-oracle risk is essentially nil here.
+- **F-M3: `KNOWN_ACTIONS` whitelist** gates `makeCallback` and `parseAndVerify` before the HMAC compute.
+- **F-M5: Decay-then-add race in `saveSeenStore`.** Dropped the belt-and-suspenders `blockedSet` rewrite that reset `firstSeenAt` for near-expired entries. The documented "60-day decay since first sighting" promise now actually holds — preserves original `firstSeenAt` by reading the pre-decay store.
+- **F-M6: Watchdog cmdline regex anchored to `telegram-bot\.mjs`** (was a bare substring match — could collateral-kill an editor process whose CLI happened to contain "telegram-bot"). Same anchor fix in `uninstall.mjs#killBot`.
+- **F-M7: Watchdog only counts a successful restart** toward `MAX_RESTARTS`. A transient scheduler failure no longer burns one of the three retry slots when no restart actually happened.
+- **F-M10: Profile-store migration rename failure** now `console.error`s instead of silently swallowing — stranded data files would have looked like an empty new install after migration.
+- **F-M13: `/jobs add` fallback slug for non-Latin terms.** Empty key would silently collide with another non-Latin query in `results[key]`; now derives `q<timestamp>` if the slug collapses to empty.
+
+### Removed
+
+- `setup-tasks.ps1` legacy `career-ops-*` Task Scheduler migration block (was gated on "until v1.x"; we are now v1.x). Anyone upgrading from v0.1 must `schtasks /delete /tn career-ops-*` by hand. The block was a no-op on every install ≥ v0.2.
+
+### Added — Dependencies
+
+- `proper-lockfile@^4.0.0` — single new prod dep (~30 KB), used for advisory file locking around `config.json` + per-profile JSON writes.
+
+---
+
+## [1.0.0] (post-release patches — superseded by v1.1)
+
+### Fixed — v1.0 post-release patch
+
+- **Daily batch was running only the 3 default queries instead of the user's full list (and weather + filters were silently disabled).** Regression introduced by E5 multi-profile migration: `daily-batch.mjs`, `batch-missed-watcher.mjs`, and `setup-tasks.ps1` had their own raw `JSON.parse(fs.readFileSync('config.json'))` reads that didn't know about the new `{active_profile, profiles: {<slug>: {...}}}` schema. After migration, `CFG.queries` / `CFG.weather` / `CFG.filters` / `CFG.scoring` resolved to `undefined`, which fell through to hardcoded defaults — 3 queries (`IAM Engineer`, `Cloud Security Engineer`, `Cybersecurity Engineer`) and the weather-unavailable fallback. Fixed by routing all three through `readActiveConfig()` (in `daily-batch.mjs` and `batch-missed-watcher.mjs`) and adding a profile-aware schedule lookup in `setup-tasks.ps1`. Verified end-to-end: live `/scrape` now fires all 16 of this dev's queries (raw=409 vs the 116 the bug produced) and surfaces 38 fresh jobs with weather + dropTitlePatterns + skipCompanies filters all active.
+- **Direct ATS apply URLs were silently 100% broken.** `resolveOne()` used Node `fetch()` to read viewjob HTML and regex-extract `apply_url`. Hiring.cafe (Cloudflare in front) returns 403 to plain HTTP fetches — even authenticated `APIRequestContext` with the bot's session cookies gets 403. The function caught the error and returned null, so every batch fell back to hiring.cafe links via `directUrls[i] || r.href`. Today's pre-fix log showed `resolved=0/38`. **Fixed** by replacing `resolveAll` with a Playwright-based resolver that reuses the persistent `browser-profile/` (auth carries over), spawns 5 concurrent `page.goto()` workers, and extracts `apply_url` from the rendered HTML. Verified live: `resolved=59/59` on the post-fix scrape. Cost: ~30s for 60 jobs (was ~5s but failing); acceptable for a daily cron.
+
+### Added — v1.0 post-release patch
+
+- **Pagination across hiring.cafe search results.** The scraper now clicks the `a[aria-label*="next" i]` pagination link to pull pages 2..N per query, up to `MAX_PAGES_PER_QUERY` (default **50**, configurable via new `config.scoring.maxPagesPerQuery`). Stops early when Next disappears OR a new page returns zero new cards (per-query dedup against viewjobUrl). Live verification: `cloud security` query alone went from 40 cards (page 1 only) to 80 cards (2 pages of unique results); `iam` went 40 → 120 across 3 pages; `IAM Engineer` went 40 → 120; `M365 Administrator` 40 → 115. Total run: raw=698 vs 409 pre-fix (+70%), fresh-after-dedup 74 vs 40 (+85%), 59 jobs delivered vs 38.
+- **Target-driven cross-query early stop.** New `config.scoring.targetJobsPerBatch` (default 100). After each query's pagination, the bot computes a running fresh-after-dedup estimate. Once it hits `target × 1.5` (50% headroom for filter+floor losses), the QUERIES loop exits early. On heavy-supply days this cuts batch time dramatically — live verification: scrape ran only 1/16 queries (IAM Engineer paginated 8 pages to 301 raw cards) and stopped early. Total scrape time: ~55 sec vs ~3 min.
+- **`/saved` command.** New paginated browser of locally-bookmarked jobs (`data/profiles/<active>/saved.md`), 5 per page, `⬅️/➡️` inline-button navigation. Counterpart to `/history`. Used by `/save N` and the `[💾 Save]` callback button.
+
+### Changed — v1.0 post-release patch
+
+- **Hiring.cafe scrape is now auth-OPTIONAL.** Replaced the Google sign-in dance in `scripts/login-once.mjs` with a passive Cloudflare warmup: a visible Chromium window loads `hiring.cafe/`, waits up to 45s for Cloudflare's bot challenge to auto-resolve (job cards become visible), and saves the persistent profile. **No Google sign-in required.** Hiring.cafe lets logged-out users browse jobs; the only blocker for headless scrapes was Cloudflare's challenge, which a real-browser visit clears. The persistent profile keeps the "challenge passed" cookie for subsequent headless runs. Verified: a fresh, never-signed-in profile passes Cloudflare in ~20 seconds and returns full 40-card pages on `cloud security` queries, plus extracts `apply_url` from individual viewjob pages successfully.
+- **`scripts/daily-batch.mjs::checkLogin()` → `checkBrowsable()`.** Probes a search URL and waits up to 25s for cards to render. Returns true if the search UI works at all — the only thing the scraper actually needs. Old `checkLogin` visited `/saved` (auth-only); replaced because we no longer require auth.
+- **`searchState.hideJobTypes` field removed** from search URL building. That field only takes effect for logged-in users; we now scrape unauth. Local `seen-jobs.json` + `applications.md` cover the dedup we actually need. Side benefit: hiring.cafe returns more results per query because nothing's filtered server-side based on an account's history.
+- **`/save N` and `/applied N` are now local-first.** They write to `saved.md` / `applications.md` *first* (source of truth), then attempt the hiring.cafe-side click as a best-effort. New exit code `7` from `job-action.mjs` means "not signed in — skipping hiring.cafe action" and the bot replies `✅ Saved/Applied locally. (Run /reauth to also act on hiring.cafe.)`. Users without a hiring.cafe account get full local bookmarking + applied-tracking; the hiring.cafe-side button-click is opt-in via `/reauth`.
+- **Setup wizard Step 3 copy** rewritten: no longer mentions Google sign-in. Tells the user to wait for jobs to render and close the window. Sign-in inside the window is documented as optional (enables hiring.cafe-side `/save` and `/applied`).
+- **`/help` text** updated: `/auth` and `/reauth` now noted as optional; `/saved` added.
+- **Supply-diagnostics banner** in the morning batch now includes a dedup-pressure callout when ≥50% of filter-passing cards were dropped as already-seen, with a direct pointer to `seenJobsFreshnessDays` (the actual lever) instead of generic "try /forget last."
+
 ### Added
 
 ### Changed
 
-### Fixed
+---
+
+## [1.0.0] — 2026-05-06
+
+> **"Trustworthy and shareable on Windows."** Six sequenced epics (E1–E6) closing the foundational gaps the v0.5 audit surfaced: silent-death reliability, depth-blind scoring, IAM-bias, supply that decayed to nothing, single-user wall, and the install/uninstall lifecycle. Telegram-first remains the thesis; the planned-then-cut Tauri GUI does not return.
+
+### Added — v1.0 E6 (Distribution + uninstall lifecycle)
+
+- **Inno Setup `.exe` installer.** New `installer/amm.iss` builds an `amm-setup-vX.Y.Z.exe` that bundles `npm install` + `npx playwright install chromium` + the setup wizard. Standard Add/Remove Programs uninstaller works. Unsigned for v1.0 (signing arrives in v1.1).
+- **`/uninstall` Telegram command** with inline confirmation buttons. `[⚠️ Pause only]` stops the bot + unregisters all four scheduled tasks but preserves data. `[☠️ Wipe everything]` does pause steps + deletes `data/`, `config.json`, `.env`, browser session. Bot can't delete its own dir; final message tells the user to remove the install dir by hand if they want the code gone.
+- **`scripts/uninstall.mjs`** — orchestrator with `--mode=pause|wipe`. Idempotent — safe to re-run on partial state. Kills the bot via PID match (cleanest) + cmdline-match cleanup. Unregisters all four `munyun-*` Task Scheduler entries. Wipe mode also wipes data + secrets.
+- **`scripts/uninstall.ps1`** — PowerShell wrapper for `iwr | iex` users. Symmetric to the install one-liner.
+- **README rewrite** — `.exe` installer leads as the recommended path; one-liner kept as Option 2 for developers; manual install as Option 3. Old "Want to start over from scratch" troubleshooting section replaced with three uninstall paths (Telegram, Add/Remove, PowerShell).
+
+### Added — v1.0 E5 (Multi-profile)
+
+- **Multi-profile support.** One install, multiple personas. Each profile has its own CV, queries, filters, scoring, schedule, and seen-jobs memory. Browser session (`data/browser-profile/`), bot heartbeat, and machine-level state stay shared. New `/profile list / add <slug> / switch <slug> / delete <slug>` Telegram commands.
+- **`config.json` schema migration.** v0.x flat shape (`{user, queries, filters, ...}`) auto-wrapped on first load into `{active_profile: "default", profiles: {default: {...}}}`. Migration is idempotent — safe to call from any script entry point. Existing per-profile data files (`cv-parsed.json`, `seen-jobs.json`, `last-batch.json`, `last-batch-callbacks.json`, `applications.md`, `query-stats.json`) relocated into `data/profiles/default/`.
+- **`scripts/profile-store.mjs`** — single module owning profile CRUD, migration, and path resolution. `paths(slug?)` returns the canonical per-profile file slots; `addProfile` clones the active profile's config so a new persona inherits queries/filters and just needs a fresh `/resume` upload.
+- **Profile-aware `config-rw.mjs`.** Existing dot-path setters (`set('user.salaryFloorUsd', X)`, `appendUnique('filters.skipCompanies', X)`) auto-route under `profiles[active].*` after migration. Existing `read()` returns a flattened view of the active profile so consumers like `daily-batch.mjs` keep working unchanged.
+- **Per-profile data layout.** `data/profiles/<slug>/{cv-parsed.json, seen-jobs.json, last-batch.json, last-batch-callbacks.json, applications.md, query-stats.json}` — `/profile switch` swaps the entire active state cleanly. Today's TSV (`today-batch-{date}.tsv`) and downloadable jobs txt also live under the active profile dir.
+- **Mid-batch switch handling.** If a user runs `/profile switch` while a batch is in flight, the switch is queued via the existing `runningJob` lock — surface message tells them to wait until the current scrape completes.
+- **5 new profile-store smoke tests** in `scripts/__tests__/profile-store.test.mjs`. Total test count: 24 (was 19).
+
+### Fixed — v1.0 E5
+- **`/forget last` and `/settings` count are now schema-aware** — work against both the v0.x `{ids: [...]}` shape and the v1.0 `{jobs: {url: {...}}}` shape so users mid-migration aren't broken.
+
+### Added — v1.0 E4
+- **Inline-button paginated batch browser.** New `/batch [N]` command opens a tap-friendly job browser. Each page renders one job with action buttons `[💾 Save] [✅ Applied] [❓ Why] [🚫 Skip co]` and `[⬅️] [N/M] [➡️]` navigation. Replaces having to remember "save 42, applied 7" job numbers across a 100-message scroll-back.
+- **Per-batch CTA after morning push.** Daily batch ends with a `🎯 Tap to act` message carrying `[📋 Open batch browser] [📊 Diagnose supply]` buttons — opens the new browser without typing.
+- **`/history [N]` command.** Paginated past-application list read from `data/applications.md`, 5 entries/page. Inline `⬅️/➡️` nav.
+- **Inline-keyboard inline-button-tap actions** for save/applied/why/skip-company. Tapping `[💾 Save]` runs the same `job-action.mjs save <url>` path that `/save N` uses; tapping `[🚫 Skip co]` adds the company to `filters.skipCompanies`.
+- **Telegram `callback_query` handling.** Bot now subscribes to `callback_query` updates and dispatches via the new `scripts/callback-router.mjs` module. Each callback is HMAC-signed at mint time (`<action>:<idx>:<sig>` where sig = first 8 hex of HMAC-SHA256(token, action+idx+url)) so stale callbacks from rotated batches are rejected with "this batch has expired" rather than silently acting on the wrong job.
+- **`data/last-batch-callbacks.json`** — per-batch callback table (idx → {url, company, title, directUrl, matchPct, score, yoe, q}). 7-day TTL. Written at end of each batch, read on every callback dispatch.
+- **`tgEditMessage` + `tgAnswerCallback` helpers** — pagination edits the bubble in place rather than piling up new messages; callback acks turn off the loading spinner with optional toast text.
+
+### Added — v1.0 E3
+- **Match floor (FIXES "0% jobs in batch").** Default 25%; jobs below the threshold are dropped *before* the top-100 cut, so the bot never ships filler when supply is short. New `config.scoring.matchFloorPercent` field. New `/floor N` Telegram command (`/floor 0` to disable, `/floor 50` to be picky).
+- **Seen-jobs freshness window (FIXES "only 7 jobs after a few weeks").** Schema upgraded from `{ids: string[]}` (boolean has-seen, grew forever) to `{jobs: {url: {firstSeenAt, lastSeenAt}}}`. Default 60-day decay: unapplied previously-seen jobs roll back into the supply pool. Applied jobs (read from `applications.md`) are always blocked. Old schema auto-migrates on first load. New `config.scoring.seenJobsFreshnessDays` field.
+- **Phrase-proximity scoring + term-frequency cap.** Multi-token CV phrases that don't match exactly now get half-credit if all tokens appear anywhere in the JD ("AWS … 50 words … RDS" no longer scores zero). Matches are counted up to 3 occurrences (TF cap) so a JD mentioning "AWS" 8 times no longer ties one mentioning it once.
+- **Cluster-aware scoring (kills the IAM-bias problem).** New `clusters` field in `cv-keywords.json` defines 11 role domains (iam, cloudsec, m365, devops, softwareEng, data, soc, networking, design, mobile, product) with signal terms. Resume parser computes hits per cluster and picks top-2 as `primaryClusters`. At scoring time, terms outside primary clusters get half weight — backend/data CVs no longer get IAM-biased rankings. New `cv-parsed.json#primaryClusters` and `clusterScores` fields.
+- **Salary parser rewrite.** New `parseSalaryK()` exports handle `$120k–$160K`, `$120,000-$160,000`, em-dash + en-dash, `USD 120K-160K`, and rejects implausible numbers. The old regex extracted bare digits and accidentally matched "K" inside words like "Kotlin". 10 fixtures pin down the new behavior.
+- **Supply-diagnostics banner.** When `afterDedup < 30`, the morning batch prepends a banner to the Telegram message: `⚠️ Limited supply today: 14 fresh jobs (typical: 50–80)` with actionable hints (`/forget last`, lowering `/floor`, expanding `/jobs add`). Decisions surface to the user instead of being buried in logs.
+- **Per-query dry-run warning.** If any single search query has averaged 0 cards over 3+ consecutive runs, the next batch's banner names the dry queries: `⚠️ Dry queries (3+ days at 0 cards): "M365 Sec Engineer". Likely typo — edit via /jobs remove + /jobs add.`
+- **First test suite.** `scripts/__tests__/salary.test.mjs`, `phrase-proximity.test.mjs`, `role-cluster.test.mjs` — 19 tests using built-in `node:test` runner. New `npm test` script.
+- **Title heuristic hardened.** Card extraction now validates candidate titles against a non-title blacklist (`/^(full[- ]?time|part[- ]?time|remote|hybrid|onsite|contract|w2|c2c|us only|usa)$/i`) and falls through to the next candidate if the primary line is metadata bleed. Prevents `(untitled)` and "Full Time" / "Remote, US" titles in batches.
+
+### Fixed — v1.0 E3
+- **Seen-jobs persistence race.** `seen-jobs.json` was previously written at the top of the post-Telegram block but the variable mutation happened separately. The new write happens *only* after Telegram chunked-message delivery succeeded for the batch and only stamps the surfaced jobs.
+- **`scoreJob` and `parseSalaryK` are now safe to import** — `daily-batch.mjs` gates its top-level pipeline IIFE behind a CLI-vs-imported check (`IS_CLI`) so test files can pull engine functions without triggering a real scrape + Telegram push at module load. `.env` validation also gated on CLI invocation.
+
+### Added — v1.0 E2
+- **Heartbeat + out-of-process watchdog.** Bot writes `data/heartbeat.json` every poll iteration with `{ts, pid, version, lastPollOk, consecutiveFailures}`. New `scripts/watchdog.mjs` runs every 5 minutes via Task Scheduler entry `munyun-watchdog` — if the heartbeat is stale > 10 min, it kills the bot, restarts the `munyun-bot` task, and pings Telegram via `scripts/telegram-send.mjs` (independent process, so a corrupt bot module can't take the alerter down). Throttled to 3 restart attempts per hour; after the limit, sends a single "give up — human needed" alert and stops trying. Solves the silent-death failure mode (we hit it during v0.5 release work — bot died without surfacing).
+- **`/status` command.** One-screen bot health snapshot: process uptime, last heartbeat, last batch (date + count + funnel + score band), last auth-OK, batch-in-progress lock state, scheduled-task state. Read by user; structured similarly by the watchdog.
+- **`/diagnose` command.** Answers "why am I getting only N jobs?" directly. Surfaces the last batch's funnel (raw → keptAfterFilter → afterDedup → sent), seen-jobs total, and per-query 7-day average card count with low-supply queries flagged. If the batch was below typical supply (< 30 fresh jobs), `/diagnose` includes hint actions (`/forget last`, `/jobs add`).
+- **Per-query supply history.** New `data/query-stats.json` written by `daily-batch.mjs` after each scrape — rolling 7-day window of `{date, cards}` per query term. Read by `/diagnose`.
+- **Funnel persistence in `data/last-batch.json`.** New `funnel: {raw, keptAfterFilter, droppedClearance, afterDedup, scored, sent, topPct, medianPct, bottomPct}` field. Read by `/status` and `/diagnose`.
+- **Batch-missed watcher.** New `scripts/batch-missed-watcher.mjs` + Task Scheduler entry `munyun-batch-missed`. Runs 1 hour after configured batch time on configured days. If today's `data/today-batch-{date}.tsv` is missing, pings Telegram. Idempotent — won't re-alert for the same date. File-existence check is the truth; doesn't parse logs.
+- **Initial heartbeat at bot startup** so the watchdog sees a fresh boot as alive within seconds, not after the first 30s long-poll round-trip.
+
+### Fixed — v1.0 E2
+- **`recordAuthOk()` no longer lies on a failed scrape.** Was previously called immediately after `/saved` loaded successfully, even if the subsequent scrape loop returned zero cards across all 15 queries. Now deferred to after the loop completes AND at least one card was extracted. `/status` and `/diagnose` no longer show "auth OK" when the user is effectively broken.
+
+### Changed — v1.0 E2
+- `setup-tasks.ps1` now registers four Task Scheduler entries instead of two: `munyun-bot`, `munyun-daily-batch`, `munyun-watchdog`, `munyun-batch-missed`. The watchdog runs every 5 min; the batch-missed watcher runs at scheduled-time + 1 hour on scheduled days.
+- `scripts/telegram-bot.mjs` header comment refreshed in v1.0 E1 was missing 20+ commands shipped after v0.2; now lists the full set.
+
+### Removed — v1.0 E1
+
+- Stale `career-ops` references in `scripts/telegram-bot.mjs` (header comment + Task Scheduler entry name) and `scripts/telegram-send.mjs` (default test message). The dual-directory `career-ops/` ↔ AMM workflow described in `CONTEXT.md` was de facto deprecated; this commit cleans up the references and rewrites the relevant CONTEXT sections.
 
 ---
 
@@ -152,7 +373,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.3.0...v0.4.0
