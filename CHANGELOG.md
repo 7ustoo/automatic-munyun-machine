@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.2.1] — 2026-05-12
+
+### Fixed
+
+- **CI release pipeline.** Two fixes so `npm test` and Linux signing prereqs both pass on the GitHub Actions runners:
+  - `package.json#scripts.test` now uses bare `node --test` (auto-discovers `**/*.test.mjs` from cwd). Node 20's `--test` doesn't expand globs as positional args, and Windows pwsh preserves the glob as a literal string — so the prior `node --test "scripts/__tests__/*.test.mjs"` failed on Windows with `Could not find ...*.test.mjs`. Verified locally: all 65 tests pass.
+  - Dropped `dpkg-sig` from the Linux build's `apt-get install` line. Ubuntu 24.04 removed the package from its default repos; `scripts/build/sign-linux.sh` already probes for it at runtime and skips `.deb` signing gracefully when absent.
+- **Release-asset hygiene.** The `.github/workflows/release.yml` no longer uploads the bare `AMM.exe` wrapper as a standalone Release asset — only the full one-click installers (`.exe` / `.dmg` / `.deb` / `.AppImage`). Avoids the "user downloads bare wrapper, gets a broken tray icon" confusion.
+
+No source-code changes vs v1.2.0 — same wrapper, same node bot, same tray UX. Pure release-pipeline patch.
+
+---
+
 ## [1.2.0] — 2026-05-11
 
 > **"AMM as a real app."** v1.1 made AMM cross-platform; v1.2 makes it visible. The bot no longer launches as a minimized cmd window — it runs under a small Go wrapper (`AMM.exe` / `AMM-darwin-{arm64,amd64}` / `amm-tray`) that owns a system-tray icon, supervises the node bot as a child process, and shows up as a real app in Task Manager / Start menu / Apps & Features / Mac menubar / Linux app launchers.
