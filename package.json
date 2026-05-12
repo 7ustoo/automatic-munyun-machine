@@ -14,7 +14,7 @@
     "bot": "node scripts/telegram-bot.mjs",
     "login": "node scripts/login-once.mjs",
     "parse-resume": "node scripts/resume-parser.mjs",
-    "test": "node --test \"scripts/__tests__/*.test.mjs\"",
+    "test": "node --test",
     "build:wrapper": "cd wrapper && make build"
   },
   "keywords": [
