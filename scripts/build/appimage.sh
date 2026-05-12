@@ -20,16 +20,22 @@ mkdir -p "$OUT"
 rm -rf "$STAGE"
 mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/lib/automatic-munyun-machine"
 
-# 1. Pull a portable Node runtime
+# 1. Pull a portable Node runtime. Node.js tarballs use "x64"/"arm64", not
+# the kernel uname "x86_64"/"aarch64", so map ARCH explicitly.
 NODE_VERSION="${NODE_VERSION:-20.18.0}"
-NODE_TARBALL="node-v${NODE_VERSION}-linux-${ARCH/amd64/x64}.tar.xz"
+case "$ARCH" in
+  x86_64|amd64) NODE_ARCH="x64" ;;
+  aarch64|arm64) NODE_ARCH="arm64" ;;
+  *) NODE_ARCH="$ARCH" ;;
+esac
+NODE_TARBALL="node-v${NODE_VERSION}-linux-${NODE_ARCH}.tar.xz"
 if [[ ! -f "$STAGE/$NODE_TARBALL" ]]; then
-  echo "→ Downloading Node v$NODE_VERSION…"
+  echo "→ Downloading Node v$NODE_VERSION (linux-${NODE_ARCH})…"
   curl -fsSL "https://nodejs.org/dist/v${NODE_VERSION}/${NODE_TARBALL}" -o "$STAGE/$NODE_TARBALL"
 fi
 echo "→ Extracting Node runtime…"
 tar -xf "$STAGE/$NODE_TARBALL" -C "$STAGE/"
-NODE_DIR="$STAGE/node-v${NODE_VERSION}-linux-${ARCH/amd64/x64}"
+NODE_DIR="$STAGE/node-v${NODE_VERSION}-linux-${NODE_ARCH}"
 cp "$NODE_DIR/bin/node" "$APPDIR/usr/bin/node"
 
 # 2. Stage the project source

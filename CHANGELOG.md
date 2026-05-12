@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.2.2] — 2026-05-12
+
+### Fixed
+
+- **Linux .AppImage build.** `scripts/build/appimage.sh` was constructing the Node.js download URL as `node-v20.18.0-linux-x86_64.tar.xz` (the kernel uname), but the official Node.js tarballs use `linux-x64` / `linux-arm64`. The substitution `${ARCH/amd64/x64}` only handled the `amd64` alias, not `x86_64`. Replaced with an explicit `case "$ARCH"` map. Windows + macOS jobs in v1.2.1 succeeded; this gets Linux back in the mix.
+
+No source-code changes vs v1.2.1. Pure release-pipeline patch (third in a row, but each one was a different latent CI bug).
+
+---
+
 ## [1.2.1] — 2026-05-12
 
 ### Fixed
