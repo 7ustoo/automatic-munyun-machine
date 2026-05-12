@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.2.3] — 2026-05-12
+
+### Fixed
+
+- **Linux .AppImage build (FUSE).** `appimagetool` is itself an AppImage and would mount itself via FUSE 2 to run — but Ubuntu 24.04 ships only libfuse3 by default, so `dlopen(): error loading libfuse.so.2`. Passing `--appimage-extract-and-run` to the appimagetool invocation tells its AppImage runtime to extract to a temp dir and exec the payload instead of mounting, sidestepping FUSE entirely. Works on any Linux runner regardless of libfuse2 presence.
+
+---
+
 ## [1.2.2] — 2026-05-12
 
 ### Fixed

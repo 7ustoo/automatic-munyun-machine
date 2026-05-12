@@ -114,6 +114,10 @@ if [[ ! -f "$APPTOOL" ]]; then
 fi
 
 echo "→ Building AppImage…"
-ARCH_AI="$ARCH" "$APPTOOL" --no-appstream "$APPDIR" "$OUT/$APPIMAGE_NAME"
+# Ubuntu 24.04 dropped libfuse2 by default, but appimagetool is itself an
+# AppImage and would need FUSE 2 to mount itself. --appimage-extract-and-run
+# tells the AppImage runtime to extract to a temp dir and exec the payload
+# instead of mounting via FUSE — works regardless of libfuse2 presence.
+ARCH_AI="$ARCH" "$APPTOOL" --appimage-extract-and-run --no-appstream "$APPDIR" "$OUT/$APPIMAGE_NAME"
 
 echo "✓ Built: $OUT/$APPIMAGE_NAME ($(du -h "$OUT/$APPIMAGE_NAME" | cut -f1))"
