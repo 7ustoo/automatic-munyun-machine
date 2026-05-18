@@ -1,7 +1,7 @@
 # CONTEXT.md — Automatic Munyun Machine
 
 > **Purpose:** complete project state so a fresh contributor (or fresh Claude Code session) can resume work without re-explaining anything.
-> **Last updated:** 2026-05-06 (E1 of v1.0: career-ops consolidation. Live bot already runs from AMM repo; this commit drops the stale dual-directory docs + cosmetic comment references.)
+> **Last updated:** 2026-05-18 (v1.3.0: local dashboard — `wrapper/dashboard.go` + embedded HTML page served on 127.0.0.1; tray menu gets "Open dashboard" item; installer version sync fix so `amm-setup-v*.exe` filenames track package.json automatically).
 > **Update protocol:** update this file at the end of *any* code change (commit, command added, file moved, schema shift). Treat it like a CHANGELOG-of-state.
 
 ---
@@ -69,6 +69,22 @@ iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main
 | `run-daily-batch.cmd` | Wrapper invoked by Task Scheduler 7am task. Just calls `node scripts/daily-batch.mjs`. |
 | `start-bot.cmd` | Launches bot detached/minimized. Window title `"munyun bot"`. |
 | `login-once.cmd` | Wraps `login-once.mjs`. User runs this to (re)auth hiring.cafe. |
+
+### `wrapper/` (Go tray + dashboard binary — v1.2+)
+
+| File | Purpose |
+|---|---|
+| `main.go` | Entrypoint. Resolves install dir, sets up logging, acquires single-instance lock, checks `isConfigured()` for needsSetup mode, starts supervisor goroutine + dashboard server, calls `systray.Run`. |
+| `supervisor.go` | Spawns the node bot as a child process. 3-strikes-per-hour respawn throttle mirrors `scripts/watchdog.mjs`. Kill on tray Quit; Restart via menu. |
+| `tray.go` | Builds the system tray menu (Status / Open dashboard / Run scrape / Pause / Open Telegram / View logs / Open folder / Restart bot / Quit). Heartbeat poller updates icon color + status label every 10s. |
+| `actions.go` | Menu-action handlers — shells out to existing JS scripts for setup/scrape, opens URLs via the platform's default opener for Telegram + dashboard + folder. |
+| `dashboard.go` | **v1.3.** Local HTTP server on `127.0.0.1:<random-port>`. `GET /api/status` aggregates heartbeat + config + last-batch; `GET /` serves the embedded HTML. Bound port written to `data/dashboard-port.txt`. |
+| `dashboard.html` | **v1.3.** Single self-contained dark-theme page (inline CSS, no CDN). Polls `/api/status` every 5s and renders bot/Telegram/profile cards + a top-10 jobs table. |
+| `singleinstance.go` | `data/wrapper.lock` PID-based lock prevents double-tray scenarios when the watchdog and the scheduled task race. |
+| `platform_windows.go` / `platform_unix.go` | OS-specific helpers — child window hiding (Windows `CREATE_NO_WINDOW`), `terminateProcess` (SIGTERM vs Job kill). |
+| `icons.go` + `icon-*.{png,ico}` | Embedded tray icons for gray (initial), green (alive), yellow (stale), red (dead) states. |
+| `Makefile` | `build`, `build-win`, `build-mac` (arm64 + amd64), `build-linux`. Version injected via `-ldflags "-X main.AMMVersion=$(VERSION)"` from `package.json`. |
+| `main_test.go`, `dashboard_test.go` | Go unit tests — 7 isConfigured cases + 9 dashboard buildStatus cases. Run via `go test ./...`. |
 
 ### Top-level files
 

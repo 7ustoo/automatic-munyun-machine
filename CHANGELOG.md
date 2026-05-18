@@ -10,6 +10,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [1.3.0] — 2026-05-18
+
+> **"AMM has a face now."** v1.2 made AMM look like a real app in the tray; v1.3 gives the tray a "Open dashboard" item that pops a local-only status page in your default browser. No new daemon, no extra port to open in your firewall — the dashboard binds 127.0.0.1 on an OS-chosen port and shuts down with the wrapper.
+
+### Added — Local dashboard
+
+- **`wrapper/dashboard.go`** — small HTTP server (Go stdlib `net/http`, no new deps) bound to `127.0.0.1` on an OS-assigned port at wrapper startup. Two routes:
+  - `GET /` → single-page HTML, embedded via `//go:embed` so the binary stays self-contained (no CDN, works fully offline)
+  - `GET /api/status` → JSON aggregation of `data/heartbeat.json` + `config.json` + `data/profiles/<active>/last-batch.json`, refreshed by the page every 5 seconds.
+- **`wrapper/dashboard.html`** — self-contained page with a dark theme. Shows: bot state (alive / stale / dead — same thresholds as `scripts/watchdog.mjs`), Telegram connection (last poll OK + consecutive failure count), active profile + all-profiles list, last batch summary with the top 10 jobs (title / company / query / match %) and a direct-apply link. Auto-refreshes via `fetch` polling.
+- **Tray menu**: new **Open dashboard** item between Status and Run scrape now. Reads the wrapper's bound port and opens `http://127.0.0.1:<port>` in the user's default browser via the existing cross-platform `openURL` helper.
+- **`data/dashboard-port.txt`** — written by the wrapper at startup so external tooling (CLI checks, ops scripts) can find the dashboard URL without parsing wrapper logs.
+- **`wrapper/dashboard_test.go`** — 9 table-driven tests for the pure `buildStatus()` aggregator: empty install, alive heartbeat, stale heartbeat, dead heartbeat, malformed heartbeat JSON, multi-profile enumeration with deterministic sort, last-batch job-limit cap, last-batch skipped without active profile, malformed last-batch JSON.
+
+### Changed — Installer version sync
+
+- **`installer/amm.iss`** — `MyAppVersion` is now injected by CI via `iscc /DMyAppVersion=<package.json version>`, with an `#ifndef` fallback for local dev runs. Fixes the recurring "installer .exe filename ships with a stale version" bug (e.g., v1.2.3 release had `amm-setup-v1.2.0.exe`). Going forward, the Windows installer asset name always tracks the tagged version.
+- **`.github/workflows/release.yml`** — Windows job reads `package.json` and passes `/DMyAppVersion=...` to `ISCC.exe`.
+
+### Security note
+
+The dashboard binds to `127.0.0.1` only — it is not reachable from the LAN or the internet, regardless of firewall settings. There are no state-changing endpoints in MVP; all writes still go through the tray menu or Telegram. If you want to access the dashboard from another device, use an SSH tunnel rather than rebinding the listener.
+
+---
+
 ## [1.2.3] — 2026-05-12
 
 ### Fixed

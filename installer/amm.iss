@@ -15,7 +15,14 @@
 
 #define MyAppName "Automatic Munyun Machine"
 #define MyAppShort "amm"
-#define MyAppVersion "1.2.0"
+; MyAppVersion is normally injected by CI via `iscc /DMyAppVersion=X.Y.Z` so
+; the installer filename always tracks package.json. The literal below is
+; only a fallback for someone running `iscc` directly on a dev box — leave
+; it pointing at the current release branch so local builds still produce
+; a sensibly-named .exe.
+#ifndef MyAppVersion
+  #define MyAppVersion "1.3.0"
+#endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
 #define MyAppExeName "AMM.exe"

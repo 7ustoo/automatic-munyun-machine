@@ -50,7 +50,12 @@ jobs:
         run: |
           $iss = "installer/amm.iss"
           if (-not (Test-Path $iss)) { Write-Error "Missing $iss"; exit 1 }
-          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" $iss
+          # Pass package.json version as /DMyAppVersion so the installer
+          # filename + Add/Remove Programs entry match the tag being built.
+          # The .iss has an #ifndef fallback for local dev runs.
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          Write-Host "Building installer for version $version"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$version" $iss
           # Inno Setup writes to installer/dist/ by default
           Get-ChildItem installer/dist/ -Filter '*.exe'
 

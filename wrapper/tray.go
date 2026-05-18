@@ -15,20 +15,22 @@ import (
 // trayState bundles everything menu handlers need to read or mutate.
 type trayState struct {
 	sup        *supervisor
+	dash       *dashboardServer
 	installDir string
 	botPath    string
 	needsSetup bool // true when launched without .env/config.json
 
 	// Menu items — captured on init so the heartbeat poller can update labels.
-	miSetup    *systray.MenuItem // v1.2: visible only when needsSetup; click → wizard
-	miStatus   *systray.MenuItem
-	miScrape   *systray.MenuItem
-	miPause    *systray.MenuItem
-	miTelegram *systray.MenuItem
-	miLogs     *systray.MenuItem
-	miFolder   *systray.MenuItem
-	miRestart  *systray.MenuItem
-	miQuit     *systray.MenuItem
+	miSetup     *systray.MenuItem // v1.2: visible only when needsSetup; click → wizard
+	miStatus    *systray.MenuItem
+	miDashboard *systray.MenuItem // v1.3: opens http://127.0.0.1:<port> in browser
+	miScrape    *systray.MenuItem
+	miPause     *systray.MenuItem
+	miTelegram  *systray.MenuItem
+	miLogs      *systray.MenuItem
+	miFolder    *systray.MenuItem
+	miRestart   *systray.MenuItem
+	miQuit      *systray.MenuItem
 
 	currentIcon iconState
 }
@@ -56,7 +58,9 @@ const (
 // v1.2: `needsSetup` controls whether the "Run setup wizard" item is at
 // the top of the menu and whether the initial tooltip/status reflects
 // the unconfigured state.
-func onTrayReady(sup *supervisor, installDir, botPath string, needsSetup bool) {
+// v1.3: `dash` is the optional dashboard server — when non-nil the
+// "Open dashboard" menu item routes through it.
+func onTrayReady(sup *supervisor, dash *dashboardServer, installDir, botPath string, needsSetup bool) {
 	systray.SetTitle("AMM")
 	if needsSetup {
 		systray.SetTooltip(fmt.Sprintf("Automatic Munyun Machine v%s — setup required", AMMVersion))
@@ -66,6 +70,7 @@ func onTrayReady(sup *supervisor, installDir, botPath string, needsSetup bool) {
 
 	state := &trayState{
 		sup:        sup,
+		dash:       dash,
 		installDir: installDir,
 		botPath:    botPath,
 		needsSetup: needsSetup,
@@ -87,6 +92,13 @@ func onTrayReady(sup *supervisor, installDir, botPath string, needsSetup bool) {
 	}
 	state.miStatus = systray.AddMenuItem(statusInitial, "Bot liveness — based on data/heartbeat.json")
 	state.miStatus.Disable() // info-only
+
+	// v1.3: localhost dashboard. Only show the item when the dashboard
+	// server is up — startDashboard() may have failed (port exhaustion,
+	// firewall, etc.) and in that case the action would be a no-op.
+	if dash != nil {
+		state.miDashboard = systray.AddMenuItem("Open dashboard", "Opens the AMM status page in your browser")
+	}
 
 	systray.AddSeparator()
 
@@ -112,6 +124,8 @@ func onTrayReady(sup *supervisor, installDir, botPath string, needsSetup bool) {
 		state.miPause.Disable()
 		state.miTelegram.Disable()
 		state.miRestart.Disable()
+		// Dashboard stays enabled even in needs-setup mode — it'll show
+		// "No heartbeat yet" + the setup-required state, which is helpful.
 	}
 
 	// --- Click handlers ---
@@ -124,11 +138,15 @@ func onTrayReady(sup *supervisor, installDir, botPath string, needsSetup bool) {
 }
 
 // onTrayExit fires when systray.Quit() is called (from the Quit menu item or
-// an OS termination signal). Shut down the supervisor here, not before, so
-// "Quit AMM" → child is killed → wrapper exits cleanly.
-func onTrayExit(sup *supervisor) {
+// an OS termination signal). Shut down the supervisor + dashboard here, not
+// before, so "Quit AMM" → child is killed → port is released → wrapper exits
+// cleanly.
+func onTrayExit(sup *supervisor, dash *dashboardServer) {
 	log.Printf("tray: exiting — signaling supervisor")
 	sup.Quit()
+	if dash != nil {
+		dash.Shutdown()
+	}
 	// Give the supervisor a moment to send SIGTERM and let the bot wind down.
 	time.Sleep(500 * time.Millisecond)
 }
@@ -136,19 +154,24 @@ func onTrayExit(sup *supervisor) {
 // handleClicks blocks reading from each menu item's ClickedCh in a select.
 // One goroutine handles all clicks so the menu code in onTrayReady stays linear.
 //
-// Setup item only exists when needsSetup=true; we plumb it through a nilable
-// channel so the select doesn't deadlock on a nil ClickedCh.
+// Setup + Dashboard items only exist when needsSetup=true / dashboard up;
+// plumb them through nilable channels so the select doesn't deadlock on a
+// nil ClickedCh.
 func (s *trayState) handleClicks() {
-	// nilable setup channel — select on nil channel never fires, which is
-	// exactly what we want when miSetup isn't present.
 	var setupCh <-chan struct{}
 	if s.miSetup != nil {
 		setupCh = s.miSetup.ClickedCh
+	}
+	var dashCh <-chan struct{}
+	if s.miDashboard != nil {
+		dashCh = s.miDashboard.ClickedCh
 	}
 	for {
 		select {
 		case <-setupCh:
 			actionRunSetup(s.sup, s.installDir)
+		case <-dashCh:
+			actionOpenDashboard(s.dash)
 		case <-s.miScrape.ClickedCh:
 			actionRunScrape(s.installDir)
 		case <-s.miPause.ClickedCh:

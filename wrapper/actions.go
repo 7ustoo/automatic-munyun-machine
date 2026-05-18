@@ -79,6 +79,21 @@ func actionRunSetup(sup *supervisor, installDir string) {
 	_ = sup // silence unused param; kept for API symmetry + future use
 }
 
+// actionOpenDashboard opens the localhost dashboard URL in the user's
+// default browser. v1.3. The wrapper bound the port at startup; we just
+// open http://127.0.0.1:<port>.
+func actionOpenDashboard(dash *dashboardServer) {
+	if dash == nil || dash.Port() == 0 {
+		log.Printf("action.dashboard: no dashboard server (start failed or not initialized)")
+		return
+	}
+	url := dash.URL()
+	log.Printf("action.dashboard: opening %s", url)
+	if err := openURL(url); err != nil {
+		log.Printf("action.dashboard: open failed: %v", err)
+	}
+}
+
 // actionRunScrape spawns `node scripts/daily-batch.mjs` as a one-shot
 // detached process. Same effect as /scrape via Telegram, but triggerable
 // from the tray when the user is at their desk.

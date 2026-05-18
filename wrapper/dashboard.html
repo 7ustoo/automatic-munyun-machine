@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AMM — Local Dashboard</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --panel: #161b22;
+    --panel-2: #1c2330;
+    --border: #2d3748;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --gray: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; min-height: 100vh;
+    background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                 Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    font-size: 14px; line-height: 1.5;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header {
+    background: var(--panel);
+    border-bottom: 1px solid var(--border);
+    padding: 16px 24px;
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 16px;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header h1 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  .banner {
+    display: inline-flex; align-items: center; gap: 8px;
+    padding: 4px 10px; border-radius: 999px;
+    font-size: 12px; font-weight: 600;
+    background: var(--panel-2); border: 1px solid var(--border);
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); }
+  .dot.alive { background: var(--green); box-shadow: 0 0 0 3px rgba(63,185,80,.15); }
+  .dot.stale { background: var(--yellow); box-shadow: 0 0 0 3px rgba(210,153,34,.15); }
+  .dot.dead  { background: var(--red);    box-shadow: 0 0 0 3px rgba(248,81,73,.15); }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  .grid {
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    margin-bottom: 24px;
+  }
+  .card {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .card h2 {
+    margin: 0 0 12px; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+  }
+  .stat-row { display: flex; justify-content: space-between; padding: 4px 0; }
+  .stat-row .k { color: var(--muted); }
+  .stat-row .v { font-variant-numeric: tabular-nums; }
+  .big {
+    font-size: 22px; font-weight: 600;
+    display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
+  }
+  .big.alive { color: var(--green); }
+  .big.stale { color: var(--yellow); }
+  .big.dead  { color: var(--red); }
+  .big.unknown { color: var(--gray); }
+
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  th, td {
+    text-align: left; padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  th {
+    font-size: 11px; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--muted); font-weight: 600;
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  td.match { font-variant-numeric: tabular-nums; font-weight: 600; }
+  td.match.hi { color: var(--green); }
+  td.match.md { color: var(--yellow); }
+  td.match.lo { color: var(--muted); }
+  td.idx { color: var(--muted); width: 36px; }
+  td.title { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.company { color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.actions { white-space: nowrap; text-align: right; }
+  .pill {
+    display: inline-block; padding: 1px 8px; border-radius: 999px;
+    font-size: 11px; background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .empty { color: var(--muted); padding: 16px 4px; text-align: center; }
+  .err {
+    color: var(--red); background: rgba(248,81,73,.08);
+    border: 1px solid rgba(248,81,73,.3); border-radius: 6px;
+    padding: 10px 14px; margin-bottom: 16px;
+  }
+  footer {
+    color: var(--muted); font-size: 12px; padding: 16px 24px;
+    border-top: 1px solid var(--border); text-align: center;
+  }
+  footer code { background: var(--panel); padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Automatic Munyun Machine <small id="version"></small></h1>
+  <span class="banner"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
+</header>
+
+<main>
+  <div id="err" class="err" style="display:none"></div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Bot</h2>
+      <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
+      <div class="stat-row"><span class="k">PID</span><span class="v" id="bot-pid">—</span></div>
+      <div class="stat-row"><span class="k">Uptime</span><span class="v" id="bot-uptime">—</span></div>
+      <div class="stat-row"><span class="k">Last heartbeat</span><span class="v" id="bot-hb">—</span></div>
+      <div class="stat-row"><span class="k">Bot version</span><span class="v" id="bot-version">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Telegram</h2>
+      <div class="big" id="tg-big"><span class="dot" id="tg-dot"></span><span id="tg-state">—</span></div>
+      <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
+      <div class="stat-row"><span class="k">Consecutive failures</span><span class="v" id="tg-fails">—</span></div>
+    </div>
+
+    <div class="card">
+      <h2>Profile</h2>
+      <div class="big" id="profile-big">—</div>
+      <div class="stat-row"><span class="k">All profiles</span><span class="v" id="profile-all">—</span></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Last batch <span class="pill" id="lb-meta"></span></h2>
+    <div id="lb-body"></div>
+  </div>
+</main>
+
+<footer>
+  Local dashboard · <code id="install-dir">—</code> · auto-refresh every 5s
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+
+function humanDuration(seconds) {
+  if (seconds == null || !isFinite(seconds) || seconds < 1) return "<1s";
+  const s = Math.floor(seconds);
+  if (s < 60) return s + "s";
+  if (s < 3600) return Math.floor(s/60) + "m";
+  if (s < 86400) {
+    const h = Math.floor(s/3600);
+    const m = Math.floor((s%3600)/60);
+    return m === 0 ? h + "h" : h + "h" + m + "m";
+  }
+  return Math.floor(s/86400) + "d";
+}
+
+function setDot(el, state) {
+  el.classList.remove("alive","stale","dead","unknown");
+  el.classList.add(state || "unknown");
+}
+
+function matchClass(pct) {
+  if (pct >= 70) return "hi";
+  if (pct >= 50) return "md";
+  return "lo";
+}
+
+function renderJobs(jobs, jobCount) {
+  if (!jobs || jobs.length === 0) {
+    return '<div class="empty">No batch yet. Trigger one from the tray ("Run scrape now") or wait for the daily run.</div>';
+  }
+  const rows = jobs.map(j => {
+    const url = j.directUrl || j.viewjobUrl || "#";
+    const pct = j.matchPct ?? 0;
+    return `<tr>
+      <td class="idx">#${j.idx}</td>
+      <td class="title" title="${escapeHTML(j.title || '')}">${escapeHTML(j.title || '—')}</td>
+      <td class="company" title="${escapeHTML(j.company || '')}">${escapeHTML(j.company || '—')}</td>
+      <td><span class="pill">${escapeHTML(j.q || '')}</span></td>
+      <td class="match ${matchClass(pct)}">${pct}%</td>
+      <td class="actions"><a href="${escapeAttr(url)}" target="_blank" rel="noopener">Open ↗</a></td>
+    </tr>`;
+  }).join("");
+  const extra = jobCount > jobs.length
+    ? `<div class="empty">Showing top ${jobs.length} of ${jobCount}. Full batch is in Telegram.</div>`
+    : "";
+  return `<table>
+    <thead><tr><th></th><th>Title</th><th>Company</th><th>Query</th><th>Match</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>${extra}`;
+}
+
+function escapeHTML(s) {
+  return String(s).replace(/[&<>"']/g, c => ({
+    "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
+  }[c]));
+}
+function escapeAttr(s) { return escapeHTML(s); }
+
+async function tick() {
+  try {
+    const res = await fetch("/api/status", { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const s = await res.json();
+    $("err").style.display = "none";
+    render(s);
+  } catch (e) {
+    $("err").style.display = "";
+    $("err").textContent = "Could not reach the wrapper: " + e.message
+      + " — is AMM still running?";
+  }
+}
+
+function render(s) {
+  $("version").textContent = "v" + (s.wrapper?.version || "—");
+  $("install-dir").textContent = s.wrapper?.installDir || "—";
+
+  const botState = s.bot?.state || "unknown";
+  const botBig = $("bot-big");
+  botBig.classList.remove("alive","stale","dead","unknown");
+  botBig.classList.add(botState);
+  $("bot-state").textContent = ({
+    alive: "Alive",
+    stale: "Stale",
+    dead:  "Dead",
+    unknown: "Unknown"
+  })[botState];
+  setDot($("bot-dot"), botState);
+  setDot($("header-dot"), botState);
+  $("header-label").textContent = ({
+    alive: "AMM is healthy",
+    stale: "Heartbeat is stale",
+    dead:  "Bot appears dead",
+    unknown: "No heartbeat yet"
+  })[botState];
+
+  $("bot-pid").textContent = s.bot?.pid || "—";
+  $("bot-uptime").textContent = s.bot?.uptimeSec
+    ? humanDuration(s.bot.uptimeSec) : "—";
+  $("bot-hb").textContent = s.bot?.lastHeartbeatTs
+    ? humanDuration(s.bot.lastHeartbeatAgeSec) + " ago" : "—";
+  $("bot-version").textContent = s.bot?.version || "—";
+
+  const tgConnected = !!s.telegram?.connected;
+  const tgBig = $("tg-big");
+  tgBig.classList.remove("alive","stale","dead","unknown");
+  tgBig.classList.add(tgConnected ? "alive" : (botState === "unknown" ? "unknown" : "dead"));
+  $("tg-state").textContent = tgConnected ? "Connected" : "Disconnected";
+  setDot($("tg-dot"), tgConnected ? "alive" : (botState === "unknown" ? "unknown" : "dead"));
+  $("tg-poll").textContent = s.telegram?.lastPollOk ? "OK" : "Failing";
+  $("tg-fails").textContent = String(s.telegram?.consecutiveFailures ?? 0);
+
+  $("profile-big").textContent = s.profile?.active || "—";
+  $("profile-all").textContent = (s.profile?.all || []).join(", ") || "—";
+
+  const lb = s.lastBatch || {};
+  if (lb.available) {
+    $("lb-meta").textContent = `${lb.date || ""} · ${lb.jobCount || 0} jobs · profile ${lb.profile || "—"}`;
+  } else {
+    $("lb-meta").textContent = "no batch yet";
+  }
+  $("lb-body").innerHTML = renderJobs(lb.jobs || [], lb.jobCount || 0);
+}
+
+tick();
+setInterval(tick, 5000);
+</script>
+</body>
+</html>
