@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed — Hiring.cafe path migration (`/viewjob/` → `/job/`)
+
+- **`scripts/daily-batch.mjs`, `scripts/login-once.mjs`** — hiring.cafe migrated their job-page path from `/viewjob/<id>` to `/job/<id>`. Every scrape since the upstream change failed the browsability gate (`a[href^="/viewjob/"]` matched zero cards) and emitted the misleading "Hiring.cafe session expired. Run npm run login" message — running `login-once` couldn't fix it because the warmup poller used the same dead selector. Updated the three scrape-side selectors and the warmup poller to `/job/`.
+- **`scripts/telegram-bot.mjs`** — the bot's id → URL builder (`'https://hiring.cafe/viewjob/' + id`) now emits `/job/`. The `/history` and `/saved` regex parsers accept both the legacy `/viewjob/` and current `/job/` paths so a pre-v1.3 `applications.md` / `saved.md` still dedupes and renders.
+- **`scripts/daily-batch.mjs`** — `loadAppliedHrefs()` regex widened to `(?:viewjob|job)`, canonicalizes to `/job/` on the way out so dedup matches regardless of which path the URL was originally stored under.
+
 ---
 
 ## [1.3.0] — 2026-05-18

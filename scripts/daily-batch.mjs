@@ -187,7 +187,7 @@ const EXTRACT_FN = `(() => {
     return true;
   };
   const seen = new Set(); const out = [];
-  document.querySelectorAll('a[href^="/viewjob/"]').forEach(a => {
+  document.querySelectorAll('a[href^="/job/"]').forEach(a => {
     if (seen.has(a.href)) return; seen.add(a.href);
     const card = a.closest('.bg-white.rounded-xl') || a.parentElement.parentElement.parentElement;
     const cardText = card.innerText || '';
@@ -251,7 +251,7 @@ async function checkBrowsable(page) {
       // Cloudflare can take a while; wait up to 25s for cards to appear
       for (let i = 0; i < 12; i++) {
         await page.waitForTimeout(2000);
-        const count = await page.locator('a[href*="viewjob"]').count().catch(() => 0);
+        const count = await page.locator('a[href*="/job/"]').count().catch(() => 0);
         if (count > 0) return true;
       }
     } catch { /* retry once */ }
@@ -331,7 +331,7 @@ async function _scrapeWith(ctx) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForSelector('a[href^="/viewjob/"]', { timeout: 8000 }).catch(() => {});
+        await page.waitForSelector('a[href^="/job/"]', { timeout: 8000 }).catch(() => {});
         await page.waitForTimeout(2000);
         firstPageRows = await page.evaluate(EXTRACT_FN);
         break;
@@ -599,8 +599,10 @@ function loadAppliedHrefs() {
     // Case-insensitive match + lowercase normalization. hiring.cafe IDs are
     // lowercase today, but treating them as a case-sensitive contract was
     // the kind of brittleness that bites silently if the upstream shifts.
-    return new Set([...apps.matchAll(/hiring\.cafe\/viewjob\/([a-z0-9]+)/gi)]
-      .map(m => 'https://hiring.cafe/viewjob/' + m[1].toLowerCase()));
+    // Accept both legacy `/viewjob/` and the current `/job/` paths so an
+    // applications.md that pre-dates the v1.3 path migration still dedupes.
+    return new Set([...apps.matchAll(/hiring\.cafe\/(?:viewjob|job)\/([a-z0-9]+)/gi)]
+      .map(m => 'https://hiring.cafe/job/' + m[1].toLowerCase()));
   } catch { return new Set(); }
 }
 
