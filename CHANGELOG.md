@@ -8,6 +8,68 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed — Hiring.cafe path migration (`/viewjob/` → `/job/`)
+
+- **`scripts/daily-batch.mjs`, `scripts/login-once.mjs`** — hiring.cafe migrated their job-page path from `/viewjob/<id>` to `/job/<id>`. Every scrape since the upstream change failed the browsability gate (`a[href^="/viewjob/"]` matched zero cards) and emitted the misleading "Hiring.cafe session expired. Run npm run login" message — running `login-once` couldn't fix it because the warmup poller used the same dead selector. Updated the three scrape-side selectors and the warmup poller to `/job/`.
+- **`scripts/telegram-bot.mjs`** — the bot's id → URL builder (`'https://hiring.cafe/viewjob/' + id`) now emits `/job/`. The `/history` and `/saved` regex parsers accept both the legacy `/viewjob/` and current `/job/` paths so a pre-v1.3 `applications.md` / `saved.md` still dedupes and renders.
+- **`scripts/daily-batch.mjs`** — `loadAppliedHrefs()` regex widened to `(?:viewjob|job)`, canonicalizes to `/job/` on the way out so dedup matches regardless of which path the URL was originally stored under.
+
+---
+
+## [1.3.0] — 2026-05-18
+
+> **"AMM has a face now."** v1.2 made AMM look like a real app in the tray; v1.3 gives the tray a "Open dashboard" item that pops a local-only status page in your default browser. No new daemon, no extra port to open in your firewall — the dashboard binds 127.0.0.1 on an OS-chosen port and shuts down with the wrapper.
+
+### Added — Local dashboard
+
+- **`wrapper/dashboard.go`** — small HTTP server (Go stdlib `net/http`, no new deps) bound to `127.0.0.1` on an OS-assigned port at wrapper startup. Two routes:
+  - `GET /` → single-page HTML, embedded via `//go:embed` so the binary stays self-contained (no CDN, works fully offline)
+  - `GET /api/status` → JSON aggregation of `data/heartbeat.json` + `config.json` + `data/profiles/<active>/last-batch.json`, refreshed by the page every 5 seconds.
+- **`wrapper/dashboard.html`** — self-contained page with a dark theme. Shows: bot state (alive / stale / dead — same thresholds as `scripts/watchdog.mjs`), Telegram connection (last poll OK + consecutive failure count), active profile + all-profiles list, last batch summary with the top 10 jobs (title / company / query / match %) and a direct-apply link. Auto-refreshes via `fetch` polling.
+- **Tray menu**: new **Open dashboard** item between Status and Run scrape now. Reads the wrapper's bound port and opens `http://127.0.0.1:<port>` in the user's default browser via the existing cross-platform `openURL` helper.
+- **`data/dashboard-port.txt`** — written by the wrapper at startup so external tooling (CLI checks, ops scripts) can find the dashboard URL without parsing wrapper logs.
+- **`wrapper/dashboard_test.go`** — 9 table-driven tests for the pure `buildStatus()` aggregator: empty install, alive heartbeat, stale heartbeat, dead heartbeat, malformed heartbeat JSON, multi-profile enumeration with deterministic sort, last-batch job-limit cap, last-batch skipped without active profile, malformed last-batch JSON.
+
+### Changed — Installer version sync
+
+- **`installer/amm.iss`** — `MyAppVersion` is now injected by CI via `iscc /DMyAppVersion=<package.json version>`, with an `#ifndef` fallback for local dev runs. Fixes the recurring "installer .exe filename ships with a stale version" bug (e.g., v1.2.3 release had `amm-setup-v1.2.0.exe`). Going forward, the Windows installer asset name always tracks the tagged version.
+- **`.github/workflows/release.yml`** — Windows job reads `package.json` and passes `/DMyAppVersion=...` to `ISCC.exe`.
+
+### Security note
+
+The dashboard binds to `127.0.0.1` only — it is not reachable from the LAN or the internet, regardless of firewall settings. There are no state-changing endpoints in MVP; all writes still go through the tray menu or Telegram. If you want to access the dashboard from another device, use an SSH tunnel rather than rebinding the listener.
+
+---
+
+## [1.2.3] — 2026-05-12
+
+### Fixed
+
+- **Linux .AppImage build (FUSE).** `appimagetool` is itself an AppImage and would mount itself via FUSE 2 to run — but Ubuntu 24.04 ships only libfuse3 by default, so `dlopen(): error loading libfuse.so.2`. Passing `--appimage-extract-and-run` to the appimagetool invocation tells its AppImage runtime to extract to a temp dir and exec the payload instead of mounting, sidestepping FUSE entirely. Works on any Linux runner regardless of libfuse2 presence.
+
+---
+
+## [1.2.2] — 2026-05-12
+
+### Fixed
+
+- **Linux .AppImage build.** `scripts/build/appimage.sh` was constructing the Node.js download URL as `node-v20.18.0-linux-x86_64.tar.xz` (the kernel uname), but the official Node.js tarballs use `linux-x64` / `linux-arm64`. The substitution `${ARCH/amd64/x64}` only handled the `amd64` alias, not `x86_64`. Replaced with an explicit `case "$ARCH"` map. Windows + macOS jobs in v1.2.1 succeeded; this gets Linux back in the mix.
+
+No source-code changes vs v1.2.1. Pure release-pipeline patch (third in a row, but each one was a different latent CI bug).
+
+---
+
+## [1.2.1] — 2026-05-12
+
+### Fixed
+
+- **CI release pipeline.** Two fixes so `npm test` and Linux signing prereqs both pass on the GitHub Actions runners:
+  - `package.json#scripts.test` now uses bare `node --test` (auto-discovers `**/*.test.mjs` from cwd). Node 20's `--test` doesn't expand globs as positional args, and Windows pwsh preserves the glob as a literal string — so the prior `node --test "scripts/__tests__/*.test.mjs"` failed on Windows with `Could not find ...*.test.mjs`. Verified locally: all 65 tests pass.
+  - Dropped `dpkg-sig` from the Linux build's `apt-get install` line. Ubuntu 24.04 removed the package from its default repos; `scripts/build/sign-linux.sh` already probes for it at runtime and skips `.deb` signing gracefully when absent.
+- **Release-asset hygiene.** The `.github/workflows/release.yml` no longer uploads the bare `AMM.exe` wrapper as a standalone Release asset — only the full one-click installers (`.exe` / `.dmg` / `.deb` / `.AppImage`). Avoids the "user downloads bare wrapper, gets a broken tray icon" confusion.
+
+No source-code changes vs v1.2.0 — same wrapper, same node bot, same tray UX. Pure release-pipeline patch.
+
 ---
 
 ## [1.2.0] — 2026-05-11

@@ -11,6 +11,7 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import readline from 'node:readline/promises';
 import { stdin as input, stdout as output } from 'node:process';
@@ -69,6 +70,14 @@ const ENV_PATH = path.join(ROOT, '.env');
 const CONFIG_PATH = path.join(ROOT, 'config.json');
 const CONFIG_EXAMPLE = path.join(ROOT, 'config.example.json');
 
+// Cross-install backup location. uninstall.mjs in wipe-mode copies .env
+// here before deletion; the wizard checks for it so a fresh install on
+// top of a previously-wiped one can offer to recover the old token + chat
+// ID instead of forcing the user back through BotFather. Outside the
+// install dir on purpose — survives Add/Remove Programs.
+const BACKUP_DIR = path.join(os.homedir(), '.amm-backup');
+const BACKUP_ENV_PATH = path.join(BACKUP_DIR, '.env');
+
 // ANSI colors
 const c = {
   reset: '\x1b[0m', bold: '\x1b[1m', dim: '\x1b[2m',
@@ -94,13 +103,28 @@ function step(n, of, title) {
 }
 
 // ---- env helpers ----
-function readEnv() {
-  if (!fs.existsSync(ENV_PATH)) return {};
+function parseEnv(text) {
   return Object.fromEntries(
-    fs.readFileSync(ENV_PATH, 'utf8')
-      .split('\n').filter(l => l && !l.startsWith('#') && l.includes('='))
+    text.split('\n').filter(l => l && !l.startsWith('#') && l.includes('='))
       .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
   );
+}
+function readEnv() {
+  if (!fs.existsSync(ENV_PATH)) return {};
+  return parseEnv(fs.readFileSync(ENV_PATH, 'utf8'));
+}
+// Read the cross-install backup .env, if present. Returns { vars, savedAt }
+// where savedAt is parsed from the `# backed up at <ISO>` header that
+// uninstall.mjs writes. Empty vars + null savedAt if no backup exists.
+function readBackupEnv() {
+  if (!fs.existsSync(BACKUP_ENV_PATH)) return { vars: {}, savedAt: null };
+  try {
+    const text = fs.readFileSync(BACKUP_ENV_PATH, 'utf8');
+    const headerMatch = text.match(/^#\s*backed up at\s+(\S+)/im);
+    return { vars: parseEnv(text), savedAt: headerMatch ? headerMatch[1] : null };
+  } catch {
+    return { vars: {}, savedAt: null };
+  }
 }
 function writeEnv(vars) {
   let body = '';
@@ -120,6 +144,37 @@ async function step1Token() {
   if (env.TELEGRAM_BOT_TOKEN && /^\d+:[\w-]+$/.test(env.TELEGRAM_BOT_TOKEN)) {
     const a = await ask(arrow(`Existing bot token detected. Reuse it? [Y/n] `));
     if (!a.match(/^n/i)) return env.TELEGRAM_BOT_TOKEN;
+  }
+
+  // No token in install-dir .env — check the cross-install backup that
+  // uninstall.mjs writes in wipe-mode. Lets a fresh reinstall after a
+  // full wipe pick up where the user left off without re-pasting the
+  // token. Validate live with getMe so a stale/revoked backup is skipped.
+  const backup = readBackupEnv();
+  if (backup.vars.TELEGRAM_BOT_TOKEN && /^\d+:[\w-]+$/.test(backup.vars.TELEGRAM_BOT_TOKEN)) {
+    const tok = backup.vars.TELEGRAM_BOT_TOKEN;
+    process.stdout.write(arrow('Found backed-up token from a previous install — validating… '));
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${tok}/getMe`);
+      const j = await r.json();
+      if (j.ok) {
+        const when = backup.savedAt ? backup.savedAt.slice(0, 10) : 'unknown date';
+        console.log(ok(`@${j.result.username} (saved ${when})`));
+        const a = await ask(arrow('Reuse this token? [Y/n] '));
+        if (!a.match(/^n/i)) {
+          writeEnv({ TELEGRAM_BOT_TOKEN: tok });
+          // Also pre-stage the backed-up chat ID so step2 can offer it.
+          if (backup.vars.TELEGRAM_CHAT_ID && /^-?\d+$/.test(backup.vars.TELEGRAM_CHAT_ID)) {
+            writeEnv({ TELEGRAM_CHAT_ID: backup.vars.TELEGRAM_CHAT_ID });
+          }
+          return tok;
+        }
+      } else {
+        console.log(`${c.dim}backup token rejected (${j.description || 'invalid'}) — falling back to manual entry${c.reset}`);
+      }
+    } catch (e) {
+      console.log(`${c.dim}could not reach Telegram (${e.message}) — skipping backup check${c.reset}`);
+    }
   }
 
   console.log(`${c.dim}On your phone: open Telegram, search ${c.bold}@BotFather${c.reset}${c.dim}, send /newbot.${c.reset}`);

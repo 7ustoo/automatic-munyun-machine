@@ -57,7 +57,7 @@ try {
 // Poll until cards render OR the user closes the window OR timeout.
 while (Date.now() - start < WARMUP_TIMEOUT_MS) {
   let count = 0;
-  try { count = await page.locator('a[href*="viewjob"]').count(); } catch { /* nav in progress */ }
+  try { count = await page.locator('a[href*="/job/"]').count(); } catch { /* nav in progress */ }
   if (count > 0) {
     console.log(`✓ Cloudflare cleared after ${Math.round((Date.now() - start)/1000)}s — ${count} job cards visible.`);
     cleared = true;

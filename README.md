@@ -123,6 +123,17 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/test`, `/ping` | Bot health check |
 | `/help` | Show this list |
 
+## Local dashboard (NEW in v1.3)
+
+The tray menu has an **Open dashboard** item that pops a small status page in your default browser. It shows:
+
+- Bot state (alive / stale / dead) + uptime + PID
+- Telegram connection (last poll OK + consecutive failure count)
+- Active profile + all profiles
+- Last batch summary — date, job count, and the top 10 jobs with company / query / match % and a direct-apply link
+
+The dashboard binds to `127.0.0.1` on an OS-assigned port — it is **not reachable from the LAN or the internet**. The page auto-refreshes every 5 seconds. Telegram remains the primary surface; the dashboard is a glance for moments when you're at your desk.
+
 ## Customize
 
 All settings live in `config.json` (created from `config.example.json` by the wizard). Edit at any time and the next run picks up changes:

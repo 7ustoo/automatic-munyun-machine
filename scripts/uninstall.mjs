@@ -138,8 +138,37 @@ function unregisterTasks() {
   console.log(`  Unsupported platform: ${process.platform}`);
 }
 
+// Backup .env to a cross-install location before wipe deletes it. Setup-
+// wizard.mjs's step1Token() probes this path on a fresh install and offers
+// to recover the previous bot token + chat ID instead of forcing the user
+// through BotFather again. Lives in $HOME/.amm-backup/ — outside the AMM
+// install dir on purpose so Add/Remove Programs uninstall doesn't take it
+// out. Single-slot backup: each wipe overwrites the prior one, since a
+// stale token is worse than no token.
+function backupEnvBeforeWipe() {
+  const src = path.join(ROOT, '.env');
+  if (!fs.existsSync(src)) return;
+  const backupDir = path.join(os.homedir(), '.amm-backup');
+  try {
+    fs.mkdirSync(backupDir, { recursive: true });
+    const dest = path.join(backupDir, '.env');
+    const original = fs.readFileSync(src, 'utf8');
+    // Strip any prior backup header so we don't accumulate them across
+    // repeated uninstall/reinstall cycles.
+    const stripped = original.replace(/^#\s*backed up at\s+\S+.*\n(?:^#.*\n)*/im, '');
+    const header = `# backed up at ${new Date().toISOString()}\n# Restored by scripts/setup-wizard.mjs on next install if found.\n`;
+    fs.writeFileSync(dest, header + stripped);
+    console.log(`  backed up .env → ${dest}`);
+  } catch (e) {
+    console.log(`  could not back up .env: ${e.message}`);
+  }
+}
+
 // 3. Wipe per-user data + secrets. Only in --mode=wipe.
 function wipeUserData() {
+  // Snapshot the bot token + chat ID before deletion so the next install
+  // wizard can offer to reuse them. See backupEnvBeforeWipe() docstring.
+  backupEnvBeforeWipe();
   const targets = [
     path.join(ROOT, 'data'),
     path.join(ROOT, 'config.json'),

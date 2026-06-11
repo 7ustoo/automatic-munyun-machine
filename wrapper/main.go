@@ -37,7 +37,14 @@ import (
 // Kept here (not read from package.json at runtime) so the binary is self-
 // contained — no need to know where the install dir lives just to render a
 // tooltip.
-const AMMVersion = "1.2.0"
+//
+// Declared as `var` (not `const`) so the Makefile / CI can inject the
+// authoritative package.json version via `-ldflags "-X main.AMMVersion=..."`.
+// Go's -X linker flag only patches package-level vars; constants are inlined
+// at compile time and silently ignore -X. Without this, every release built
+// since the wrapper landed would have shipped with whatever string happened
+// to be on this line.
+var AMMVersion = "1.3.0"
 
 // CLI flags. The wrapper is usually invoked with no args from Task Scheduler /
 // launchd / systemd; the flags exist for manual debugging.
@@ -115,11 +122,20 @@ func main() {
 		log.Printf("--no-spawn set: skipping node bot spawn (tray-only test mode)")
 	}
 
+	// v1.3: localhost dashboard. Starts in any state (configured or not) so
+	// users without a heartbeat yet can still see "no heartbeat" instead of
+	// nothing. The tray menu's Open dashboard item reads the bound port
+	// from this handle.
+	dash, dashErr := startDashboard(installDir)
+	if dashErr != nil {
+		log.Printf("dashboard: failed to start (%v) — tray menu item will be disabled", dashErr)
+	}
+
 	// Tray init blocks until systray.Quit() is called. Returns when the
 	// user picks Quit from the menu or the OS sends a termination signal.
 	systray.Run(
-		func() { onTrayReady(sup, installDir, botPath, needsSetup) },
-		func() { onTrayExit(sup) },
+		func() { onTrayReady(sup, dash, installDir, botPath, needsSetup) },
+		func() { onTrayExit(sup, dash) },
 	)
 }
 

@@ -425,7 +425,7 @@ function loadLatestBatch() {
   const txt = fs.readFileSync(path.join(dir, latest), 'utf8');
   const rows = txt.trim().split('\n').map(l => {
     const [idx, id, title, company, yoe, q, url] = l.split('\t');
-    return { idx: parseInt(idx), id, title, company, yoe, q, url, viewjobUrl: 'https://hiring.cafe/viewjob/' + id };
+    return { idx: parseInt(idx), id, title, company, yoe, q, url, viewjobUrl: 'https://hiring.cafe/job/' + id };
   });
   return { file: latest, rows };
 }
@@ -1293,10 +1293,11 @@ async function showHistory(chatId, page = 1) {
   let entries = [];
   try {
     const md = fs.readFileSync(profilePaths().applications, 'utf8');
-    // Extract every viewjob URL + the line above it (assume some metadata)
+    // Extract every job URL + the line above it (assume some metadata).
+    // Accepts both legacy `/viewjob/` and current `/job/` paths.
     const lines = md.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/hiring\.cafe\/viewjob\/[a-z0-9]+/);
+      const m = lines[i].match(/hiring\.cafe\/(?:viewjob|job)\/[a-z0-9]+/);
       if (m) entries.push({ url: 'https://' + m[0], context: lines.slice(Math.max(0, i - 1), i + 2).join(' · ').slice(0, 200) });
     }
   } catch {
@@ -1330,7 +1331,7 @@ async function showSaved(chatId, page = 1) {
     const md = fs.readFileSync(savedPath, 'utf8');
     const lines = md.split('\n');
     for (let i = 0; i < lines.length; i++) {
-      const m = lines[i].match(/hiring\.cafe\/viewjob\/[a-z0-9]+/);
+      const m = lines[i].match(/hiring\.cafe\/(?:viewjob|job)\/[a-z0-9]+/);
       if (m) entries.push({ url: 'https://' + m[0], context: lines[i].slice(0, 200) });
     }
   } catch {
