@@ -219,7 +219,7 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 - ✅ **v1.2** — **AMM as a real app.** Small Go tray-wrapper binary (~3.6 MB stripped) shows up as `AMM.exe` / `AMM.app` / `amm-tray` in Task Manager + Start menu + Apps & Features. Owns a system-tray icon with heartbeat-driven color (green/yellow/red) and a right-click menu (Status/Pause/Scrape/Telegram/Logs/Restart/Quit). Supervises the node bot as a child process with the same 3-strikes/hour respawn throttle as the watchdog.
 - ✅ **v2.0** *(current)* — **Audit remediation.** Fixed `/update` (silently ran a scrape instead — broken since v0.5), `Security+`/`C++` resume terms never scoring, a PowerShell 5.1 encoding bug that broke task registration, setup declaring success without checking the bot started, concurrent-scrape collisions, update failures leaving broken installs (now rolls back), and second-bot-instance 409s looking like a dead bot. Plus visible installer progress, log rotation, and 11 new regression tests.
 - **Next** — Scam-listing detection + salary database. Plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby).
-- **v2.0** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension.
+- **Later** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension.
 
 (Tauri desktop GUI was permanently cut in v1.0 — Telegram-first stays the thesis.)
 
