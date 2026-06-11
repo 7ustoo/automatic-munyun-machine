@@ -138,16 +138,32 @@ async function tgDocument(filePath, caption) {
   return json.result.message_id;
 }
 
-async function tgChunked(message) {
-  const MAX = 3900;
-  const blocks = message.split('\n\n');
+// Split a long message into <= max chunks, preferring blank-line boundaries.
+// v2.0: a single block longer than max is hard-split on line boundaries —
+// previously it was emitted as-is and Telegram rejects messages > 4096 chars,
+// killing the whole batch send. Pure + exported for tests.
+export function chunkMessage(message, max = 3900) {
+  const blocks = String(message ?? '').split('\n\n');
   const chunks = [];
   let cur = '';
-  for (const block of blocks) {
-    if ((cur + '\n\n' + block).length > MAX && cur) { chunks.push(cur); cur = block; }
+  const push = () => { if (cur) { chunks.push(cur); cur = ''; } };
+  for (let block of blocks) {
+    while (block.length > max) {
+      push();
+      let cut = block.lastIndexOf('\n', max);
+      if (cut <= 0) cut = max;
+      chunks.push(block.slice(0, cut));
+      block = block.slice(cut).replace(/^\n/, '');
+    }
+    if ((cur + '\n\n' + block).length > max && cur) { push(); cur = block; }
     else cur = cur ? cur + '\n\n' + block : block;
   }
-  if (cur) chunks.push(cur);
+  push();
+  return chunks;
+}
+
+async function tgChunked(message) {
+  const chunks = chunkMessage(message);
   for (const c of chunks) await tg(c);
   return chunks.length;
 }
@@ -429,7 +445,10 @@ function recordQueryStats(byQuery) {
 }
 
 // ---------- filter ----------
-function escRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+// escRx + termRegex shared with resume-parser via term-match.mjs (v2.0).
+// termRegex fixes the Security+/C++ hole: plain \b after a trailing
+// non-word char never matches, so those terms previously scored zero.
+import { escRx, termRegex } from './term-match.mjs';
 
 // Build filter regexes from config.json
 const DROP_TITLE_PATTERNS = (CFG.filters?.dropTitlePatterns || []).map(p => p.replace(/\s+/g, '\\s+'));
@@ -514,7 +533,7 @@ export function parseSalaryK(text) {
 function tokensAllPresent(jdText, phrase) {
   const tokens = phrase.toLowerCase().split(/\s+/).filter(Boolean);
   if (tokens.length < 2) return false;
-  return tokens.every(t => new RegExp('\\b' + escRx(t) + '\\b', 'i').test(jdText));
+  return tokens.every(t => termRegex(t).test(jdText));
 }
 
 export function scoreJob(job) {
@@ -526,7 +545,7 @@ export function scoreJob(job) {
     if (seen.has(term.toLowerCase())) return;
     const weight = baseWeight * clusterMultiplier(term);
     // Exact phrase / word-boundary match. Term-frequency cap: count up to TF_CAP.
-    const re = new RegExp('\\b' + escRx(term) + '\\b', 'gi');
+    const re = termRegex(term, 'gi');
     const matches = text.match(re);
     if (matches && matches.length > 0) {
       const tf = Math.min(matches.length, TF_CAP);
@@ -914,6 +933,25 @@ function writeBatchTsv(top, directUrls, funnel) {
 // at the top of the file). Skipped on `import`, so test files can pull
 // scoreJob / parseSalaryK without triggering a real scrape.
 if (IS_CLI) (async () => {
+  // Cross-process scrape lock (v2.0). The bot's in-memory runningJob lock
+  // can't see Task Scheduler's independent munyun-daily-batch trigger, so a
+  // 7am scheduled run and a /scrape could previously run concurrently —
+  // duplicate batches, and the loser's seen-jobs read-modify-write clobbers
+  // the winner's. proper-lockfile auto-refreshes the lock's mtime while we
+  // hold it, so the 30s stale ceiling tolerates multi-minute scrapes while
+  // a crashed holder frees the lock within 30s.
+  const lockfile = (await import('proper-lockfile')).default;
+  const SCRAPE_LOCK = path.join(ROOT, 'data', 'scrape.lock');
+  let releaseScrapeLock = null;
+  try {
+    fs.mkdirSync(path.dirname(SCRAPE_LOCK), { recursive: true });
+    if (!fs.existsSync(SCRAPE_LOCK)) fs.writeFileSync(SCRAPE_LOCK, '');
+    releaseScrapeLock = await lockfile.lock(SCRAPE_LOCK, { stale: 30000, retries: 0, realpath: false });
+  } catch {
+    log('Another scrape holds data/scrape.lock — skipping this run.');
+    try { await tg('⏳ Another scrape is already running — skipped this one.'); } catch {}
+    return; // exit 0: an overlapping run isn't a failure
+  }
   try {
     log(`=== daily-batch ${DATE} ===`);
 
@@ -1046,6 +1084,15 @@ if (IS_CLI) (async () => {
     const msg = '❌ daily-batch failed: ' + SCRUB(e.message || e);
     log(msg);
     try { await tg(msg); } catch (tgErr) { log(`(also: tg failed: ${SCRUB(tgErr.message || tgErr)})`); }
+    // Release before the hard exit — finally doesn't run after process.exit.
+    // (If the process dies harder than this, proper-lockfile's 30s stale
+    // ceiling frees the lock anyway.)
+    await releaseScrapeLock().catch(() => {});
     process.exit(1);
+  } finally {
+    // Covers the normal path AND the early returns (empty-CV nudge,
+    // auth-fail). Releasing twice is harmless — the second call throws
+    // "already released" and is swallowed.
+    await releaseScrapeLock().catch(() => {});
   }
 })();

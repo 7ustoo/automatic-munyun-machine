@@ -189,7 +189,7 @@ async function step1Token() {
     // (which contains the token). Match the bot's discipline.
     const scrub = (s) => (s == null ? '' : String(s).split(tok).join('<TOKEN>'));
     try {
-      const r = await fetch(`https://api.telegram.org/bot${tok}/getMe`);
+      const r = await fetch(`https://api.telegram.org/bot${tok}/getMe`, { signal: AbortSignal.timeout(15000) });
       const j = await r.json();
       if (j.ok) {
         console.log(ok(`Connected as @${j.result.username}`));
@@ -222,7 +222,7 @@ async function step2ChatId(token) {
   const TIMEOUT_MS = 120000;
   while (Date.now() - start < TIMEOUT_MS) {
     try {
-      const r = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=10`);
+      const r = await fetch(`https://api.telegram.org/bot${token}/getUpdates?timeout=10`, { signal: AbortSignal.timeout(20000) });
       const j = await r.json();
       if (j.ok && j.result.length) {
         const msg = j.result[0].message;
@@ -255,25 +255,41 @@ async function step3Login() {
   console.log(`${c.dim}Skip the sign-in for the simplest setup.)${c.reset}\n`);
   await ask(arrow('Press Enter to open the browser… '));
 
-  // Spawn login-once.mjs and wait for it to exit (window closed)
+  // Spawn login-once.mjs (via process.execPath — bare 'node' fails on
+  // stripped-PATH installs) and wait for it to exit (window closed).
+  // 10-min ceiling so a hung Chromium can't freeze the wizard forever (v2.0).
+  const LOGIN_TIMEOUT_MS = 10 * 60 * 1000;
   await new Promise((resolve, reject) => {
-    const child = spawn('node', [path.join(__dirname, 'login-once.mjs')], {
+    const child = spawn(process.execPath, [path.join(__dirname, 'login-once.mjs')], {
       cwd: ROOT, stdio: 'inherit'
     });
-    child.on('exit', code => code === 0 ? resolve() : reject(new Error('login-once exited ' + code)));
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      reject(new Error('Browser window was open for 10+ minutes — timed out. Re-run setup, or use /reauth on the bot later.'));
+    }, LOGIN_TIMEOUT_MS);
+    child.on('error', e => { clearTimeout(timer); reject(new Error('Could not open browser: ' + e.message)); });
+    child.on('exit', code => {
+      clearTimeout(timer);
+      code === 0 ? resolve() : reject(new Error('login-once exited ' + code));
+    });
   });
 
   // Verify hiring.cafe is browsable (Cloudflare cleared). Auth is optional;
   // job-action.mjs returns AUTH_FAIL when not signed in but we don't treat
-  // that as a setup failure anymore.
+  // that as a setup failure anymore. 90s ceiling — Playwright + page loads.
   process.stdout.write(arrow('Verifying hiring.cafe browsable… '));
   const r = await new Promise((resolve) => {
-    const child = spawn('node', [path.join(__dirname, 'job-action.mjs'), 'auth'], {
+    const child = spawn(process.execPath, [path.join(__dirname, 'job-action.mjs'), 'auth'], {
       cwd: ROOT, windowsHide: true
     });
     let out = '';
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      resolve({ code: -1, out: out + '\n[verify timed out after 90s]' });
+    }, 90000);
     child.stdout.on('data', d => { out += d.toString(); });
-    child.on('exit', code => resolve({ code, out }));
+    child.on('error', () => { clearTimeout(timer); resolve({ code: -2, out }); });
+    child.on('exit', code => { clearTimeout(timer); resolve({ code, out }); });
   });
   if (r.code === 0) {
     console.log(ok('Hiring.cafe is browsable AND you signed in (full feature set).'));
@@ -471,21 +487,46 @@ async function step10Finalize(token, chatId, resumeSkipped) {
   // `stdio: 'ignore'` drops those refs entirely; `.unref()` is belt-and-
   // suspenders so the loop exits even if the child is still spawning.
   process.stdout.write(arrow('Starting bot… '));
+  const BOT_LOG = path.join(ROOT, 'data', 'telegram-bot.log');
+  const logSizeBefore = (() => { try { return fs.statSync(BOT_LOG).size; } catch { return 0; } })();
   await startBotForPlatform();
-  await new Promise(r2 => setTimeout(r2, 3000));
-  console.log(ok('Bot started.'));
 
-  // Final Telegram ping. Tailor the message based on whether resume was uploaded.
+  // VERIFY the bot actually came up instead of declaring victory blind (v2.0)
+  // — "setup complete!" with a dead bot was the #1 silent failure mode. The
+  // bot's first act is appending a fresh line to its log; poll for growth
+  // for up to 20s. (Log-based, so it works identically on all 3 platforms.)
+  let botUp = false;
+  const deadline = Date.now() + 20000;
+  while (Date.now() < deadline) {
+    await new Promise(r2 => setTimeout(r2, 1500));
+    try {
+      if (fs.statSync(BOT_LOG).size > logSizeBefore) { botUp = true; break; }
+    } catch { /* log not created yet — keep waiting */ }
+  }
+  if (botUp) {
+    console.log(ok('Bot is running (confirmed in data/telegram-bot.log).'));
+  } else {
+    console.log(fail('Bot did not start within 20s.'));
+    console.log(`${c.yellow}!${c.reset} Start it manually with: ${c.bold}npm run bot${c.reset} (foreground, shows errors)`);
+    console.log(`${c.dim}  Then check data/telegram-bot.log for details.${c.reset}`);
+  }
+
+  // Final Telegram ping. Tailor the message based on whether resume was
+  // uploaded and whether the bot verifiably started.
   const resumeNudge = resumeSkipped
     ? "\n\n📄 <b>Don't forget your resume.</b> Send <code>/resume</code> to upload it — match quality is poor without one."
     : '';
+  const botWarning = botUp
+    ? ''
+    : '\n\n⚠️ <b>The background bot did not start.</b> On your computer, run <code>npm run bot</code> in the install folder to see why — commands here won\'t answer until it\'s running.';
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       chat_id: chatId,
-      text: `🎉 <b>Automatic Munyun Machine — setup complete!</b>\n\nTry <code>/scrape</code> to get your first batch of 100 ranked jobs.${resumeNudge}`,
+      text: `🎉 <b>Automatic Munyun Machine — setup complete!</b>\n\nTry <code>/scrape</code> to get your first batch of 100 ranked jobs.${resumeNudge}${botWarning}`,
       parse_mode: 'HTML'
-    })
+    }),
+    signal: AbortSignal.timeout(15000)
   }).catch(() => {});
 }
 

@@ -8,11 +8,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+---
+
+## [2.0.0] — 2026-06-11
+
+> **Audit remediation.** A full repo audit found four classes of silent failure that survived every release since v0.5. All fixed, with regression tests pinning each one down. Also ships the hiring.cafe `/viewjob/` → `/job/` path migration that was sitting in Unreleased.
+
 ### Fixed — Hiring.cafe path migration (`/viewjob/` → `/job/`)
 
 - **`scripts/daily-batch.mjs`, `scripts/login-once.mjs`** — hiring.cafe migrated their job-page path from `/viewjob/<id>` to `/job/<id>`. Every scrape since the upstream change failed the browsability gate (`a[href^="/viewjob/"]` matched zero cards) and emitted the misleading "Hiring.cafe session expired. Run npm run login" message — running `login-once` couldn't fix it because the warmup poller used the same dead selector. Updated the three scrape-side selectors and the warmup poller to `/job/`.
 - **`scripts/telegram-bot.mjs`** — the bot's id → URL builder (`'https://hiring.cafe/viewjob/' + id`) now emits `/job/`. The `/history` and `/saved` regex parsers accept both the legacy `/viewjob/` and current `/job/` paths so a pre-v1.3 `applications.md` / `saved.md` still dedupes and renders.
 - **`scripts/daily-batch.mjs`** — `loadAppliedHrefs()` regex widened to `(?:viewjob|job)`, canonicalizes to `/job/` on the way out so dedup matches regardless of which path the URL was originally stored under.
+
+### Fixed — Audit remediation
+
+- **`/update` actually works now.** Since v0.5, typing `/update` silently ran a *scrape* instead of the update flow — `update` was still listed as a scrape alias from the pre-v0.5 days, and the scrape dispatcher matches first. The alias is gone; `/update`, `/update skip`, `/update check`, and `/update notes` all reach the real handler for the first time in five releases.
+- **Scoring: CV terms ending in `+` never matched.** `Security+`, `C++`, `A+` and friends could never score — the trailing `\b` word boundary after a non-word character matches nothing. Jobs mentioning `Security+` got zero cert credit, and `resume-parser` never extracted those terms from CVs either. New shared `scripts/term-match.mjs#termRegex()` anchors word boundaries only against word-character edges; both the scorer (exact + phrase-fallback paths) and the resume parser use it. Covered by `scripts/__tests__/term-match.test.mjs`.
+- **`setup-tasks.ps1` failed to parse under Windows PowerShell 5.1.** The em-dash in a v1.2 status string, read as ANSI (the file had no BOM), decodes to a smart-quote that *terminates the string* — the whole script failed to parse, so the wizard's task-registration step broke on stock Windows. String is ASCII now, and `setup-tasks.ps1`, `uninstall.ps1`, and `install.ps1` all carry a UTF-8 BOM so PS 5.1 can never mis-decode them again.
+- **Setup wizard verifies the bot actually started.** It used to fire the scheduler, wait 3 seconds blind, and declare "🎉 setup complete!" — a dead bot behind a success banner was the #1 silent failure mode. The wizard now watches `data/telegram-bot.log` for fresh output for up to 20s; on failure it prints recovery steps and adds a warning to the Telegram ping.
+- **409 Conflict no longer looks like a dead bot.** An `{ok:false}` poll response (e.g. a second bot instance fighting over the token) used to be silently skipped — the loop re-polled at full speed forever. Non-ok responses now back off like network errors, and a 409 logs the cause + pings the chat once: "Another copy of the bot is running."
+- **`/update` rolls back on failure.** If `npm install` fails (or the freshly installed deps can't actually be imported — a fresh-process import probe gates the restart), the repo is `git reset --hard` back to the pre-pull commit and the old bot keeps running. Previously the bot exited into new code with missing deps and crash-looped.
+- **Concurrent scrapes can no longer trample each other.** The 7am scheduled task and a `/scrape` from Telegram run in separate processes; both could previously run at once — duplicate batches, and the loser's seen-jobs read-modify-write clobbering the winner's. `daily-batch.mjs` now takes `data/scrape.lock` (proper-lockfile; auto-refreshed mtime so the 30s stale ceiling tolerates multi-minute scrapes), and the loser skips with a friendly Telegram note.
+- **Stripped-PATH strike three: bare `node` and `git` spawns.** The wizard, `/save`/`/applied`, `/reauth` (POSIX), `/scrape` (POSIX), and `/uninstall` all spawned `node` by name; `/update` spawned `git` by name. All self-spawns now use `process.execPath` (zero PATH dependency); `/update` resolves git via the new `os-paths.mjs#gitCmd()` (PATH probe → known install locations → clear error). The `.cmd` launchers gained a `%ProgramFiles%\nodejs` fallback. Also fixed: `os-paths.mjs#npmCmd()` called `require()` inside an ESM module — the APPDATA guess always threw (silently) and never worked; it now also prefers the `npm.cmd` sitting next to `node.exe`.
+- **Wizard hang points removed.** Browser warmup (10 min), browsable-verify (90s), file-picker dialog (5 min — all three platform backends), and the token/chat-detection/final-ping fetches (15–20s) all have timeouts; any of them could previously freeze setup forever with no feedback.
+- **Oversized Telegram messages can't kill a batch send.** A single block with no blank lines longer than ~3900 chars used to be sent as-is — Telegram rejects > 4096 and the whole batch send died. `chunkMessage()` (now exported + tested) hard-splits oversized blocks on line boundaries.
+- **Telegram client hardening.** Non-JSON poll responses (HTML 502s from Telegram's CDN) now produce a named error instead of `Unexpected token <`; the bot token is scrubbed centrally inside `log()` so no call site can leak it; `data/telegram-bot.log` rotates at 5 MB (previous generation kept as `.1`).
+- **Installer hangs de-mystified.** The ~150 MB Chromium download and `npm install` no longer run silenced — their progress output shows (an invisible multi-minute download is indistinguishable from a frozen installer). winget installs pin `--source winget` (the msstore source can throw an interactive prompt that hangs piped `iex` sessions) and check exit codes with clear manual-install fallbacks.
+
+### Added
+
+- `scripts/term-match.mjs` — shared term-matching regex builder (see Fixed above).
+- `scripts/check-syntax.mjs` + `npm run check` — `node --check` parse gate over every script + test; wired into CI ahead of the test step.
+- 11 new regression tests (`term-match.test.mjs`, `chunk-message.test.mjs`) — suite now at 76.
+- `process.title = 'munyun-bot'` so the node child is identifiable in process lists.
+
+### Changed
+
+- CI/release workflows: `actions/checkout` and `actions/setup-node` bumped v4 → v5 (GitHub retires the Node 20 action runtime on 2026-06-16).
+- `/update`'s npm install budget raised from 2 to 3 minutes.
 
 ---
 

@@ -72,21 +72,23 @@ export const OSASCRIPT = _osascript;
 export const ZENITY = _zenity;
 export const KDIALOG = _kdialog;
 
-// ---------- npm / node binaries ----------
+// ---------- npm / node / git binaries ----------
 // On Windows, npm ships as npm.cmd (not npm.exe) and its location depends
 // on the install method (winget, manual download, fnm, etc.). The bot
 // historically used `process.platform === 'win32' ? 'npm.cmd' : 'npm'`
 // which fails on stripped-PATH; resolve absolutely if possible.
 export function npmCmd() {
   if (IS_WIN32) {
-    // Try APPDATA first (manual nodejs install adds npm.cmd there), then PATH.
+    // npm.cmd ships next to node.exe for winget/manual installs — and
+    // process.execPath needs no PATH at all. (v2.0: this branch previously
+    // used `require()` inside an ESM module, which threw and was silently
+    // swallowed by the try/catch — the guess never worked.)
+    const besideNode = path.join(path.dirname(process.execPath), 'npm.cmd');
+    if (fs.existsSync(besideNode)) return besideNode;
     const appdata = process.env.APPDATA;
     if (appdata) {
       const guess = path.join(appdata, 'npm', 'npm.cmd');
-      try {
-        const fs = require('node:fs');
-        if (fs.existsSync(guess)) return guess;
-      } catch {}
+      if (fs.existsSync(guess)) return guess;
     }
     return whichSync('npm.cmd') || whichSync('npm') || 'npm.cmd';
   }
@@ -95,6 +97,24 @@ export function npmCmd() {
 
 export function nodeCmd() {
   return whichSync(IS_WIN32 ? 'node.exe' : 'node') || 'node';
+}
+
+// Resolve git without relying on PATH (v2.0). The /update flow runs git on
+// exactly the machines most likely to have a stripped PATH. Returns null
+// when git genuinely isn't installed — callers must handle that.
+let _gitCache;
+export function gitCmd() {
+  if (_gitCache !== undefined) return _gitCache;
+  const fromPath = whichSync(IS_WIN32 ? 'git.exe' : 'git') || whichSync('git');
+  if (fromPath && fs.existsSync(fromPath)) { _gitCache = fromPath; return _gitCache; }
+  const candidates = IS_WIN32
+    ? [
+        path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Git', 'cmd', 'git.exe'),
+        path.join(process.env.LOCALAPPDATA || '', 'Programs', 'Git', 'cmd', 'git.exe')
+      ]
+    : ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git'];
+  _gitCache = candidates.find(p => p && fs.existsSync(p)) || null;
+  return _gitCache;
 }
 
 // ---------- Scheduler abstractions ----------

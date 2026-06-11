@@ -23,7 +23,7 @@ import { paths } from './profile-store.mjs';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
 
-function escRx(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+import { termRegex } from './term-match.mjs';
 
 function findHits(text, dictionary) {
   const seen = new Set();
@@ -31,7 +31,10 @@ function findHits(text, dictionary) {
   for (const term of dictionary) {
     const key = term.toLowerCase();
     if (seen.has(key)) continue;
-    if (new RegExp('\\b' + escRx(term) + '\\b', 'i').test(text)) {
+    // termRegex (term-match.mjs) — plain \b…\b silently never matched
+    // terms ending in non-word chars (Security+, C++), so those certs
+    // were never extracted from CVs.
+    if (termRegex(term).test(text)) {
       hits.push(term);
       seen.add(key);
     }

@@ -1,4 +1,4 @@
-# Automatic Munyun Machine — uninstall wrapper.
+﻿# Automatic Munyun Machine — uninstall wrapper.
 #
 # Symmetric to the install one-liner. Two modes:
 #   pause  — stop the bot + unregister scheduled tasks; preserves data
