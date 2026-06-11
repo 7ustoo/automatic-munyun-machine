@@ -37,15 +37,26 @@ on error number -128
   return ""
 end try`;
 
+// 5-min ceiling (v2.0): a wedged dialog (broken GUI session, hung backend)
+// used to freeze the setup wizard forever. Long enough that nobody browsing
+// for their resume gets cut off; finite so the wizard can fall back to
+// typed-path input.
+const PICKER_TIMEOUT_MS = 5 * 60 * 1000;
+
 function runChild(cmd, args) {
   return new Promise((resolve, reject) => {
     const child = spawn(cmd, args, { windowsHide: true });
     let out = '';
     let err = '';
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      reject(new Error('File picker timed out after 5 minutes'));
+    }, PICKER_TIMEOUT_MS);
     child.stdout.on('data', d => { out += d.toString(); });
     child.stderr.on('data', d => { err += d.toString(); });
-    child.on('error', e => reject(new Error('File picker unavailable: ' + e.message)));
+    child.on('error', e => { clearTimeout(timer); reject(new Error('File picker unavailable: ' + e.message)); });
     child.on('exit', code => {
+      clearTimeout(timer);
       const trimmed = out.trim();
       if (code === 0) resolve(trimmed || null);
       else if (code === 2 || (cmd.endsWith('osascript') && trimmed === '')) resolve(null);

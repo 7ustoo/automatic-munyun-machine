@@ -1,4 +1,4 @@
-# Automatic Munyun Machine - Windows Task Scheduler setup.
+﻿# Automatic Munyun Machine - Windows Task Scheduler setup.
 # Idempotent: re-running re-registers both tasks.
 #
 # Run via:
@@ -22,8 +22,11 @@ if (Test-Path $WRAPPER_EXE) {
   Write-Host "[v1.2] Using tray-wrapper binary: $BOT_LAUNCHER"
 } else {
   $BOT_LAUNCHER = $START_BOT_CMD
-  Write-Host "[v1.2] Wrapper not built yet — falling back to start-bot.cmd."
-  Write-Host "       Build it later with: cd wrapper && make build"
+  # ASCII only in strings (v2.0): an em-dash here, read as ANSI by PS 5.1,
+  # decodes to a smart-quote that TERMINATES the string — the whole script
+  # failed to parse and task registration silently broke.
+  Write-Host "[v1.2] Wrapper not built yet - falling back to start-bot.cmd."
+  Write-Host "       Build it later with: cd wrapper, then: make build"
 }
 
 # Read time + days from config.json if present.

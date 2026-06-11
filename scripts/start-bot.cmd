@@ -1,11 +1,20 @@
 @echo off
 REM Launches telegram-bot.mjs detached/minimized.
-REM Invoked by Task Scheduler "munyun-bot" at user logon.
+REM Invoked by Task Scheduler "munyun-bot" at user logon (fallback path when
+REM the v1.2 tray wrapper binary hasn't been built — see setup-tasks.ps1).
 REM
 REM To run manually for debugging: just double-click; close window to stop.
 
 set ROOT=%~dp0..
 cd /d "%ROOT%"
 
+REM Resolve node.exe WITHOUT relying on PATH (v2.0) — stripped-PATH installs
+REM are a recurring bug class here (v0.4.1, v0.5). Order:
+REM   1. the standard Node.js install location
+REM   2. bare "node" via PATH (last resort, pre-v2.0 behavior)
+set "NODE="
+if exist "%ProgramFiles%\nodejs\node.exe" set "NODE=%ProgramFiles%\nodejs\node.exe"
+if not defined NODE set "NODE=node"
+
 REM Use start /min to detach so the bot keeps running after the launcher exits.
-start "munyun bot" /min cmd /c "node scripts\telegram-bot.mjs"
+start "munyun bot" /min "%NODE%" scripts\telegram-bot.mjs

@@ -60,7 +60,7 @@ const VERSION = currentVersion();
 import {
   IS_WIN32, IS_DARWIN, IS_LINUX, PLATFORM,
   POWERSHELL, CMD_EXE, SCHTASKS,
-  npmCmd, nodeCmd,
+  npmCmd, gitCmd,
   runScheduledTask, disableScheduledTask, enableScheduledTask, scheduledTaskExists,
   LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
 } from './os-paths.mjs';
@@ -88,12 +88,34 @@ if (!TG_TOKEN || !ALLOWED_CHAT || ALLOWED_CHAT === 'undefined') {
   process.exit(1);
 }
 
+// Identifiable in Task Manager / window title of the minimized console.
+process.title = 'munyun-bot';
+
+// Defensive scrubber: if TG_TOKEN is somehow falsy (env reload, future
+// refactor), `String.replace(undefined, …)` would coerce to literal
+// "undefined" and replace stray substrings. Explicitly check truthiness.
+// Defined ABOVE log() because log() scrubs centrally (v2.0).
+const SCRUB = (s) => {
+  if (s == null) return '';
+  let str = String(s);
+  if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
+  return str;
+};
+
 // ---------- log ----------
 const LOG = path.join(ROOT, 'data', 'telegram-bot.log');
+const LOG_MAX_BYTES = 5 * 1024 * 1024; // rotate at 5 MB so the log can't grow unbounded
 fs.mkdirSync(path.dirname(LOG), { recursive: true });
+try {
+  if (fs.existsSync(LOG) && fs.statSync(LOG).size > LOG_MAX_BYTES) {
+    fs.rmSync(LOG + '.1', { force: true });
+    fs.renameSync(LOG, LOG + '.1');
+  }
+} catch { /* rotation is best-effort */ }
 function log(line) {
   const stamp = new Date().toISOString();
-  const msg = `[${stamp}] ${line}`;
+  // Central token scrub — no individual call site can leak TG_TOKEN to disk.
+  const msg = `[${stamp}] ${SCRUB(line)}`;
   console.log(msg);
   try { fs.appendFileSync(LOG, msg + '\n'); } catch { /* never let log writes crash the bot */ }
 }
@@ -103,17 +125,7 @@ function log(line) {
 // suspected cause was an unhandled rejection or thrown error inside the
 // poll-loop's catch block (e.g., log() failing on a locked file). Catch
 // the kitchen sink so the bot never silently disappears. Token is scrubbed
-// from log lines defensively in case it leaks via a stack trace.
-//
-// Defensive scrubber: if TG_TOKEN is somehow falsy (env reload, future
-// refactor), `String.replace(undefined, …)` would coerce to literal
-// "undefined" and replace stray substrings. Explicitly check truthiness.
-const SCRUB = (s) => {
-  if (s == null) return '';
-  let str = String(s);
-  if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
-  return str;
-};
+// from log lines centrally inside log() (SCRUB defined near the top).
 process.on('unhandledRejection', (e) => {
   const raw = e instanceof Error ? `${e.message}\n${e.stack || ''}` : String(e);
   log('UNHANDLED REJECTION: ' + SCRUB(raw));
@@ -157,7 +169,14 @@ async function tgGet(method, params = {}) {
   const url = new URL(`https://api.telegram.org/bot${TG_TOKEN}/${method}`);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, String(v));
   const r = await fetch(url, { signal: AbortSignal.timeout(40000) });
-  return r.json();
+  // Non-JSON guard: a 502 from Telegram's CDN returns an HTML error page;
+  // r.json() throwing "Unexpected token <" used to surface as an
+  // inscrutable poll error. Name the real condition instead.
+  try {
+    return await r.json();
+  } catch {
+    throw new Error(`Telegram ${method} returned non-JSON (HTTP ${r.status})`);
+  }
 }
 async function tgPost(method, body) {
   const r = await fetch(`https://api.telegram.org/bot${TG_TOKEN}/${method}`, {
@@ -283,7 +302,8 @@ function runClaudeBatch(chatId) {
     });
   } else {
     log('Starting daily batch via node scripts/daily-batch.mjs');
-    child = spawn(nodeCmd(), [path.join(ROOT, 'scripts', 'daily-batch.mjs')], {
+    // process.execPath — the node running us — needs no PATH at all (v2.0).
+    child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'daily-batch.mjs')], {
       cwd: ROOT, detached: false
     });
   }
@@ -433,7 +453,8 @@ function loadLatestBatch() {
 async function spawnAction(action, jobUrl) {
   const args = jobUrl ? [path.join(ROOT, 'scripts', 'job-action.mjs'), action, jobUrl]
                        : [path.join(ROOT, 'scripts', 'job-action.mjs'), action];
-  const r = await spawnWithTimeout('node', args, 60000);
+  // process.execPath, not bare 'node' — survives stripped-PATH installs (v2.0).
+  const r = await spawnWithTimeout(process.execPath, args, 60000);
   return { code: r.code, output: (r.output || '').trim(), timeout: r.timeout };
 }
 
@@ -731,7 +752,10 @@ async function handleMessage(msg) {
     catch (e) { return reply(chatId, '❌ Weather fetch failed: ' + escHtml(e.message)); }
   }
   // /scrape (and aliases /daily, gm, morning, update) — run a fresh batch
-  if (/^\/?(scrape|daily|gm|morning|update)\b/.test(text) && !/^\/?jobs\b/.test(text)) {
+  // NOTE: 'update' must NOT be an alias here — it shadowed the real /update
+  // command (dispatch is first-match), which made self-update unreachable
+  // from v0.5 until v2.0: typing /update silently ran a scrape instead.
+  if (/^\/?(scrape|daily|gm|morning)\b/.test(text) && !/^\/?jobs\b/.test(text)) {
     return runClaudeBatch(chatId);
   }
 
@@ -773,7 +797,7 @@ async function handleMessage(msg) {
         cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
       }).unref();
     } else {
-      spawn(nodeCmd(), [path.join(ROOT, 'scripts', 'login-once.mjs')], {
+      spawn(process.execPath, [path.join(ROOT, 'scripts', 'login-once.mjs')], {
         cwd: ROOT, detached: true, stdio: 'ignore'
       }).unref();
     }
@@ -1129,10 +1153,25 @@ async function handleMessage(msg) {
     if (!info) return reply(chatId, '⚠️ Could not reach GitHub. Try again later.');
     if (!info.hasUpdate) return reply(chatId, `✅ You're already on the latest: v${info.current}. Nothing to update.`);
 
+    // Resolve git WITHOUT relying on PATH (v2.0) — stripped-PATH machines
+    // are exactly the ones that need auto-update most.
+    const GIT = gitCmd();
+    if (!GIT) {
+      return reply(chatId, `❌ Could not find git on this machine. Update manually:\n<code>cd ${escHtml(INSTALL_DIR_HINT)}; git pull origin main; npm install</code>`);
+    }
+
     await reply(chatId, `🔄 Updating from v${info.current} to v${info.latest}…\n<i>Pulling latest from GitHub.</i>`);
 
-    // git pull origin main (spawnWithTimeout's cwd already defaults to ROOT)
-    const pullR = await spawnWithTimeout('git', ['pull', 'origin', 'main'], 60000);
+    // Remember where we are so a failed update can roll back cleanly (v2.0).
+    const headR = await spawnWithTimeout(GIT, ['rev-parse', 'HEAD'], 15000);
+    const preUpdateCommit = headR.code === 0 ? (headR.output || '').trim() : null;
+    const rollback = async () => {
+      if (!preUpdateCommit) return false;
+      const r = await spawnWithTimeout(GIT, ['reset', '--hard', preUpdateCommit], 30000);
+      return r.code === 0;
+    };
+
+    const pullR = await spawnWithTimeout(GIT, ['pull', 'origin', 'main'], 60000);
     if (pullR.timeout) return reply(chatId, '❌ git pull timed out after 60s. Cancelling update.');
     if (pullR.code !== 0) {
       return reply(chatId, `❌ git pull failed (exit ${pullR.code}):\n<pre>${escHtml((pullR.output || '').slice(0, 800))}</pre>\n\n<i>Likely cause: uncommitted local changes. Update manually:\n<code>cd ${escHtml(INSTALL_DIR_HINT)}; git stash; git pull origin main; npm install</code></i>`);
@@ -1141,10 +1180,32 @@ async function handleMessage(msg) {
     await reply(chatId, '📦 <i>Installing dependencies…</i>');
     // Resolve npm absolutely via os-paths (handles Win32 stripped-PATH +
     // Mac/Linux PATH lookup uniformly).
-    const npmR = await spawnWithTimeout(npmCmd(), ['install', '--no-audit', '--no-fund', '--loglevel=error'], 120000);
-    if (npmR.timeout) return reply(chatId, '❌ npm install timed out after 2min. Bot left in old state — restart manually.');
-    if (npmR.code !== 0) {
-      return reply(chatId, `❌ npm install failed (exit ${npmR.code}):\n<pre>${escHtml((npmR.output || '').slice(0, 800))}</pre>`);
+    const npmR = await spawnWithTimeout(npmCmd(), ['install', '--no-audit', '--no-fund', '--loglevel=error'], 180000);
+    if (npmR.timeout || npmR.code !== 0) {
+      // v2.0: roll back instead of leaving new code with broken deps on
+      // disk — the restarted bot would crash-loop on a missing import.
+      const rolledBack = await rollback();
+      const why = npmR.timeout ? 'npm install timed out after 3min' : `npm install failed (exit ${npmR.code})`;
+      return reply(chatId, [
+        `❌ ${why}:`,
+        `<pre>${escHtml((npmR.output || '').slice(0, 600))}</pre>`,
+        rolledBack
+          ? `↩️ Rolled back to v${info.current} — the bot keeps running on the old version. Try /update again later.`
+          : `⚠️ Could not roll back automatically. Run <code>git reset --hard</code> + <code>npm install</code> manually in ${escHtml(INSTALL_DIR_HINT)}.`
+      ].join('\n'));
+    }
+
+    // Sanity check (v2.0): can the updated install actually load its deps?
+    // Guards against "npm exited 0 but node_modules is broken" — a fresh
+    // process import is the cheapest truthful probe.
+    const depCheck = await spawnWithTimeout(process.execPath, ['-e',
+      "Promise.all([import('playwright-core'),import('mammoth'),import('pdf-parse'),import('proper-lockfile')]).then(()=>process.exit(0),()=>process.exit(1))"
+    ], 30000);
+    if (depCheck.code !== 0) {
+      const rolledBack = await rollback();
+      return reply(chatId, rolledBack
+        ? `❌ Updated dependencies failed to load — rolled back to v${info.current}. The bot keeps running on the old version.`
+        : '❌ Updated dependencies failed to load and rollback also failed. Run <code>git reset --hard</code> + <code>npm install</code> manually.');
     }
 
     // Mark for the post-restart confirmation message
@@ -1418,9 +1479,9 @@ async function handleCallback(cq) {
       ? `🛑 <b>Pausing.</b>\nBot exiting; scheduled tasks unregistering. Preserved: data/, config.json, .env. ${escHtml(RESTART_HINT_DOC)}.`
       : `☠️ <b>Wiping everything.</b>\nBot exiting. data/, config.json, .env, browser session will be deleted by the uninstall process.\n\n<i>Install dir at <code>${escHtml(ROOT)}</code> remains — delete by hand if you want the code gone.</i>`;
     await reply(chatId, finalMsg);
-    // Spawn uninstall.mjs detached so it survives our exit
-    const uninstallScript = path.join(ROOT, 'scripts', 'uninstall.mjs');
-    const child = spawn('node', [uninstallScript, `--mode=${mode}`], {
+    // Spawn uninstall.mjs detached so it survives our exit.
+    // process.execPath, not bare 'node' — survives stripped-PATH installs (v2.0).
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'uninstall.mjs'), `--mode=${mode}`], {
       detached: true, stdio: 'ignore', windowsHide: true, cwd: ROOT
     });
     child.unref();
@@ -1627,10 +1688,29 @@ writeHeartbeat({ lastPollOk: null, consecutiveFailures: 0 });
 const BACKOFF_MS = [5000, 10000, 20000, 30000];
 let consecutiveFailures = 0;
 let outageStartedAt = null;
+let conflictNotified = false;
 
 while (true) {
   try {
     const j = await tgGet('getUpdates', { offset, timeout: 30, allowed_updates: JSON.stringify(['message', 'callback_query']) });
+
+    // Telegram answered but refused the poll. Without this check an
+    // {ok:false} response (e.g. 409 Conflict from a second bot instance)
+    // used to fall through the `if (j.ok …)` below and the loop re-polled
+    // at full speed forever — burning CPU and looking exactly like a dead
+    // bot. Treat it as a failure so the backoff applies.
+    if (!j.ok) {
+      if (j.error_code === 409) {
+        log('poll 409 Conflict: another process is polling this bot token (second bot instance?)');
+        // Notify once per process lifetime — with two pollers alternating,
+        // resetting this on a successful poll would spam the chat.
+        if (!conflictNotified) {
+          conflictNotified = true;
+          reply(ALLOWED_CHAT, '⚠️ <b>Another copy of the bot is running.</b>\nTwo pollers are fighting over this token — kill the extra process or restart the machine. I\'ll keep retrying.').catch(() => {});
+        }
+      }
+      throw new Error(`getUpdates rejected: ${j.error_code} ${j.description || ''}`.trim());
+    }
 
     // Heartbeat: tell the watchdog we're alive and Telegram-reachable.
     writeHeartbeat({ lastPollOk: true, consecutiveFailures: 0 });

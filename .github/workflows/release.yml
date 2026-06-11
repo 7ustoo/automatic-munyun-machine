@@ -10,14 +10,14 @@ on:
         required: false
 
 jobs:
-  # Windows: build wrapper.exe (Go) → Inno Setup .exe → (optionally) sign.
+  # Windows: build wrapper.exe (Go) â†’ Inno Setup .exe â†’ (optionally) sign.
   build-windows:
     name: Build Windows installer
     runs-on: windows-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - uses: actions/setup-go@v5
         with: { go-version: '1.21' }
@@ -79,14 +79,14 @@ jobs:
           name: amm-windows
           path: installer/dist/*.exe
 
-  # macOS: build wrapper (arm64 + amd64) → .dmg → notarize.
+  # macOS: build wrapper (arm64 + amd64) â†’ .dmg â†’ notarize.
   build-mac:
     name: Build macOS .dmg
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - uses: actions/setup-go@v5
         with: { go-version: '1.21' }
@@ -116,14 +116,14 @@ jobs:
           name: amm-mac
           path: dist/*.dmg
 
-  # Linux: build wrapper (amm-tray) → .deb + .AppImage → GPG-sign both.
+  # Linux: build wrapper (amm-tray) â†’ .deb + .AppImage â†’ GPG-sign both.
   build-linux:
     name: Build Linux .deb + .AppImage
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - uses: actions/setup-go@v5
         with: { go-version: '1.21' }
@@ -133,7 +133,7 @@ jobs:
       - name: Install build prereqs (incl. GTK headers for systray CGO)
         run: |
           sudo apt-get update -qq
-          # dpkg-sig was dropped from Ubuntu 24.04's default repos —
+          # dpkg-sig was dropped from Ubuntu 24.04's default repos â€”
           # scripts/build/sign-linux.sh probes for it at runtime and skips
           # .deb signing gracefully when absent. The signing path only
           # runs if GPG_PRIVATE_KEY secret is set anyway.
@@ -184,7 +184,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artifacts
         uses: actions/download-artifact@v4
@@ -195,7 +195,7 @@ jobs:
         run: |
           mkdir -p release
 
-          # Full installers are the only Windows/Mac/Linux artifacts —
+          # Full installers are the only Windows/Mac/Linux artifacts â€”
           # one-click setup is the only path we advertise. (The bare Go
           # wrapper is intentionally NOT shipped as a separate Release
           # asset; it'd be too easy to download by mistake.)
@@ -221,7 +221,7 @@ jobs:
 
             | Platform | Asset | How to install |
             |---|---|---|
-            | Windows | `amm-setup-v*.exe` | Double-click, accept the SmartScreen prompt, follow the wizard. Sets up Telegram bot, CV parsing, scheduled batch — fully automatic. |
+            | Windows | `amm-setup-v*.exe` | Double-click, accept the SmartScreen prompt, follow the wizard. Sets up Telegram bot, CV parsing, scheduled batch â€” fully automatic. |
             | macOS | `amm-v*.dmg` | Open the DMG, drag the AMM folder into your Applications. Double-click "Run Setup.command" on first launch. |
             | Linux (Debian/Ubuntu) | `amm_*_all.deb` | `sudo dpkg -i amm_*_all.deb && amm setup` |
             | Linux (any distro) | `amm-v*-x86_64.AppImage` | `chmod +x amm-v*.AppImage && ./amm-v*.AppImage setup` |
