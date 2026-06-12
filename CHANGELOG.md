@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.2] — 2026-06-12
+
+### Changed
+
+- **Custom AMM logo on everything user-facing.** The full money-printer logo (`wrapper/logo.png`) is now the icon for the setup exe, `AMM.exe` (embedded via go-winres), Start-menu/desktop shortcuts, and Add/Remove Programs. New `scripts/build/make-ico.mjs` converts any PNG to a multi-size Windows `.ico` (256→16 px) using a headless run of the system browser — zero new dependencies. The color-coded tray icons (`icon-{green,yellow,red,gray}.ico`) are unchanged: those signal live bot status.
+
+---
+
 ## [2.0.1] — 2026-06-12
 
 > **Fast installs + branding.** The Windows installer's multi-minute silent "Installing dependencies" step is gone: AMM now drives your already-installed Chrome or Edge instead of downloading its own 150 MB Chromium, and `node_modules` ships inside the installer. Plus the setup exe and shortcuts finally carry the AMM icon.
