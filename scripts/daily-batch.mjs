@@ -26,6 +26,7 @@ import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson } from './io-helpers.mjs';
+import { resolveBrowser } from './browser-launcher.mjs';
 
 // v1.0 E5: ensure config + data layout are profile-aware before we read anything.
 migrateIfNeeded();
@@ -237,7 +238,13 @@ const EXTRACT_FN = `(() => {
 async function launchBrowser() {
   const profileDir = path.join(ROOT, 'data', 'browser-profile');
   fs.mkdirSync(profileDir, { recursive: true });
+  // v2.0.1: prefer the user's installed Chrome/Edge over Playwright's
+  // bundled Chromium (kills the ~150 MB install-time download). Still
+  // AMM's own profile dir — the user's browsing is untouched.
+  const browser = await resolveBrowser();
+  log(`Browser: ${browser.label}`);
   return chromium.launchPersistentContext(profileDir, {
+    ...browser.launchOptions,
     headless: false,
     timeout: 30000,
     args: [

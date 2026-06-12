@@ -57,6 +57,12 @@
     "_percentBands": "score 30+ → 90-100%; 20-29 → 75-89%; 10-19 → 50-74%; 5-9 → 30-49%; 0-4 → 0-29%"
   },
 
+  "browser": {
+    "channel": "auto",
+    "executablePath": "",
+    "_comment": "v2.0.1: which browser the scraper drives. auto (default) = installed Google Chrome, then Microsoft Edge, then Playwright's downloaded Chromium. Force with channel: chrome | msedge, or point executablePath at any Chromium-family binary (Brave, distro chromium). AMM always uses its own profile in data/browser-profile - your personal browsing is never touched."
+  },
+
   "weather": {
     "city": "Miami",
     "lat": 25.7617,

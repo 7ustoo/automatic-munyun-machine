@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.1] — 2026-06-12
+
+> **Fast installs + branding.** The Windows installer's multi-minute silent "Installing dependencies" step is gone: AMM now drives your already-installed Chrome or Edge instead of downloading its own 150 MB Chromium, and `node_modules` ships inside the installer. Plus the setup exe and shortcuts finally carry the AMM icon.
+
+### Changed
+
+- **AMM uses your installed browser.** New `scripts/browser-launcher.mjs` resolves a browser at launch: installed Google Chrome → Microsoft Edge (preinstalled on every Windows 10/11 machine) → Playwright's downloaded Chromium → a clear error with instructions. All three Playwright launch sites (`daily-batch.mjs`, `job-action.mjs`, `login-once.mjs`) go through it. AMM still uses its **own** profile in `data/browser-profile` — only the browser *binary* is borrowed; your personal tabs, cookies, and sessions are untouched, and it runs fine while your own Chrome is open. Override per profile in `config.json`: `browser.channel` (`auto`/`chrome`/`msedge`) or `browser.executablePath` (Brave, distro chromium, portable installs). 12 unit tests.
+- **Installer ships `node_modules`.** All runtime deps are pure JS, so CI's `npm ci` output is packaged into the installer instead of re-downloaded by every user. The `npm install` post-install step is deleted outright.
+- **Chromium download is now conditional + visible.** Only runs when no Chrome/Edge exists (effectively never on Windows), and without `runhidden` so Playwright's real progress bar shows instead of a static "this may take a few minutes" message. Same conditional logic added to the git-based `install.ps1`.
+- **Icons.** The setup exe gets the AMM icon (`SetupIconFile`), Start-menu/desktop shortcuts and Add/Remove Programs point at `wrapper/icon-green.ico`, and `make build-win` now embeds the icon into `AMM.exe` itself via go-winres (pinned `v0.3.3`, runs at build time in CI; config in `wrapper/winres/winres.json`).
+
+### Notes
+
+- If you switch browsers later (e.g. Chromium profile → Chrome) and scraping misbehaves, delete `data/browser-profile` and re-run `npm run login` — the profile is just Cloudflare cookies and rebuilds in ~30 seconds.
+
+---
+
 ## [2.0.0] — 2026-06-11
 
 > **Audit remediation.** A full repo audit found four classes of silent failure that survived every release since v0.5. All fixed, with regression tests pinning each one down. Also ships the hiring.cafe `/viewjob/` → `/job/` path migration that was sitting in Unreleased.

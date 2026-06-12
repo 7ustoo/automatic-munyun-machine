@@ -44,6 +44,8 @@ endif
 
 build-win: $(DIST)
 	@echo "→ Building Windows amd64 (v$(VERSION))"
+	@echo "→ Embedding exe icon (go-winres, pinned)"
+	go run github.com/tc-hib/go-winres@v0.3.3 make --in winres/winres.json
 	go build $(LDFLAGS_WIN) -o $(DIST)/AMM.exe .
 
 build-mac: $(DIST)

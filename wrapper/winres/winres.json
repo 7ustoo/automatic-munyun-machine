@@ -1,0 +1,16 @@
+{
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": ["../icon-green.png"]
+    }
+  },
+  "RT_MANIFEST": {
+    "#1": {
+      "0409": {
+        "identity": {},
+        "description": "Automatic Munyun Machine tray wrapper",
+        "execution-level": "asInvoker"
+      }
+    }
+  }
+}

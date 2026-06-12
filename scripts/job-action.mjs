@@ -14,6 +14,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { resolveBrowser } from './browser-launcher.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -25,7 +26,11 @@ if (!action || (action !== 'auth' && !jobUrl)) {
 }
 
 const profileDir = path.join(ROOT, 'data', 'browser-profile');
+// v2.0.1: user's installed Chrome/Edge preferred over bundled Chromium —
+// same browser the scraper uses, same AMM-private profile dir.
+const browser = await resolveBrowser();
 const ctx = await chromium.launchPersistentContext(profileDir, {
+  ...browser.launchOptions,
   headless: false,
   args: [
     '--no-sandbox',
