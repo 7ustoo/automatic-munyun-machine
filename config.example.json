@@ -25,6 +25,11 @@
     { "key": "PAM",          "term": "PAM Engineer" }
   ],
 
+  "search": {
+    "mode": "titles",
+    "_comment": "v2.0.3: what /jobs suggest and wizard step 5 propose. titles (default) = full job titles like 'IAM Engineer' — precise searches. keywords = short domain terms like 'iam', 'm365', 'linux' — broader nets; the CV-match scorer and matchFloorPercent handle precision. Switch anytime from the bot: /jobs mode titles|keywords. The scraper itself just searches whatever strings are in queries[]."
+  },
+
   "filters": {
     "filterClearance": true,
     "applicationFormEase": "all",

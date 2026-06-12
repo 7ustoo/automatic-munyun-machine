@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.3] — 2026-06-12
+
+### Added
+
+- **Keyword search mode.** New `search.mode` config (`titles` | `keywords`) controls what `/jobs suggest` and wizard step 5 propose: full job titles ("IAM Engineer" — precise searches, the default and previous behavior) or short domain keywords ("iam", "m365", "linux", "cloud security" — broader nets, with the CV-match scorer and `matchFloorPercent` doing the precision work). New `/jobs mode titles|keywords` bot command switches anytime; `/settings` shows the current mode. Every cluster in `role-suggester.mjs` now carries a curated keyword list alongside its title list (`suggestKeywords()` shares the same signal-density ranking as `suggestRoles()`). The scraper is unchanged — it searches whatever strings are in `queries[]`, so titles and keywords can be mixed freely via `/jobs add`.
+
+---
+
 ## [2.0.2] — 2026-06-12
 
 ### Changed

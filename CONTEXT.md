@@ -195,6 +195,7 @@ node scripts/telegram-send.mjs "<message>"
 
 ## Recent change history (newest first)
 
+- **2026-06-12** — v2.0.3 (branch `v2.0.3`). Keyword search mode: `search.mode` config (titles|keywords), `suggestKeywords()` in role-suggester (per-cluster curated keyword lists, same signal-density ranking), `/jobs mode` bot command, mode-aware `/jobs suggest` + wizard step 5, `/settings` shows mode. 8 new tests (95 total). Scraper untouched — queries[] still holds plain search strings.
 - **2026-06-12** — v2.0.2 (branch `v2.0.2`). Custom AMM logo as the app icon: `wrapper/logo.png` (640×640 money-printer art) feeds go-winres for AMM.exe; new `scripts/build/make-ico.mjs` (PNG → multi-size .ico via headless system browser, no new deps) generated `wrapper/logo.ico` for SetupIconFile/shortcuts/ARP. Tray status icons unchanged.
 - **2026-06-12** — v2.0.1 (branch `v2.0.1`). System-browser support: `scripts/browser-launcher.mjs` resolves installed Chrome → Edge → bundled Chromium (config override via `browser.channel`/`browser.executablePath`, per profile); wired into daily-batch/job-action/login-once — same AMM-private profile, only the binary is borrowed. Installer: `node_modules` ships in the payload (npm install step deleted), Chromium download conditional on no Chrome/Edge + runs visible; same conditional in install.ps1. Icons: SetupIconFile on the installer, shortcuts + ARP point at wrapper/icon-green.ico, `make build-win` embeds the icon in AMM.exe via go-winres v0.3.3 (wrapper/winres/winres.json). 12 new tests (87 total).
 

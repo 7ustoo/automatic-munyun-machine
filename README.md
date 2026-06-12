@@ -66,7 +66,7 @@ node scripts/setup-wizard.mjs
    - **Pick from disk** *(default)* — opens a Windows file picker dialog. Click your PDF / DOCX / MD resume.
    - **Upload via Telegram later** — skip the wizard step, send `/resume` to the bot once setup finishes and attach your CV.
    - **Type the path manually** — fallback for headless installs or weird environments.
-5. **Auto-suggested job titles.** Wizard reads your CV and proposes 10-12 search titles. Accept all, pick a subset, or keep defaults. (Skipped if you uploaded later — defaults apply until you run `/jobs suggest` post-upload.)
+5. **Auto-suggested search terms.** Pick a search style — full job titles ("IAM Engineer", precise) or short keywords ("iam", "m365", "linux" — broader nets, the CV-match ranking does the filtering) — then the wizard reads your CV and proposes 10-12 terms. Accept all, pick a subset, or keep defaults. Switch styles anytime with `/jobs mode`. (Skipped if you uploaded later — defaults apply until you run `/jobs suggest` post-upload.)
 6. **Years of experience.** Max YOE you'd accept on a job listing.
 7. **Salary floor.** Used for ranking (bonus above floor, penalty below).
 8. **Clearance filter.** Toggle on/off — drop or include gov clearance jobs.
@@ -92,9 +92,10 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/settings` | Show current config in one message |
 | `/resume` | Upload a new resume (PDF/DOCX/MD); bot re-parses skills |
 | `/jobs` | List current search titles |
-| `/jobs add "Title"` | Add a search title |
-| `/jobs remove "Title"` | Remove a search title |
-| `/jobs suggest` | Bot reads your CV and proposes new titles |
+| `/jobs add "term"` | Add a search term (a job title or a keyword) |
+| `/jobs remove "term"` | Remove a search term |
+| `/jobs suggest` | Bot reads your CV and proposes new search terms |
+| `/jobs mode titles\|keywords` | What `/jobs suggest` proposes: full job titles ("IAM Engineer") or short keywords ("iam", "m365", "linux") |
 | `/yoe N` | Set max years of experience |
 | `/salary N` | Set salary floor in $K (e.g. `/salary 120`) |
 | `/clearance on/off` | Toggle gov clearance filter |

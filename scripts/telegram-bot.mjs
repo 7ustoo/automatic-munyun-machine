@@ -358,7 +358,7 @@ function spawnWithTimeout(cmd, args, timeoutMs = 30000, opts = {}) {
 // ---------- config helpers (config-rw.mjs) ----------
 import * as cfgRW from './config-rw.mjs';
 import { geocode } from './geocode.mjs';
-import { suggestRoles } from './role-suggester.mjs';
+import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
 
 // Per-chat state for multi-step interactions (e.g. /resume waiting for attachment)
@@ -402,7 +402,8 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /jobs                → list current search titles
 /jobs add &lt;title&gt;    → add a search title
 /jobs remove &lt;title&gt; → remove a search title
-/jobs suggest        → bot reads your CV and proposes new titles
+/jobs suggest        → bot reads your CV and proposes new search terms
+/jobs mode titles|keywords → suggest full titles or short keywords (iam, m365)
 /yoe N               → set max years of experience
 /salary N            → set salary floor in $K (e.g. /salary 120)
 /floor N             → minimum match-% to include in batch (default 25)
@@ -863,8 +864,9 @@ async function handleMessage(msg) {
         `<b>Forms:</b>      ${{ all: 'all (default)', simple: 'Simple only (quick apps)', long: 'Time-consuming only' }[cfg.filters?.applicationFormEase || 'all']}`,
         `<b>Weather:</b>    ${cfg.weather?.city || '?'} (${cfg.weather?.lat}, ${cfg.weather?.lon})`,
         `<b>Schedule:</b>   ${cfg.schedule?.time || '?'} ${(cfg.schedule?.days || []).map(d => d.slice(0, 3)).join('/')}`,
+        `<b>Suggest as:</b> ${cfg.search?.mode === 'keywords' ? 'keywords (broad)' : 'job titles (precise)'} — /jobs mode to switch`,
         '',
-        `<b>Job titles (${queries.length}):</b>`,
+        `<b>Search terms (${queries.length}):</b>`,
         '  ' + queries.map(q => q.term).join(', '),
         '',
         skip.length ? `<b>Skip list (${skip.length}):</b> ${skip.join(', ')}` : '<b>Skip list:</b> empty',
@@ -1019,11 +1021,31 @@ async function handleMessage(msg) {
         : `<i>"${escHtml(term)}" wasn't in your search list.</i>`);
     }
 
-    // /jobs suggest
+    // /jobs mode [titles|keywords] — v2.0.3: what /jobs suggest proposes
+    const modeM = text.match(/^\/?jobs\s+mode(?:\s+(titles?|keywords?))?\s*$/i);
+    if (modeM) {
+      const current = cfg.search?.mode === 'keywords' ? 'keywords' : 'titles';
+      if (!modeM[1]) {
+        return reply(chatId, [
+          `🔎 Search-suggestion mode: <b>${current}</b>`,
+          '',
+          '<b>titles</b> — full job titles ("IAM Engineer"). Precise searches.',
+          '<b>keywords</b> — short terms ("iam", "m365", "linux"). Broader nets; CV-match ranking + the match floor keep quality up.',
+          '',
+          'Switch: <code>/jobs mode titles</code> or <code>/jobs mode keywords</code>'
+        ].join('\n'));
+      }
+      const mode = modeM[1].toLowerCase().startsWith('keyword') ? 'keywords' : 'titles';
+      cfgRW.set('search.mode', mode);
+      return reply(chatId, `✅ Search-suggestion mode: <b>${mode}</b>.\nRun <code>/jobs suggest</code> to get ${mode === 'keywords' ? 'short keyword' : 'job-title'} picks from your CV, then add the ones you like.`);
+    }
+
+    // /jobs suggest — proposes titles or keywords per config search.mode
     if (/^\/?jobs\s+suggest\b/i.test(text)) {
       try {
         const cv = JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8'));
-        const suggestions = suggestRoles(cv, { max: 12 });
+        const mode = cfg.search?.mode === 'keywords' ? 'keywords' : 'titles';
+        const suggestions = mode === 'keywords' ? suggestKeywords(cv, { max: 12 }) : suggestRoles(cv, { max: 12 });
         if (!suggestions.length) {
           return reply(chatId, '❌ No suggestions. Your CV may be too sparse — try /resume to upload a fuller version.');
         }
@@ -1033,11 +1055,15 @@ async function handleMessage(msg) {
           return reply(chatId, '✅ Your search list already covers the strongest matches from your CV. Nothing new to suggest.');
         }
         const lines = [
-          '<b>💡 Suggested job titles based on your CV:</b>',
+          mode === 'keywords'
+            ? '<b>💡 Suggested search keywords based on your CV:</b>'
+            : '<b>💡 Suggested job titles based on your CV:</b>',
           '',
           ...fresh.map((s, i) => `${i + 1}. <b>${escHtml(s.title)}</b>\n   <i>${escHtml(s.cluster)} · ${s.signalsHit.slice(0, 4).map(escHtml).join(', ')}</i>`),
           '',
-          'Add any with: <code>/jobs add Title Here</code>'
+          mode === 'keywords'
+            ? `Add any with: <code>/jobs add ${escHtml(fresh[0].title)}</code> · switch styles with <code>/jobs mode titles</code>`
+            : 'Add any with: <code>/jobs add Title Here</code> · prefer broad nets? <code>/jobs mode keywords</code>'
         ];
         return reply(chatId, lines.join('\n'));
       } catch (e) {
@@ -1048,11 +1074,11 @@ async function handleMessage(msg) {
     // /jobs (list)
     if (!queries.length) return reply(chatId, '<i>No search titles yet. Add some with /jobs add &lt;title&gt;.</i>');
     const lines = [
-      `<b>🔎 Search titles (${queries.length}):</b>`,
+      `<b>🔎 Search terms (${queries.length}):</b>`,
       '',
       ...queries.map((q, i) => `${i + 1}. ${escHtml(q.term)}`),
       '',
-      '<i>/jobs add "Title" · /jobs remove "Title" · /jobs suggest</i>'
+      '<i>/jobs add "term" · /jobs remove "term" · /jobs suggest · /jobs mode titles|keywords</i>'
     ];
     return reply(chatId, lines.join('\n'));
   }
