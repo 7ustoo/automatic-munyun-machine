@@ -24,6 +24,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+import { resolveBrowser } from './browser-launcher.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -33,12 +34,17 @@ fs.mkdirSync(profileDir, { recursive: true });
 const WARMUP_TIMEOUT_MS = 45000;
 const POLL_INTERVAL_MS  = 2000;
 
-console.log(`Opening Chromium with profile: ${profileDir}`);
+// v2.0.1: user's installed Chrome/Edge preferred — must match what the
+// scraper launches so the Cloudflare clearance lands in the same profile.
+const browser = await resolveBrowser();
+
+console.log(`Opening ${browser.label} with profile: ${profileDir}`);
 console.log('Wait until you see job listings on hiring.cafe (~20–30 seconds), then');
 console.log("close the window. The bot does NOT need you to log in — Cloudflare's");
 console.log('bot challenge is what we are clearing here.');
 
 const ctx = await chromium.launchPersistentContext(profileDir, {
+  ...browser.launchOptions,
   headless: false,
   args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--window-position=100,100', '--window-size=1280,800'],
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
