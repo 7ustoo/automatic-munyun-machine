@@ -84,16 +84,31 @@ if ($LASTEXITCODE -ne 0) {
   exit 1
 }
 
-# 6. Playwright Chromium — ~150 MB download. Output deliberately NOT
-# suppressed (v2.0): playwright prints a real progress bar, and hiding it
-# made slow downloads look like the installer froze.
-Write-Host "`n[5/5] Downloading Chromium (~150 MB - a few minutes on slow connections)..." -ForegroundColor Yellow
-npx --yes playwright install chromium
-if ($LASTEXITCODE -ne 0) {
-  Write-Host "Chromium download failed (exit $LASTEXITCODE). Re-run this installer to retry." -ForegroundColor Red
-  exit 1
+# 6. Browser. v2.0.1: AMM drives your installed Chrome/Edge via Playwright's
+# channel option (scripts/browser-launcher.mjs) — the ~150 MB Chromium
+# download only happens when neither exists, which on Windows is rare
+# (Edge ships with the OS).
+$systemBrowsers = @(
+  "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+  "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+  "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe",
+  "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+  "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+) | Where-Object { $_ -and (Test-Path $_) }
+
+if ($systemBrowsers) {
+  Write-Host "`n[5/5] Browser found: $($systemBrowsers[0]) - skipping the 150 MB Chromium download." -ForegroundColor Green
+} else {
+  # Output deliberately NOT suppressed (v2.0): playwright prints a real
+  # progress bar, and hiding it made slow downloads look like a freeze.
+  Write-Host "`n[5/5] No Chrome/Edge found. Downloading Chromium (~150 MB - a few minutes on slow connections)..." -ForegroundColor Yellow
+  npx --yes playwright install chromium
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "Chromium download failed (exit $LASTEXITCODE). Re-run this installer to retry." -ForegroundColor Red
+    exit 1
+  }
+  Write-Host "    Chromium ready." -ForegroundColor Green
 }
-Write-Host "    Chromium ready." -ForegroundColor Green
 
 # 7. Launch wizard
 Write-Host "`n$('═' * 60)" -ForegroundColor Cyan

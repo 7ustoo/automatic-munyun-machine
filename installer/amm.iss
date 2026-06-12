@@ -55,38 +55,71 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-UninstallDisplayIcon={app}\wrapper\dist\AMM.exe
+UninstallDisplayIcon={app}\wrapper\icon-green.ico
 UninstallFilesDir={app}
+; v2.0.1: brand the setup .exe itself (title-bar + Explorer icon).
+SetupIconFile=..\wrapper\icon-green.ico
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Files]
 ; Ship the entire repo under {app}. Source path is one level up since the .iss
-; lives in installer/. Excludes are hardcoded in [Files] vs npm-install at
-; runtime (see [Run] below).
+; lives in installer/.
+;
+; v2.0.1: node_modules is NO LONGER excluded — all runtime deps are pure JS
+; (no native compilation), so CI's `npm ci` output ships inside the installer
+; and the user never runs npm at install time. That kills the multi-minute
+; silent "Installing dependencies" step that looked like a hang.
 Source: "..\*"; DestDir: "{app}"; \
-  Excludes: "node_modules\*,data\*,.env,.env.*,*.log,installer\dist\*,.git\*,.github\*,.claude\*,*.zip,*.tmp"; \
+  Excludes: "data\*,.env,.env.*,*.log,installer\dist\*,.git\*,.github\*,.claude\*,*.zip,*.tmp,node_modules\.cache\*"; \
   Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 ; v1.2: Start menu + desktop shortcuts launch AMM.exe (the Go tray wrapper),
 ; which owns the system-tray icon and supervises the node bot.
-Name: "{group}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\dist\AMM.exe"
+; v2.0.1: shortcuts point at the branded .ico directly — AMM.exe itself only
+; carries an embedded icon when built with the go-winres step (CI does this;
+; see wrapper/Makefile build-win), so the .ico is the reliable source.
+Name: "{group}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\icon-green.ico"
 Name: "{group}\Setup wizard"; Filename: "{app}\scripts\setup-wizard.mjs"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\dist\AMM.exe"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\icon-green.ico"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional tasks:"; Flags: unchecked
 
+[Code]
+// v2.0.1: AMM drives the user's installed Chrome/Edge via Playwright's
+// `channel` option (see scripts/browser-launcher.mjs) — the 150 MB bundled
+// Chromium download is only needed when NEITHER browser exists, which on
+// Windows effectively never happens (Edge ships with the OS).
+function SystemBrowserPresent(): Boolean;
+begin
+  Result :=
+    FileExists(ExpandConstant('{commonpf64}\Google\Chrome\Application\chrome.exe')) or
+    FileExists(ExpandConstant('{commonpf32}\Google\Chrome\Application\chrome.exe')) or
+    FileExists(ExpandConstant('{localappdata}\Google\Chrome\Application\chrome.exe')) or
+    FileExists(ExpandConstant('{commonpf32}\Microsoft\Edge\Application\msedge.exe')) or
+    FileExists(ExpandConstant('{commonpf64}\Microsoft\Edge\Application\msedge.exe'));
+end;
+
+function NeedsChromium(): Boolean;
+begin
+  Result := not SystemBrowserPresent();
+end;
+
 [Run]
-; Post-install: install npm deps + Playwright Chromium + run the wizard.
+; Post-install. v2.0.1: npm install is GONE — node_modules ships inside the
+; installer payload (see [Files]). Chromium download only runs when no
+; system Chrome/Edge exists, and runs VISIBLE so its progress bar shows
+; instead of a static "this may take a few minutes" message.
 Filename: "cmd.exe"; \
-  Parameters: "/C ""npm install --no-audit --no-fund && npx playwright install chromium"""; \
+  Parameters: "/C ""npx playwright install chromium"""; \
   WorkingDir: "{app}"; \
-  StatusMsg: "Installing dependencies (this may take a few minutes)…"; \
-  Flags: runhidden waituntilterminated
+  StatusMsg: "No Chrome/Edge found — downloading Chromium (~150 MB)…"; \
+  Check: NeedsChromium; \
+  Flags: waituntilterminated
 
 Filename: "node.exe"; \
   Parameters: """{app}\scripts\setup-wizard.mjs"""; \

@@ -8,7 +8,9 @@
 #   1. Verifies prerequisites (git, node ≥ 18) — installs via brew/apt if missing.
 #   2. Clones (or pulls) the repo into ~/.local/share/automatic-munyun-machine
 #      (Mac: ~/Library/Application\ Support/automatic-munyun-machine).
-#   3. Runs npm install + npx playwright install chromium.
+#   3. Runs npm install. (v2.0.1: Playwright Chromium is only downloaded
+#      when no Chrome/Edge/chromium is already installed — AMM drives your
+#      system browser with its own private profile.)
 #   4. Hands off to the interactive wizard (`npm run setup`).
 #
 # Idempotent: re-running pulls latest + re-runs the wizard.
@@ -83,12 +85,31 @@ else
 fi
 cd "$INSTALL_DIR"
 
-# ---- 3. npm + playwright ----
+# ---- 3. npm + browser ----
 cyan "→ Installing dependencies (this can take a minute)…"
 npm install --no-audit --no-fund --loglevel=error
 
-cyan "→ Installing bundled Chromium (~120 MB)…"
-npx playwright install chromium
+# v2.0.1: AMM drives your installed Chrome/Edge/chromium via Playwright's
+# channel/executablePath options (scripts/browser-launcher.mjs) — the
+# bundled-Chromium download is a fallback, not a requirement. Keep this
+# candidate list in sync with browser-launcher.mjs.
+have_system_browser() {
+  [ -e "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" ] && return 0
+  [ -e "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge" ] && return 0
+  for b in /usr/bin/google-chrome /usr/bin/google-chrome-stable /opt/google/chrome/chrome \
+           /usr/bin/microsoft-edge /usr/bin/microsoft-edge-stable \
+           /usr/bin/chromium /usr/bin/chromium-browser /snap/bin/chromium; do
+    [ -e "$b" ] && return 0
+  done
+  return 1
+}
+
+if have_system_browser; then
+  green "✓ System browser found — skipping the ~120 MB Chromium download."
+else
+  cyan "→ No Chrome/Edge/chromium found. Downloading bundled Chromium (~120 MB)…"
+  npx playwright install chromium
+fi
 
 # ---- 4. Wizard ----
 green ""

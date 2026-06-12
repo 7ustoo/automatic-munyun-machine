@@ -44,7 +44,7 @@ curl -fsSL https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/mai
 Both:
 1. Install Node.js + Git (via winget / brew / apt / dnf) if missing
 2. Clone the repo to the platform-appropriate dir (`%LOCALAPPDATA%\automatic-munyun-machine\` on Windows, `~/Library/Application Support/automatic-munyun-machine/` on macOS, `~/.local/share/automatic-munyun-machine/` on Linux)
-3. Install npm deps + Chromium (for Playwright)
+3. Install npm deps. Since v2.0.1 AMM drives your installed Chrome/Edge (with its own private profile) — the ~150 MB Playwright Chromium download only happens if you have neither.
 4. Launch the interactive setup wizard
 
 ### Option 3 — Manual install
@@ -53,7 +53,7 @@ Both:
 git clone https://github.com/7ustoo/automatic-munyun-machine.git
 cd automatic-munyun-machine
 npm install
-npx playwright install chromium
+npx playwright install chromium   # only needed if you have neither Chrome nor Edge installed
 node scripts/setup-wizard.mjs
 ```
 
@@ -206,7 +206,7 @@ Three independent processes, all reading/writing one shared filesystem. No serve
 ## Requirements
 
 - Windows 10 / 11, macOS 14+ (Sonoma), or any reasonably modern Linux (Ubuntu 22.04+, Fedora 40+, etc.)
-- ~500 MB disk (mostly Chromium)
+- ~150 MB disk (v2.0.1 uses your installed Chrome/Edge; ~500 MB only if neither exists and Playwright's Chromium gets downloaded)
 - Always-on machine for the 7am push (or use `/daily` on demand)
 - A Telegram account
 - A hiring.cafe account (free; sign in via Google)
