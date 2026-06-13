@@ -18,7 +18,7 @@ import { stdin as input, stdout as output } from 'node:process';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
-import { suggestRoles } from './role-suggester.mjs';
+import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { geocode } from './geocode.mjs';
 import * as cfgRW from './config-rw.mjs';
 import { pickResumeFile } from './file-picker.mjs';
@@ -365,9 +365,9 @@ async function step4Resume() {
   }
 }
 
-// ---- step 5: auto-suggest job titles from resume ----
+// ---- step 5: auto-suggest search terms from resume ----
 async function step5JobsSuggest(parsed) {
-  step(5, 10, 'Job titles to search');
+  step(5, 10, 'What to search hiring.cafe for');
 
   // No resume yet? Fall through to defaults; user can run /jobs suggest later.
   if (!parsed) {
@@ -376,9 +376,20 @@ async function step5JobsSuggest(parsed) {
     return null;
   }
 
-  console.log(`${c.dim}Based on your resume, I'll suggest job titles to search hiring.cafe for.${c.reset}\n`);
+  // v2.0.3: two search styles. Either way the CV-match scorer ranks results,
+  // so keywords trade search precision for a wider supply pool.
+  console.log(`${c.dim}Two ways to search:${c.reset}`);
+  console.log(`  ${c.cyan}1${c.reset}  Job titles   ${c.dim}("IAM Engineer", "Linux Administrator") — precise searches${c.reset}  ${c.green}[default]${c.reset}`);
+  console.log(`  ${c.cyan}2${c.reset}  Keywords     ${c.dim}("iam", "m365", "linux") — broader nets, ranking does the filtering${c.reset}\n`);
+  const modeChoice = (await ask(arrow('Search style [default 1]: '))).trim();
+  const mode = modeChoice === '2' ? 'keywords' : 'titles';
+  cfgRW.set('search.mode', mode);
 
-  const suggestions = suggestRoles(parsed, { max: 12 });
+  console.log(`\n${c.dim}Based on your resume, I'll suggest ${mode === 'keywords' ? 'search keywords' : 'job titles'} to search hiring.cafe for.${c.reset}\n`);
+
+  const suggestions = mode === 'keywords'
+    ? suggestKeywords(parsed, { max: 12 })
+    : suggestRoles(parsed, { max: 12 });
   if (!suggestions.length) {
     console.log(`${c.dim}Couldn't auto-suggest from your CV. We'll use sensible defaults from config.example.json.${c.reset}`);
     return null;
