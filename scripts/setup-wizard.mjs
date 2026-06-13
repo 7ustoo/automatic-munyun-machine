@@ -22,7 +22,7 @@ import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { geocode } from './geocode.mjs';
 import * as cfgRW from './config-rw.mjs';
 import { pickResumeFile } from './file-picker.mjs';
-import { IS_WIN32, IS_DARWIN, IS_LINUX, POWERSHELL, runScheduledTask } from './os-paths.mjs';
+import { IS_WIN32, IS_DARWIN, IS_LINUX, POWERSHELL, runScheduledTask, wrapperBinaryPath } from './os-paths.mjs';
 
 // Absolute path to powershell.exe (Win32 only; null elsewhere) — exported
 // here for backward-compat with any code reading POWERSHELL_EXE; new code
@@ -55,13 +55,30 @@ function registerSchedulerForPlatform() {
   });
 }
 
-// Helper: ask the platform scheduler to start the bot now (post-registration).
+// Helper: start AMM now (post-registration). Two attempts, both safe to
+// fire together:
+//   1. The platform scheduler (`schtasks /run` / launchctl / systemctl) —
+//      the canonical path, but it can fail quietly (policy, registration
+//      race), which left users with a finished wizard and nothing running.
+//   2. v2.0.4: direct-launch the tray wrapper binary when it exists (every
+//      installer-based install). The wrapper's PID-based single-instance
+//      lock (wrapper/singleinstance.go) makes a duplicate launch exit
+//      cleanly, so this is pure belt-and-suspenders.
 async function startBotForPlatform() {
   const r = runScheduledTask('bot');
-  if (!r.ok) {
-    console.log(fail(`Could not auto-start bot: ${r.output}`));
+  const wrapper = wrapperBinaryPath(ROOT);
+  let direct = false;
+  if (wrapper) {
+    try {
+      spawn(wrapper, [], { cwd: ROOT, detached: true, stdio: 'ignore' }).unref();
+      direct = true;
+    } catch { /* messaging below covers the both-failed case */ }
+  }
+  if (!r.ok && !direct) {
+    console.log(fail(`Could not auto-start AMM: ${r.output}`));
     console.log(`${c.dim}It will start at next login. Or run the bot manually with: npm run bot${c.reset}`);
   }
+  return { scheduled: r.ok, direct, hasWrapper: !!wrapper };
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -497,10 +514,10 @@ async function step10Finalize(token, chatId, resumeSkipped) {
   // because process exit races with handles still tracked in the event loop.
   // `stdio: 'ignore'` drops those refs entirely; `.unref()` is belt-and-
   // suspenders so the loop exits even if the child is still spawning.
-  process.stdout.write(arrow('Starting bot… '));
+  process.stdout.write(arrow('Starting AMM… '));
   const BOT_LOG = path.join(ROOT, 'data', 'telegram-bot.log');
   const logSizeBefore = (() => { try { return fs.statSync(BOT_LOG).size; } catch { return 0; } })();
-  await startBotForPlatform();
+  const startInfo = await startBotForPlatform();
 
   // VERIFY the bot actually came up instead of declaring victory blind (v2.0)
   // — "setup complete!" with a dead bot was the #1 silent failure mode. The
@@ -515,11 +532,21 @@ async function step10Finalize(token, chatId, resumeSkipped) {
     } catch { /* log not created yet — keep waiting */ }
   }
   if (botUp) {
-    console.log(ok('Bot is running (confirmed in data/telegram-bot.log).'));
+    if (startInfo.hasWrapper) {
+      console.log(ok('AMM is running — look for the AMM icon in your system tray.'));
+      console.log(`${c.yellow}!${c.reset} ${c.bold}AMM must stay running for the bot to respond.${c.reset} It starts automatically at every login; if you quit it from the tray, start it again from the desktop icon.`);
+    } else {
+      console.log(ok('Bot is running (confirmed in data/telegram-bot.log).'));
+    }
   } else {
-    console.log(fail('Bot did not start within 20s.'));
-    console.log(`${c.yellow}!${c.reset} Start it manually with: ${c.bold}npm run bot${c.reset} (foreground, shows errors)`);
-    console.log(`${c.dim}  Then check data/telegram-bot.log for details.${c.reset}`);
+    console.log(fail('AMM did not start within 20s.'));
+    if (startInfo.hasWrapper) {
+      console.log(`${c.yellow}!${c.reset} Start it manually: double-click the ${c.bold}Automatic Munyun Machine${c.reset} icon on your desktop (or Start menu).`);
+      console.log(`${c.dim}  The bot only answers on Telegram while AMM is running. It will also auto-start at your next login.${c.reset}`);
+    } else {
+      console.log(`${c.yellow}!${c.reset} Start it manually with: ${c.bold}npm run bot${c.reset} (foreground, shows errors)`);
+      console.log(`${c.dim}  Then check data/telegram-bot.log for details.${c.reset}`);
+    }
   }
 
   // Final Telegram ping. Tailor the message based on whether resume was
@@ -528,8 +555,12 @@ async function step10Finalize(token, chatId, resumeSkipped) {
     ? "\n\n📄 <b>Don't forget your resume.</b> Send <code>/resume</code> to upload it — match quality is poor without one."
     : '';
   const botWarning = botUp
-    ? ''
-    : '\n\n⚠️ <b>The background bot did not start.</b> On your computer, run <code>npm run bot</code> in the install folder to see why — commands here won\'t answer until it\'s running.';
+    ? (startInfo.hasWrapper
+        ? '\n\n🟢 <b>AMM is running in your system tray.</b> Keep it running — I only answer while it\'s up. It starts automatically at every login.'
+        : '')
+    : (startInfo.hasWrapper
+        ? '\n\n⚠️ <b>AMM did not start.</b> Double-click the AMM icon on your desktop — commands here won\'t answer until it\'s running.'
+        : '\n\n⚠️ <b>The background bot did not start.</b> On your computer, run <code>npm run bot</code> in the install folder to see why — commands here won\'t answer until it\'s running.');
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
