@@ -10,6 +10,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.0.4] — 2026-06-13
+
+### Fixed
+
+- **AMM now actually starts when setup finishes.** The wizard's last step used to fire only `schtasks /run` and could end with nothing running — the user had to find and double-click the desktop icon themselves, with no hint that AMM must be running for the bot to respond. Now the wizard ALSO direct-launches the tray wrapper binary (safe to fire alongside the scheduler: the wrapper's PID-based single-instance lock makes a duplicate launch exit cleanly), verifies via the bot log, and says it plainly in the console and the Telegram ping: "🟢 AMM is running in your system tray. Keep it running — I only answer while it's up." On failure, both surfaces now point at the desktop icon instead of a bare `npm run bot`.
+- **Installer upgrades over a configured install get a "Start AMM" checkbox** on the finish page (only shown when `.env` already exists — fresh installs are handled by the wizard launch above). Previously an upgrade that skipped the wizard ended with AMM stopped until next login.
+
+---
+
 ## [2.0.3] — 2026-06-12
 
 ### Added

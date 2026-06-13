@@ -112,6 +112,16 @@ begin
   Result := not SystemBrowserPresent();
 end;
 
+// v2.0.4: an install is "configured" when .env survives from a previous
+// setup-wizard run. Gates the finish-page "Start AMM" checkbox: on upgrades
+// the wizard is usually skipped, so without this the user ended the
+// installer with nothing running and no hint that AMM must be started.
+// Fresh installs don't need it — the wizard launches AMM at its last step.
+function IsConfigured(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\.env'));
+end;
+
 [Run]
 ; Post-install. v2.0.1: npm install is GONE — node_modules ships inside the
 ; installer payload (see [Files]). Chromium download only runs when no
@@ -129,6 +139,17 @@ Filename: "node.exe"; \
   WorkingDir: "{app}"; \
   Description: "Run the {#MyAppName} setup wizard"; \
   Flags: postinstall nowait
+
+; v2.0.4: upgrades over a configured install (.env exists) usually skip the
+; wizard — start the tray app straight from the finish page instead. The
+; wrapper's single-instance lock makes an accidental double-launch (wizard
+; checked too) exit cleanly. Fresh installs never see this entry; the
+; wizard's last step launches AMM and explains the tray icon.
+Filename: "{app}\wrapper\dist\AMM.exe"; \
+  WorkingDir: "{app}"; \
+  Description: "Start {#MyAppName} in the system tray (required for the bot to work)"; \
+  Check: IsConfigured; \
+  Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
 ; v1.0 E6 — call uninstall.mjs in wipe mode so Add/Remove Programs gives
