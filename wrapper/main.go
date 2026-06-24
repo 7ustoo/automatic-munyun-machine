@@ -53,6 +53,10 @@ var (
 	flagInstallDir = flag.String("install-dir", "", "AMM install directory (default: parent of wrapper binary's dir)")
 	flagNoSpawn   = flag.Bool("no-spawn", false, "Don't spawn the node bot — useful for testing tray UI in isolation")
 	flagVersion   = flag.Bool("version", false, "Print version and exit")
+	// v2.2: the desktop shortcut launches with no flag → the dashboard opens
+	// as an app window. The login auto-start task passes --background → it
+	// starts quietly in the tray without stealing a window every boot.
+	flagBackground = flag.Bool("background", false, "Start in the tray without opening the dashboard window (used by the login auto-start task)")
 )
 
 func main() {
@@ -95,7 +99,17 @@ func main() {
 	// alive. See risk #4 in the plan.
 	released, err := acquireSingleInstanceLock(installDir)
 	if err != nil {
-		log.Printf("Single-instance lock failed: %v — another AMM may already be running. Exiting.", err)
+		// v2.2: AMM is already running (almost always: started in the
+		// background at login, now the user double-clicked the icon). Don't
+		// just exit silently — bring up the app window for the running
+		// instance, so clicking the icon always shows the dashboard. Skip
+		// this when WE were launched in the background (avoid a window loop).
+		if !*flagBackground {
+			log.Printf("Another AMM instance is running — opening its dashboard window.")
+			openAppWindowFromPortFile(installDir)
+		} else {
+			log.Printf("Single-instance lock failed: %v — another AMM is running. Exiting.", err)
+		}
 		os.Exit(0) // exit 0 so scheduler doesn't flag this as a crash
 	}
 	defer released()
@@ -128,6 +142,13 @@ func main() {
 	dash, dashErr := startDashboard(installDir, sup)
 	if dashErr != nil {
 		log.Printf("dashboard: failed to start (%v) — tray menu item will be disabled", dashErr)
+	}
+
+	// v2.2: open the dashboard as an app window on launch, UNLESS we were
+	// started in the background (the login auto-start task). So: double-click
+	// the desktop icon → the window comes up; boot/login → quiet in the tray.
+	if dash != nil && !*flagBackground {
+		openAppWindow(installDir, dash.URL())
 	}
 
 	// Tray init blocks until systray.Quit() is called. Returns when the

@@ -71,7 +71,14 @@ Write-Host "[OK] Registered: munyun-daily-batch ($time, $($days -join ','))"
 # system-tray icon, so the user sees a real "AMM is running" indicator
 # instead of a minimized cmd window. Falls back to start-bot.cmd if the
 # wrapper binary hasn't been built (see $BOT_LAUNCHER resolution above).
-$actionB  = New-ScheduledTaskAction -Execute $BOT_LAUNCHER -WorkingDirectory $ROOT
+# v2.2: pass --background to the wrapper at logon so it starts quietly in the
+# tray and does NOT pop the dashboard window every boot. Double-clicking the
+# desktop icon (no flag) is what opens the window.
+if ($BOT_LAUNCHER -eq $WRAPPER_EXE) {
+  $actionB = New-ScheduledTaskAction -Execute $BOT_LAUNCHER -Argument '--background' -WorkingDirectory $ROOT
+} else {
+  $actionB = New-ScheduledTaskAction -Execute $BOT_LAUNCHER -WorkingDirectory $ROOT
+}
 $triggerB = New-ScheduledTaskTrigger -AtLogOn -User "$env:USERDOMAIN\$env:USERNAME"
 $setB     = New-ScheduledTaskSettingsSet -StartWhenAvailable -RestartCount 5 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit (New-TimeSpan -Days 1) -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries
 Register-ScheduledTask -TaskName 'munyun-bot' -Action $actionB -Trigger $triggerB -Settings $setB -Description "AMM Telegram bot listener (tray wrapper supervises node child)" -Force | Out-Null

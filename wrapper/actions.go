@@ -82,16 +82,14 @@ func actionRunSetup(sup *supervisor, installDir string) {
 // actionOpenDashboard opens the localhost dashboard URL in the user's
 // default browser. v1.3. The wrapper bound the port at startup; we just
 // open http://127.0.0.1:<port>.
-func actionOpenDashboard(dash *dashboardServer) {
+func actionOpenDashboard(dash *dashboardServer, installDir string) {
 	if dash == nil || dash.Port() == 0 {
 		log.Printf("action.dashboard: no dashboard server (start failed or not initialized)")
 		return
 	}
-	url := dash.URL()
-	log.Printf("action.dashboard: opening %s", url)
-	if err := openURL(url); err != nil {
-		log.Printf("action.dashboard: open failed: %v", err)
-	}
+	// v2.2: open the real app window (not a plain browser tab).
+	log.Printf("action.dashboard: opening app window at %s", dash.URL())
+	openAppWindow(installDir, dash.URL())
 }
 
 // actionRunScrape spawns `node scripts/daily-batch.mjs` as a one-shot

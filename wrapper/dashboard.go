@@ -36,6 +36,9 @@ import (
 //go:embed dashboard.html
 var dashboardHTML []byte
 
+//go:embed logo.png
+var logoPNG []byte // v2.2: served as the app-window favicon
+
 // dashboardServer owns the HTTP listener + handler mux. Construct with
 // startDashboard(); release with Shutdown().
 type dashboardServer struct {
@@ -75,9 +78,12 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.handleIndex)
+	mux.HandleFunc("/favicon.png", d.handleFavicon) // v2.2: AMM icon in the app window
+	mux.HandleFunc("/favicon.ico", d.handleFavicon)
 	mux.HandleFunc("/api/status", d.handleStatus)
 	mux.HandleFunc("/api/batch", d.handleBatch)       // GET: full ranked batch (all jobs + matched)
 	mux.HandleFunc("/api/settings", d.handleSettings) // GET: editable knobs + search terms
+	mux.HandleFunc("/api/jobs-txt", d.handleJobsTxt)  // GET: download newest jobs(date).txt
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
@@ -172,6 +178,45 @@ func (d *dashboardServer) handleBatch(w http.ResponseWriter, r *http.Request) {
 // (yoe, salary, filters, schedule, search mode, search terms).
 func (d *dashboardServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	d.relayDashboardAPI(w, 15*time.Second, "settings-get")
+}
+
+// handleFavicon serves the AMM logo so the app window shows the brand icon.
+func (d *dashboardServer) handleFavicon(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	_, _ = w.Write(logoPNG)
+}
+
+// handleJobsTxt (GET) streams the newest jobs(<date>).txt from the active
+// profile as a download — the search-friendly full batch the user can keep.
+func (d *dashboardServer) handleJobsTxt(w http.ResponseWriter, r *http.Request) {
+	var active string
+	if data, err := os.ReadFile(filepath.Join(d.installDir, "config.json")); err == nil {
+		var cfg struct {
+			ActiveProfile string `json:"active_profile"`
+		}
+		_ = json.Unmarshal(data, &cfg)
+		active = cfg.ActiveProfile
+	}
+	if active == "" {
+		active = "default"
+	}
+	dir := filepath.Join(d.installDir, "data", "profiles", active)
+	matches, _ := filepath.Glob(filepath.Join(dir, "jobs(*).txt"))
+	if len(matches) == 0 {
+		http.Error(w, "No batch yet — run a scrape first.", http.StatusNotFound)
+		return
+	}
+	sort.Strings(matches) // names are date-stamped, so lexical sort = chronological
+	newest := matches[len(matches)-1]
+	data, err := os.ReadFile(newest)
+	if err != nil {
+		http.Error(w, "Could not read the batch file.", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(newest)+`"`)
+	_, _ = w.Write(data)
 }
 
 // --- Status aggregation (pure, testable) ---

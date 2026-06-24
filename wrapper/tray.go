@@ -171,7 +171,7 @@ func (s *trayState) handleClicks() {
 		case <-setupCh:
 			actionRunSetup(s.sup, s.installDir)
 		case <-dashCh:
-			actionOpenDashboard(s.dash)
+			actionOpenDashboard(s.dash, s.installDir)
 		case <-s.miScrape.ClickedCh:
 			actionRunScrape(s.installDir)
 		case <-s.miPause.ClickedCh:
