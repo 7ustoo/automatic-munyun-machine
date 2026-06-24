@@ -100,21 +100,20 @@ func main() {
 	}
 	defer released()
 
-	// First-run UX (v1.2.0): if the user hasn't completed setup (.env +
-	// config.json absent or empty TG_TOKEN), don't start the supervisor at
-	// all. The tray comes up with a "Run setup wizard" menu item visible
-	// at the top, and the icon stays gray + tooltip says "setup required."
-	// Once the user finishes the wizard (triggered from the tray or run
-	// externally), the wrapper's actionRunSetup → waitForConfigThenStart
-	// goroutine detects the new config and starts the supervisor.
-	needsSetup := !isConfigured(installDir)
+	// First-run UX: "needs setup" means the wizard hasn't run yet (no
+	// config.json). v2.1 decouples this from Telegram — Telegram is now
+	// optional, so "set up" no longer requires a bot token. The tray shows
+	// "Run setup wizard" until config.json exists; once it does, the bot
+	// supervisor starts (and itself idles unless Telegram is enabled).
+	needsSetup := !isSetUp(installDir)
 	if needsSetup {
-		log.Printf("config missing or TG_TOKEN empty — entering 'needs setup' state. User must click 'Run setup wizard' from the tray.")
+		log.Printf("config.json missing — entering 'needs setup' state. User must click 'Run setup wizard' from the tray.")
 	}
 
-	// Supervisor runs in its own goroutine. On wrapper shutdown (tray Quit
-	// or signal), it kills the child and returns. The supervisor + tray
-	// share state through the supervisorRef struct.
+	// Supervisor runs in its own goroutine. It supervises the node bot poller
+	// ONLY while Telegram is enabled (.env has a token); when Telegram is off
+	// it idles, so a desktop-only install has a quiet, healthy wrapper with no
+	// crash-looping token-less bot. The supervisor + tray + dashboard share it.
 	sup := newSupervisor(botPath, installDir)
 	if !*flagNoSpawn && !needsSetup {
 		go sup.runForever()
@@ -124,9 +123,9 @@ func main() {
 
 	// v1.3: localhost dashboard. Starts in any state (configured or not) so
 	// users without a heartbeat yet can still see "no heartbeat" instead of
-	// nothing. The tray menu's Open dashboard item reads the bound port
-	// from this handle.
-	dash, dashErr := startDashboard(installDir)
+	// nothing. v2.1: it's now the primary control surface (Scrape now, set up
+	// Telegram), so it takes the supervisor handle to start/stop the bot.
+	dash, dashErr := startDashboard(installDir, sup)
 	if dashErr != nil {
 		log.Printf("dashboard: failed to start (%v) — tray menu item will be disabled", dashErr)
 	}
@@ -139,17 +138,22 @@ func main() {
 	)
 }
 
-// isConfigured returns true when AMM has completed initial setup.
-// Criteria: .env exists with a non-empty TELEGRAM_BOT_TOKEN, AND config.json
-// exists. Matches the checks telegram-bot.mjs:67-86 does at startup so the
-// wrapper agrees with the bot on "configured."
-func isConfigured(installDir string) bool {
-	envPath := filepath.Join(installDir, ".env")
-	cfgPath := filepath.Join(installDir, "config.json")
-	if _, err := os.Stat(cfgPath); err != nil {
-		return false
-	}
-	data, err := os.ReadFile(envPath)
+// isSetUp returns true once the user has run the setup wizard — i.e.
+// config.json exists. v2.1: this is deliberately independent of Telegram,
+// which is now optional. A desktop-only install (no .env, no token) is still
+// fully "set up."
+func isSetUp(installDir string) bool {
+	_, err := os.Stat(filepath.Join(installDir, "config.json"))
+	return err == nil
+}
+
+// telegramEnabled returns true when .env carries a non-empty
+// TELEGRAM_BOT_TOKEN — the wrapper's view of "Telegram is on," which gates
+// whether the supervisor runs the bot poller. Mirrors telegramConfigured()
+// in scripts/telegram-config.mjs (token presence is the load-bearing check;
+// the JS side additionally validates shape).
+func telegramEnabled(installDir string) bool {
+	data, err := os.ReadFile(filepath.Join(installDir, ".env"))
 	if err != nil {
 		return false
 	}

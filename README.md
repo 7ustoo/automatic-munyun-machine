@@ -1,16 +1,16 @@
 # Automatic Munyun Machine (AMM)
 
-> Wake up to your morning coffee, your local weather, and 100 jobs sorted by how well they match your CV — delivered straight to Telegram every weekday at 7am. Apply, save, and track from your phone. Runs on Windows, macOS, and Linux.
+> Every weekday morning, 100 jobs sorted by how well they match your CV — in a clean desktop dashboard, with one-click apply. Optionally pushed to your phone over Telegram too. Runs on Windows, macOS, and Linux.
 
 ## What it does
 
-- **Daily 100-job batch.** Scrapes hiring.cafe across as many search queries as you configure (default ships with 16; you `/jobs add` more).
+- **Daily 100-job batch.** Scrapes hiring.cafe across as many search queries as you configure (default ships with 16; add more with the dashboard or `/jobs add`).
 - **CV-aware ranking.** Parses your resume, scores each job by keyword overlap, sorts top→bottom by match %.
 - **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
-- **Telegram-first.** Push at 7am Mon-Fri (configurable), on-demand `/scrape`, plus `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
-- **Visible "is it running?" UX.** A small system-tray icon (Windows tray / macOS menubar / Linux indicator) shows real-time bot health — green when alive, yellow when stale, red when dead. Right-click for Status / Pause / Run scrape / Open Telegram / View logs / Restart / Quit. No more wondering whether the bot is still going.
-- **Downloadable .txt batch every morning.** `jobs(YYYY-MM-DD).txt` arrives as a Telegram attachment alongside the message stream — search-friendly, archivable, pull anytime via `/export`.
-- **Local-first.** Everything runs on your machine. Nothing leaves your computer except the actual Telegram messages.
+- **Desktop dashboard (primary).** A local control surface in your browser — see the ranked batch, open jobs to apply, and click **Scrape now** for a fresh batch. Opened from the system-tray icon, which also shows real-time health (green/yellow/red).
+- **Telegram (optional, since v2.1).** Want batches on your phone too? Turn Telegram on right from the dashboard — paste a bot token, connect your chat, done. Skip it and AMM is a pure desktop app; no bot token needed. When on, you also get `/scrape`, `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
+- **Downloadable .txt batch.** `jobs(YYYY-MM-DD).txt` is written every run — search-friendly, archivable. Sent to Telegram too when it's enabled, or pulled anytime via `/export`.
+- **Local-first.** Everything runs on your machine. Nothing leaves your computer except (if you enable it) the Telegram messages.
 
 ## Install
 
@@ -57,10 +57,10 @@ npx playwright install chromium   # only needed if you have neither Chrome nor E
 node scripts/setup-wizard.mjs
 ```
 
-## Setup wizard — 10 steps, ~3 minutes
+## Setup wizard — ~3 minutes
 
-1. **Telegram bot.** Wizard walks you through @BotFather to create one, validates the token.
-2. **Chat ID.** Send any message to your bot, wizard auto-detects your chat ID.
+1. **Telegram phone notifications (optional).** Default is **no** — AMM is desktop-first, so you can skip the @BotFather token entirely and use the dashboard. Say yes only if you also want batches pushed to your phone (you can also turn it on later from the dashboard's Telegram panel).
+2. **Chat ID.** *(only if you opted into Telegram)* Send any message to your bot, wizard auto-detects your chat ID.
 3. **hiring.cafe login.** Browser opens, you sign in with Google once. Session persists.
 4. **Resume.** Three options:
    - **Pick from disk** *(default)* — opens a Windows file picker dialog. Click your PDF / DOCX / MD resume.
@@ -71,7 +71,17 @@ node scripts/setup-wizard.mjs
 7. **Salary floor.** Used for ranking (bonus above floor, penalty below).
 8. **Clearance filter.** Toggle on/off — drop or include gov clearance jobs.
 9. **Your city.** Auto-geocoded for the morning weather report.
-10. **Schedule + finalize.** Pick time + days. Wizard registers Windows Task Scheduler, starts the bot, and sends a final ✅ ping to your Telegram so you know setup completed end-to-end.
+10. **Schedule + finalize.** Pick time + days. Wizard registers the scheduler, starts AMM (the tray app), and confirms it's running. Open the dashboard from the tray menu and click **Scrape now** for your first batch. (If you connected Telegram, you also get a ✅ ping there.)
+
+## Desktop dashboard
+
+The tray icon's **Open dashboard** opens a local page (`127.0.0.1`, your machine only) where you:
+
+- see today's ranked batch and open any job to apply,
+- click **Scrape now** to pull a fresh batch on demand,
+- turn **Telegram** on or off — the panel walks you through pasting a bot token, connecting your chat, and enabling phone notifications, with a one-click Disable later.
+
+It's the primary way to use AMM; Telegram is an optional notification channel layered on top.
 
 After setup, the bot runs in the background and delivers a batch every weekday morning. Every wizard answer is later editable from your phone via Telegram commands.
 

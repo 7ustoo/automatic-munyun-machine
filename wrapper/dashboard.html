@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- v2.1: per-process CSRF token, injected by the wrapper at serve time.
+     The page sends it as X-AMM-Token on every state-changing POST. -->
+<meta name="amm-token" content="__AMM_TOKEN__" />
 <title>AMM — Local Dashboard</title>
 <style>
   :root {
@@ -111,6 +114,67 @@
     border-top: 1px solid var(--border); text-align: center;
   }
   footer code { background: var(--panel); padding: 1px 6px; border-radius: 4px; }
+
+  /* v2.1: controls — buttons, inputs, the Telegram setup flow, toasts. */
+  .card h2 .right { float: right; text-transform: none; letter-spacing: 0; }
+  button {
+    font: inherit; cursor: pointer; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 14px; font-weight: 600;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; }
+  button.danger { background: transparent; border-color: rgba(248,81,73,.5); color: var(--red); }
+  button.sm { padding: 4px 10px; font-size: 12px; }
+  input[type=text] {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    width: 100%; margin: 4px 0;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted-sm { color: var(--muted); font-size: 12px; margin: 6px 0; }
+  .step { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .hidden { display: none !important; }
+  .note { font-size: 12px; margin-top: 6px; }
+  .note.ok { color: var(--green); }
+  .note.bad { color: var(--red); }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw;
+  }
+  #toast.show { opacity: 1; }
+  #toast.bad { border-color: rgba(248,81,73,.5); color: var(--red); }
+  #toast.good { border-color: rgba(63,185,80,.5); color: var(--green); }
+
+  /* v2.1: settings + search terms + job-action UI */
+  .grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
+  .set-row label { color: var(--muted); }
+  input.num, select {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; width: 120px;
+  }
+  input.num:focus, select:focus { outline: none; border-color: var(--accent); }
+  .terms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 6px 3px 11px; font-size: 13px;
+  }
+  .chip button {
+    border: none; background: none; color: var(--muted); padding: 0 2px;
+    font-size: 15px; line-height: 1; cursor: pointer;
+  }
+  .chip button:hover { color: var(--red); }
+  td.actions button { margin-left: 4px; }
+  a.btnlink { text-decoration: none; }
+  tr.why-row td { background: var(--panel-2); color: var(--muted); font-size: 12px; padding: 8px 12px; }
+  .kw { display: inline-block; background: var(--bg); border: 1px solid var(--border);
+        border-radius: 4px; padding: 1px 6px; margin: 2px; font-size: 11px; }
 </style>
 </head>
 <body>
@@ -133,10 +197,44 @@
     </div>
 
     <div class="card">
-      <h2>Telegram</h2>
+      <h2>Telegram <span class="pill right" id="tg-pill">optional</span></h2>
       <div class="big" id="tg-big"><span class="dot" id="tg-dot"></span><span id="tg-state">—</span></div>
-      <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
-      <div class="stat-row"><span class="k">Consecutive failures</span><span class="v" id="tg-fails">—</span></div>
+
+      <!-- ENABLED view -->
+      <div id="tg-on" class="hidden">
+        <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
+        <div class="muted-sm">Batches are pushed to your phone. You apply here on the desktop either way.</div>
+        <button class="danger sm" id="tg-disable">Disable Telegram</button>
+      </div>
+
+      <!-- DISABLED / setup view -->
+      <div id="tg-off">
+        <div class="muted-sm">Off — the dashboard is your control surface. Connect a bot only if you also want batches on your phone.</div>
+        <button class="sm" id="tg-setup-start">Set up Telegram…</button>
+
+        <div id="tg-setup" class="hidden">
+          <div class="step">
+            <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token it gives you:</div>
+            <input type="text" id="tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
+            <button class="sm primary" id="tg-validate">Validate token</button>
+            <div class="note" id="tg-validate-note"></div>
+          </div>
+          <div class="step hidden" id="tg-step-chat">
+            <div class="muted-sm">2. Open your new bot in Telegram and send it any message, then:</div>
+            <div class="row">
+              <button class="sm primary" id="tg-detect">Detect my chat</button>
+              <span class="muted-sm">or paste your chat id</span>
+              <input type="text" id="tg-chat" placeholder="chat id" style="width:140px" autocomplete="off" />
+            </div>
+            <div class="note" id="tg-detect-note"></div>
+          </div>
+          <div class="step hidden" id="tg-step-save">
+            <button class="sm primary" id="tg-save">Save &amp; enable</button>
+            <button class="sm" id="tg-cancel">Cancel</button>
+            <div class="note" id="tg-save-note"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -146,11 +244,46 @@
     </div>
   </div>
 
+  <div class="grid two">
+    <!-- Settings -->
+    <div class="card">
+      <h2>Settings</h2>
+      <div class="set-row"><label>Max years of experience</label><input type="text" id="set-yoe" class="num" /></div>
+      <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
+      <div class="set-row"><label>Match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
+      <div class="set-row"><label>Daily scrape time</label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
+      <div class="set-row"><label>Drop gov-clearance jobs</label>
+        <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
+      <div class="set-row"><label>Application forms</label>
+        <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
+      <div class="set-row"><label>Suggest searches as</label>
+        <select id="set-mode"><option value="titles">Job titles</option><option value="keywords">Keywords</option></select></div>
+      <div class="note" id="set-note"></div>
+    </div>
+
+    <!-- Search terms -->
+    <div class="card">
+      <h2>What we search for <span class="pill right" id="terms-count"></span></h2>
+      <div class="row">
+        <input type="text" id="term-input" placeholder='add a title or keyword, e.g. "iam"' autocomplete="off" />
+        <button class="sm primary" id="term-add">Add</button>
+      </div>
+      <div id="terms-list" class="terms"></div>
+    </div>
+  </div>
+
   <div class="card">
-    <h2>Last batch <span class="pill" id="lb-meta"></span></h2>
+    <h2>Ranked jobs <span class="pill" id="lb-meta"></span>
+      <span class="right">
+        <button class="sm" id="refresh-btn">↻ Refresh</button>
+        <button class="primary sm" id="scrape-btn">⟳ Scrape now</button>
+      </span>
+    </h2>
     <div id="lb-body"></div>
   </div>
 </main>
+
+<div id="toast"></div>
 
 <footer>
   Local dashboard · <code id="install-dir">—</code> · auto-refresh every 5s
@@ -183,29 +316,37 @@ function matchClass(pct) {
   return "lo";
 }
 
-function renderJobs(jobs, jobCount) {
-  if (!jobs || jobs.length === 0) {
-    return '<div class="empty">No batch yet. Trigger one from the tray ("Run scrape now") or wait for the daily run.</div>';
+// Full ranked batch with per-job actions. Rendered from /api/batch (not the
+// 5s status poll) so it doesn't flicker while you read it.
+function renderBatch(batch) {
+  const jobs = batch.jobs || [];
+  if (!jobs.length) {
+    $("lb-body").innerHTML = '<div class="empty">No batch yet. Click <b>Scrape now</b> above to pull your first 100 ranked jobs (takes 1–2 min).</div>';
+    return;
   }
   const rows = jobs.map(j => {
     const url = j.directUrl || j.viewjobUrl || "#";
     const pct = j.matchPct ?? 0;
-    return `<tr>
+    return `<tr data-idx="${j.idx}">
       <td class="idx">#${j.idx}</td>
       <td class="title" title="${escapeHTML(j.title || '')}">${escapeHTML(j.title || '—')}</td>
       <td class="company" title="${escapeHTML(j.company || '')}">${escapeHTML(j.company || '—')}</td>
-      <td><span class="pill">${escapeHTML(j.q || '')}</span></td>
       <td class="match ${matchClass(pct)}">${pct}%</td>
-      <td class="actions"><a href="${escapeAttr(url)}" target="_blank" rel="noopener">Open ↗</a></td>
+      <td class="actions">
+        <a class="btnlink" href="${escapeAttr(url)}" target="_blank" rel="noopener"><button class="sm primary">Apply ↗</button></a>
+        <button class="sm" data-act="why" data-idx="${j.idx}">Why</button>
+        <button class="sm" data-act="save" data-idx="${j.idx}">Save</button>
+        <button class="sm" data-act="applied" data-idx="${j.idx}">Applied ✓</button>
+      </td>
     </tr>`;
   }).join("");
-  const extra = jobCount > jobs.length
-    ? `<div class="empty">Showing top ${jobs.length} of ${jobCount}. Full batch is in Telegram.</div>`
-    : "";
-  return `<table>
-    <thead><tr><th></th><th>Title</th><th>Company</th><th>Query</th><th>Match</th><th></th></tr></thead>
+  $("lb-body").innerHTML = `<table>
+    <thead><tr><th></th><th>Title</th><th>Company</th><th>Match</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
-  </table>${extra}`;
+  </table>`;
+  // Stash matched keywords for the "Why" expander.
+  window.__batchMatched = {};
+  for (const j of jobs) window.__batchMatched[j.idx] = j.matched || [];
 }
 
 function escapeHTML(s) {
@@ -259,29 +400,272 @@ function render(s) {
     ? humanDuration(s.bot.lastHeartbeatAgeSec) + " ago" : "—";
   $("bot-version").textContent = s.bot?.version || "—";
 
+  // v2.1: Telegram is optional. Reflect enabled/disabled; the setup panel
+  // inside #tg-off is owned by the control logic below, not touched here.
+  const tgEnabled = !!s.telegram?.enabled;
   const tgConnected = !!s.telegram?.connected;
+  const tgDotState = !tgEnabled ? "unknown" : (tgConnected ? "alive" : "dead");
   const tgBig = $("tg-big");
   tgBig.classList.remove("alive","stale","dead","unknown");
-  tgBig.classList.add(tgConnected ? "alive" : (botState === "unknown" ? "unknown" : "dead"));
-  $("tg-state").textContent = tgConnected ? "Connected" : "Disconnected";
-  setDot($("tg-dot"), tgConnected ? "alive" : (botState === "unknown" ? "unknown" : "dead"));
+  tgBig.classList.add(tgDotState);
+  setDot($("tg-dot"), tgDotState);
+  $("tg-state").textContent = !tgEnabled ? "Off" : (tgConnected ? "Connected" : "Starting…");
+  $("tg-pill").textContent = tgEnabled ? "on" : "optional";
   $("tg-poll").textContent = s.telegram?.lastPollOk ? "OK" : "Failing";
-  $("tg-fails").textContent = String(s.telegram?.consecutiveFailures ?? 0);
+  // Don't yank the panel out from under a user mid-setup.
+  if (!window.__tgSetupActive) {
+    $("tg-on").classList.toggle("hidden", !tgEnabled);
+    $("tg-off").classList.toggle("hidden", tgEnabled);
+  }
 
   $("profile-big").textContent = s.profile?.active || "—";
   $("profile-all").textContent = (s.profile?.all || []).join(", ") || "—";
 
   const lb = s.lastBatch || {};
-  if (lb.available) {
-    $("lb-meta").textContent = `${lb.date || ""} · ${lb.jobCount || 0} jobs · profile ${lb.profile || "—"}`;
-  } else {
-    $("lb-meta").textContent = "no batch yet";
-  }
-  $("lb-body").innerHTML = renderJobs(lb.jobs || [], lb.jobCount || 0);
+  $("lb-meta").textContent = lb.available
+    ? `${lb.date || ""} · ${lb.jobCount || 0} jobs`
+    : "no batch yet";
 }
+
+// ---- v2.1: control surface (Scrape now + Telegram setup) ----
+const AMM_TOKEN = document.querySelector('meta[name="amm-token"]')?.content || "";
+
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AMM-Token": AMM_TOKEN },
+    body: JSON.stringify(body || {}),
+    cache: "no-store",
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok && data.error == null) data = { ok: false, error: "HTTP " + res.status };
+  return data;
+}
+
+let toastTimer = null;
+function toast(msg, kind) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "show" + (kind ? " " + kind : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ""; }, 3500);
+}
+
+function note(id, msg, ok) {
+  const el = $(id);
+  el.textContent = msg || "";
+  el.className = "note" + (msg ? (ok ? " ok" : " bad") : "");
+}
+
+// --- Ranked jobs (from /api/batch, refreshed on demand) ---
+async function loadBatch() {
+  try {
+    const res = await fetch("/api/batch", { cache: "no-store" });
+    renderBatch(await res.json());
+  } catch (e) {
+    $("lb-body").innerHTML = '<div class="empty">Could not load the batch.</div>';
+  }
+}
+
+// Event delegation for the per-job action buttons.
+$("lb-body").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-act]");
+  if (!btn) return;
+  const act = btn.dataset.act, idx = btn.dataset.idx;
+  if (act === "why") {
+    const tr = btn.closest("tr");
+    const existing = tr.nextElementSibling;
+    if (existing && existing.classList.contains("why-row")) { existing.remove(); return; }
+    const kws = (window.__batchMatched?.[idx] || []);
+    const html = kws.length
+      ? kws.map(k => `<span class="kw">${escapeHTML(k)}</span>`).join("")
+      : "<i>No CV keyword matched — ranked on search relevance only.</i>";
+    const row = document.createElement("tr");
+    row.className = "why-row";
+    row.innerHTML = `<td></td><td colspan="4"><b>Matched from your CV:</b> ${html}</td>`;
+    tr.after(row);
+    return;
+  }
+  // save / applied
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "…";
+  try {
+    const r = await postJSON("/api/job/action", { action: act, idx });
+    if (r.ok) {
+      toast(act === "applied" ? `Marked applied — job #${idx} won't show again.` : `Saved job #${idx} on hiring.cafe.`, "good");
+      if (act === "applied") btn.textContent = "Applied ✓";
+      else { btn.textContent = label; btn.disabled = false; }
+    } else {
+      toast(r.error || "Action failed", "bad");
+      btn.textContent = label; btn.disabled = false;
+    }
+  } catch (e) {
+    toast("Action failed: " + e.message, "bad");
+    btn.textContent = label; btn.disabled = false;
+  }
+});
+
+// --- Scrape now / Refresh ---
+$("scrape-btn").addEventListener("click", async () => {
+  const btn = $("scrape-btn");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Scraping…";
+  try {
+    const r = await postJSON("/api/scrape");
+    if (r.ok) {
+      toast("Scrape started — refreshing the list as jobs come in (1–2 min).", "good");
+      // Poll the batch a few times so the new results show up without a manual refresh.
+      let tries = 0;
+      const iv = setInterval(async () => { tries++; await loadBatch(); if (tries >= 12) clearInterval(iv); }, 12000);
+    } else {
+      toast("Could not start: " + (r.error || "error"), "bad");
+    }
+  } catch (e) {
+    toast("Could not start scrape: " + e.message, "bad");
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 5000);
+  }
+});
+$("refresh-btn").addEventListener("click", loadBatch);
+
+// --- Settings ---
+async function loadSettings() {
+  try {
+    const r = await (await fetch("/api/settings", { cache: "no-store" })).json();
+    if (!r.ok) return;
+    const s = r.settings;
+    $("set-yoe").value = s.maxYoeAcceptable;
+    $("set-salary").value = s.salaryFloorUsd;
+    $("set-floor").value = s.matchFloorPercent;
+    $("set-time").value = s.scheduleTime;
+    $("set-clearance").value = String(s.filterClearance);
+    $("set-forms").value = s.applicationFormEase;
+    $("set-mode").value = s.searchMode;
+    renderTerms(s.queries || []);
+  } catch {}
+}
+
+async function saveSetting(path, value) {
+  const r = await postJSON("/api/settings/set", { path, value: String(value) });
+  note("set-note", r.ok ? "✓ Saved." : ("✗ " + (r.error || "could not save")), r.ok);
+  if (r.ok) setTimeout(() => note("set-note", ""), 1500);
+}
+$("set-yoe").addEventListener("change", e => saveSetting("user.maxYoeAcceptable", e.target.value));
+$("set-salary").addEventListener("change", e => saveSetting("user.salaryFloorUsd", e.target.value));
+$("set-floor").addEventListener("change", e => saveSetting("scoring.matchFloorPercent", e.target.value));
+$("set-time").addEventListener("change", e => saveSetting("schedule.time", e.target.value));
+$("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
+$("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));
+$("set-mode").addEventListener("change", e => saveSetting("search.mode", e.target.value));
+
+// --- Search terms ---
+function renderTerms(terms) {
+  $("terms-count").textContent = terms.length + " terms";
+  $("terms-list").innerHTML = terms.map(t =>
+    `<span class="chip">${escapeHTML(t)}<button data-term="${escapeAttr(t)}" title="remove">×</button></span>`
+  ).join("");
+}
+$("terms-list").addEventListener("click", async (ev) => {
+  const b = ev.target.closest("button[data-term]");
+  if (!b) return;
+  const r = await postJSON("/api/jobs/remove", { term: b.dataset.term });
+  if (r.ok) renderTerms(r.list || []);
+});
+async function addTerm() {
+  const term = $("term-input").value.trim();
+  if (!term) return;
+  const r = await postJSON("/api/jobs/add", { term });
+  if (r.ok) { renderTerms(r.list || []); $("term-input").value = ""; toast(r.added ? `Added "${term}".` : `"${term}" was already there.`, "good"); }
+}
+$("term-add").addEventListener("click", addTerm);
+$("term-input").addEventListener("keydown", e => { if (e.key === "Enter") addTerm(); });
+
+// --- Telegram setup flow ---
+let tgToken = "", tgChat = "";
+
+$("tg-setup-start").addEventListener("click", () => {
+  window.__tgSetupActive = true;
+  $("tg-setup").classList.remove("hidden");
+  $("tg-setup-start").classList.add("hidden");
+  $("tg-token").focus();
+});
+
+function resetTgSetup() {
+  window.__tgSetupActive = false;
+  tgToken = ""; tgChat = "";
+  $("tg-setup").classList.add("hidden");
+  $("tg-setup-start").classList.remove("hidden");
+  $("tg-step-chat").classList.add("hidden");
+  $("tg-step-save").classList.add("hidden");
+  $("tg-token").value = ""; $("tg-chat").value = "";
+  note("tg-validate-note", ""); note("tg-detect-note", ""); note("tg-save-note", "");
+}
+$("tg-cancel").addEventListener("click", resetTgSetup);
+
+$("tg-validate").addEventListener("click", async () => {
+  const token = $("tg-token").value.trim();
+  if (!token) return note("tg-validate-note", "Paste the token first.", false);
+  note("tg-validate-note", "Validating…", true);
+  const r = await postJSON("/api/telegram/validate", { token });
+  if (r.ok) {
+    tgToken = token;
+    note("tg-validate-note", "✓ Connected as @" + r.username, true);
+    $("tg-step-chat").classList.remove("hidden");
+  } else {
+    note("tg-validate-note", "✗ " + (r.error || "invalid token"), false);
+  }
+});
+
+$("tg-detect").addEventListener("click", async () => {
+  if (!tgToken) return;
+  const btn = $("tg-detect");
+  btn.disabled = true;
+  note("tg-detect-note", "Listening for your message (send your bot any message now)…", true);
+  try {
+    const r = await postJSON("/api/telegram/detect", { token: tgToken });
+    if (r.ok) {
+      tgChat = r.chatId;
+      $("tg-chat").value = r.chatId;
+      note("tg-detect-note", '✓ Got chat ' + r.chatId + (r.text ? ' ("' + r.text + '")' : ''), true);
+      $("tg-step-save").classList.remove("hidden");
+    } else {
+      note("tg-detect-note", "✗ " + (r.error || "no message received"), false);
+    }
+  } finally { btn.disabled = false; }
+});
+
+// Typing a chat id manually also unlocks Save.
+$("tg-chat").addEventListener("input", () => {
+  const v = $("tg-chat").value.trim();
+  if (/^-?\d+$/.test(v)) { tgChat = v; $("tg-step-save").classList.remove("hidden"); }
+});
+
+$("tg-save").addEventListener("click", async () => {
+  if (!tgToken || !tgChat) return note("tg-save-note", "Need both a token and a chat id.", false);
+  note("tg-save-note", "Saving + sending a test message…", true);
+  const r = await postJSON("/api/telegram/save", { token: tgToken, chatId: tgChat });
+  if (r.ok) {
+    toast("Telegram connected — check your phone for the test message.", "good");
+    resetTgSetup();
+    tick();
+  } else {
+    note("tg-save-note", "✗ " + (r.error || "could not save"), false);
+  }
+});
+
+$("tg-disable").addEventListener("click", async () => {
+  const r = await postJSON("/api/telegram/disable");
+  toast(r.ok ? "Telegram disabled — desktop only now." : ("Could not disable: " + (r.error || "error")), r.ok ? "good" : "bad");
+  if (r.ok) tick();
+});
 
 tick();
 setInterval(tick, 5000);
+loadBatch();
+loadSettings();
 </script>
 </body>
 </html>

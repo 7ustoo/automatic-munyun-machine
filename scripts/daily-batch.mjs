@@ -26,6 +26,7 @@ import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson } from './io-helpers.mjs';
+import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 
 // v1.0 E5: ensure config + data layout are profile-aware before we read anything.
@@ -44,12 +45,11 @@ const _invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
 const IS_CLI = path.resolve(_thisFile) === _invokedFile;
 
 // ---------- env ----------
+// v2.1: Telegram is OPTIONAL. A missing .env (or one with no token) is no
+// longer fatal — the batch still scrapes, scores, and writes to disk; the
+// desktop dashboard is the delivery surface. Telegram sends are skipped when
+// not configured (see TELEGRAM_ON below).
 const ENV_PATH = path.join(ROOT, '.env');
-if (!fs.existsSync(ENV_PATH) && IS_CLI) {
-  console.error('❌ Missing .env file at ' + ENV_PATH);
-  console.error('   Run: node scripts/setup-wizard.mjs');
-  process.exit(1);
-}
 const env = fs.existsSync(ENV_PATH)
   ? Object.fromEntries(
       fs.readFileSync(ENV_PATH, 'utf8')
@@ -60,6 +60,7 @@ const env = fs.existsSync(ENV_PATH)
   : {};
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = env.TELEGRAM_CHAT_ID;
+const TELEGRAM_ON = telegramConfigured(env);
 
 // Token scrubber for everything that lands in logs or user-visible error
 // messages. Telegram URL is `…/bot<TOKEN>/sendMessage`; if a fetch failure
@@ -103,6 +104,7 @@ function log(line) {
 }
 
 async function tg(text, opts = {}) {
+  if (!TELEGRAM_ON) return null; // v2.1: Telegram off — disk + dashboard are the delivery
   const body = { chat_id: TG_CHAT, text, parse_mode: 'HTML', disable_web_page_preview: true };
   if (opts.reply_markup) body.reply_markup = opts.reply_markup;
   let res;
@@ -123,6 +125,7 @@ async function tg(text, opts = {}) {
 }
 
 async function tgDocument(filePath, caption) {
+  if (!TELEGRAM_ON) return null; // v2.1: Telegram off
   const buf = fs.readFileSync(filePath);
   const fd = new FormData();
   fd.append('chat_id', TG_CHAT);
@@ -1039,18 +1042,26 @@ if (IS_CLI) (async () => {
       skippedSeen
     });
     if (banner) message = banner + '\n\n' + message;
-    const chunks = await tgChunked(message);
-    log(`Telegram sent in ${chunks} chunk(s)`);
+    if (TELEGRAM_ON) {
+      const chunks = await tgChunked(message);
+      log(`Telegram sent in ${chunks} chunk(s)`);
+    } else {
+      log('Telegram off — batch ready in the dashboard (last-batch.json) + jobs txt on disk.');
+    }
 
-    // Build + attach the downloadable .txt as the final message of the batch.
-    // Failure here is non-fatal — messages already went through.
+    // Always write the downloadable .txt (it's the disk record + /export
+    // source); only attach it to Telegram when enabled.
     const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen };
     try {
       const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
-      await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
-      log(`Sent batch .txt: ${path.basename(txtPath)}`);
+      if (TELEGRAM_ON) {
+        await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
+        log(`Sent batch .txt: ${path.basename(txtPath)}`);
+      } else {
+        log(`Wrote batch .txt: ${path.basename(txtPath)}`);
+      }
     } catch (e) {
-      log(`Batch .txt attach failed (non-fatal): ${e.message}`);
+      log(`Batch .txt write/attach failed (non-fatal): ${e.message}`);
     }
 
     // Only persist seen-jobs *after* successful Telegram delivery —
@@ -1061,7 +1072,10 @@ if (IS_CLI) (async () => {
     // v1.0 E4: write per-batch callback table + send a final "Open batch
     // browser" CTA. The callback table maps idx → {url, company, ...} so
     // the bot can resolve inline-button taps for the next 7 days.
-    try {
+    // v2.1: Telegram-only — the table + HMAC callbacks exist for the inline
+    // bot UI. Skip entirely when Telegram is off (the dashboard reads
+    // last-batch.json directly).
+    if (TELEGRAM_ON) try {
       const items = top.map((r, i) => ({
         idx: i + 1,
         viewjobUrl: r.href,

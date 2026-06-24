@@ -18,7 +18,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -39,23 +42,53 @@ type dashboardServer struct {
 	installDir string
 	listener   net.Listener
 	srv        *http.Server
+	sup        *supervisor // v2.1: lets POST endpoints start/stop the bot poller
+	csrfToken  string      // v2.1: required on POST; injected into the served HTML
 }
 
 // startDashboard binds a free port on 127.0.0.1 and starts serving in a
 // goroutine. Returns immediately once the listener is bound so the caller
 // can read Port()/URL() right away. The chosen port is also written to
 // data/dashboard-port.txt for any external reader (CLI, scripts, debug).
-func startDashboard(installDir string) (*dashboardServer, error) {
+//
+// v2.1: takes the supervisor so the action endpoints (Scrape now, enable/
+// disable Telegram) can drive the bot. A per-process CSRF token guards every
+// state-changing POST — a random web page can reach 127.0.0.1 but can't read
+// the served HTML (same-origin), so it can't learn the token.
+func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("dashboard listen: %w", err)
 	}
 
-	d := &dashboardServer{installDir: installDir, listener: ln}
+	tokBytes := make([]byte, 16)
+	if _, err := rand.Read(tokBytes); err != nil {
+		return nil, fmt.Errorf("dashboard csrf token: %w", err)
+	}
+
+	d := &dashboardServer{
+		installDir: installDir,
+		listener:   ln,
+		sup:        sup,
+		csrfToken:  hex.EncodeToString(tokBytes),
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.handleIndex)
 	mux.HandleFunc("/api/status", d.handleStatus)
+	mux.HandleFunc("/api/batch", d.handleBatch)       // GET: full ranked batch (all jobs + matched)
+	mux.HandleFunc("/api/settings", d.handleSettings) // GET: editable knobs + search terms
+	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
+	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
+	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
+	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
+	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
+	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
+	mux.HandleFunc("/api/jobs/mode", d.guardPost(d.handleJobsMode))
+	mux.HandleFunc("/api/telegram/validate", d.guardPost(d.handleTelegramValidate))
+	mux.HandleFunc("/api/telegram/detect", d.guardPost(d.handleTelegramDetect))
+	mux.HandleFunc("/api/telegram/save", d.guardPost(d.handleTelegramSave))
+	mux.HandleFunc("/api/telegram/disable", d.guardPost(d.handleTelegramDisable))
 
 	d.srv = &http.Server{
 		Handler:           mux,
@@ -113,7 +146,11 @@ func (d *dashboardServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(dashboardHTML)
+	// Inject the per-process CSRF token into the page. The placeholder lives
+	// in a <meta> tag; the page's JS reads it and sends it as X-AMM-Token on
+	// every POST.
+	page := strings.Replace(string(dashboardHTML), "__AMM_TOKEN__", d.csrfToken, 1)
+	_, _ = w.Write([]byte(page))
 }
 
 func (d *dashboardServer) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -121,6 +158,20 @@ func (d *dashboardServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(status)
+}
+
+// handleBatch (GET) returns the full ranked batch — all jobs with their
+// matched keywords — for the dashboard's job list + "Why" popovers.
+func (d *dashboardServer) handleBatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(readFullBatch(d.installDir))
+}
+
+// handleSettings (GET) relays the node helper's editable-settings snapshot
+// (yoe, salary, filters, schedule, search mode, search terms).
+func (d *dashboardServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 15*time.Second, "settings-get")
 }
 
 // --- Status aggregation (pure, testable) ---
@@ -153,6 +204,7 @@ type botInfo struct {
 }
 
 type telegramInfo struct {
+	Enabled             bool `json:"enabled"` // v2.1: token present in .env
 	Connected           bool `json:"connected"`
 	LastPollOk          bool `json:"lastPollOk"`
 	ConsecutiveFailures int  `json:"consecutiveFailures"`
@@ -173,15 +225,16 @@ type lastBatchInfo struct {
 }
 
 type batchJob struct {
-	Idx       int    `json:"idx"`
-	Title     string `json:"title"`
-	Company   string `json:"company"`
-	Yoe       *int   `json:"yoe"`
-	MatchPct  int    `json:"matchPct"`
-	Score     int    `json:"score"`
-	Query     string `json:"q"`
-	DirectURL string `json:"directUrl"`
-	ViewURL   string `json:"viewjobUrl"`
+	Idx       int      `json:"idx"`
+	Title     string   `json:"title"`
+	Company   string   `json:"company"`
+	Yoe       *int     `json:"yoe"`
+	MatchPct  int      `json:"matchPct"`
+	Score     int      `json:"score"`
+	Query     string   `json:"q"`
+	Matched   []string `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
+	DirectURL string   `json:"directUrl"`
+	ViewURL   string   `json:"viewjobUrl"`
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the
@@ -214,6 +267,10 @@ func buildStatusAt(installDir string, now time.Time) statusResponse {
 	readHeartbeatInto(installDir, now, &out)
 	readConfigInto(installDir, &out)
 	readLastBatchInto(installDir, out.Profile.Active, &out)
+
+	// v2.1: Telegram is optional; the page shows enabled/disabled + a setup
+	// panel. "Connected" still requires an alive, polling bot.
+	out.Telegram.Enabled = telegramEnabled(installDir)
 
 	return out
 }
@@ -307,26 +364,38 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 	out.LastBatch.GeneratedAt = lb.GeneratedAt
 	out.LastBatch.JobCount = len(lb.Jobs)
 
-	limit := len(lb.Jobs)
-	if limit > dashboardJobLimit {
-		limit = dashboardJobLimit
+	out.LastBatch.Jobs = parseBatchJobs(lb.Jobs, dashboardJobLimit)
+}
+
+// parseBatchJobs decodes raw last-batch.json job entries into batchJobs.
+// limit <= 0 returns all of them (the /api/batch full list); a positive
+// limit caps the count (the /api/status glance).
+func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
+	n := len(raw)
+	if limit > 0 && limit < n {
+		n = limit
 	}
-	for i := 0; i < limit; i++ {
+	jobs := make([]batchJob, 0, n)
+	for i := 0; i < n; i++ {
 		var j struct {
-			Idx       int     `json:"idx"`
-			Title     string  `json:"title"`
-			Company   string  `json:"company"`
-			Yoe       *int    `json:"yoe"`
-			MatchPct  int     `json:"matchPct"`
-			Score     float64 `json:"score"`
-			Query     string  `json:"q"`
-			DirectURL string  `json:"directUrl"`
-			ViewURL   string  `json:"viewjobUrl"`
+			Idx       int      `json:"idx"`
+			Title     string   `json:"title"`
+			Company   string   `json:"company"`
+			Yoe       *int     `json:"yoe"`
+			MatchPct  int      `json:"matchPct"`
+			Score     float64  `json:"score"`
+			Query     string   `json:"q"`
+			Matched   []string `json:"matched"`
+			DirectURL string   `json:"directUrl"`
+			ViewURL   string   `json:"viewjobUrl"`
 		}
-		if err := json.Unmarshal(lb.Jobs[i], &j); err != nil {
+		if err := json.Unmarshal(raw[i], &j); err != nil {
 			continue
 		}
-		out.LastBatch.Jobs = append(out.LastBatch.Jobs, batchJob{
+		if j.Matched == nil {
+			j.Matched = []string{}
+		}
+		jobs = append(jobs, batchJob{
 			Idx:       j.Idx,
 			Title:     j.Title,
 			Company:   j.Company,
@@ -334,10 +403,50 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 			MatchPct:  j.MatchPct,
 			Score:     int(j.Score),
 			Query:     j.Query,
+			Matched:   j.Matched,
 			DirectURL: j.DirectURL,
 			ViewURL:   j.ViewURL,
 		})
 	}
+	return jobs
+}
+
+// readFullBatch returns the entire active-profile batch (all jobs, with
+// matched keywords) for GET /api/batch. Empty result when no batch exists.
+func readFullBatch(installDir string) lastBatchInfo {
+	info := lastBatchInfo{Jobs: []batchJob{}}
+	var active string
+	if data, err := os.ReadFile(filepath.Join(installDir, "config.json")); err == nil {
+		var cfg struct {
+			ActiveProfile string `json:"active_profile"`
+		}
+		if json.Unmarshal(data, &cfg) == nil {
+			active = cfg.ActiveProfile
+		}
+	}
+	if active == "" {
+		return info
+	}
+	data, err := os.ReadFile(filepath.Join(installDir, "data", "profiles", active, "last-batch.json"))
+	if err != nil {
+		return info
+	}
+	var lb struct {
+		Date        string            `json:"date"`
+		Profile     string            `json:"profile"`
+		GeneratedAt string            `json:"generatedAt"`
+		Jobs        []json.RawMessage `json:"jobs"`
+	}
+	if json.Unmarshal(data, &lb) != nil {
+		return info
+	}
+	info.Available = true
+	info.Date = lb.Date
+	info.Profile = lb.Profile
+	info.GeneratedAt = lb.GeneratedAt
+	info.JobCount = len(lb.Jobs)
+	info.Jobs = parseBatchJobs(lb.Jobs, 0)
+	return info
 }
 
 // parseAnyRFC3339 accepts both nanosecond and second-precision ISO8601.
