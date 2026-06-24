@@ -156,9 +156,26 @@ function writeEnv(vars) {
 
 // ---- step 1: Telegram bot token ----
 async function step1Token() {
-  step(1, 10, 'Telegram bot');
+  step(1, 10, 'Telegram phone notifications (optional)');
+
+  // v2.1: AMM is desktop-first. The dashboard on THIS computer is the main
+  // way to see and act on jobs. Telegram is now optional — only worth it if
+  // you also want batches pushed to your phone. Default is to skip it (and
+  // skip the @BotFather token dance entirely); it can be enabled later with
+  // one click from the dashboard's Telegram panel.
+  console.log(`${c.dim}AMM runs a dashboard on this computer — that's where you'll see and apply to jobs.${c.reset}`);
+  console.log(`${c.dim}Telegram is ${c.bold}optional${c.reset}${c.dim}: connect it only if you also want batches on your phone.${c.reset}`);
+  console.log(`${c.dim}You can turn it on anytime later from the dashboard — no need to decide now.${c.reset}\n`);
+
   const env = readEnv();
-  if (env.TELEGRAM_BOT_TOKEN && /^\d+:[\w-]+$/.test(env.TELEGRAM_BOT_TOKEN)) {
+  const hasExisting = env.TELEGRAM_BOT_TOKEN && /^\d+:[\w-]+$/.test(env.TELEGRAM_BOT_TOKEN);
+  const want = await ask(arrow(`Set up Telegram phone notifications now? [y/N] `));
+  if (!want.match(/^y/i)) {
+    console.log(ok('Skipping Telegram — the desktop dashboard is your control surface. Enable it later from the dashboard if you want phone alerts.'));
+    return null;
+  }
+
+  if (hasExisting) {
     const a = await ask(arrow(`Existing bot token detected. Reuse it? [Y/n] `));
     if (!a.match(/^n/i)) return env.TELEGRAM_BOT_TOKEN;
   }
@@ -222,6 +239,8 @@ async function step1Token() {
 
 // ---- step 2: chat ID auto-detection ----
 async function step2ChatId(token) {
+  // v2.1: token is null when the user skipped Telegram in step 1.
+  if (!token) return null;
   step(2, 10, 'Connecting your chat');
   const env = readEnv();
   if (env.TELEGRAM_CHAT_ID && /^\d+$/.test(env.TELEGRAM_CHAT_ID)) {
@@ -483,6 +502,7 @@ async function step9City() {
 
 // ---- step 10: schedule + finalize ----
 async function step10Finalize(token, chatId, resumeSkipped) {
+  const telegramOn = !!(token && chatId);
   step(10, 10, 'Schedule & finalize');
 
   // Load config (defaults from example) and let user tweak schedule
@@ -516,60 +536,63 @@ async function step10Finalize(token, chatId, resumeSkipped) {
   // suspenders so the loop exits even if the child is still spawning.
   process.stdout.write(arrow('Starting AMM… '));
   const BOT_LOG = path.join(ROOT, 'data', 'telegram-bot.log');
-  const logSizeBefore = (() => { try { return fs.statSync(BOT_LOG).size; } catch { return 0; } })();
+  const PORT_FILE = path.join(ROOT, 'data', 'dashboard-port.txt');
+  const botLogBefore = (() => { try { return fs.statSync(BOT_LOG).size; } catch { return 0; } })();
+  const portBefore = (() => { try { return fs.statSync(PORT_FILE).mtimeMs; } catch { return 0; } })();
   const startInfo = await startBotForPlatform();
 
-  // VERIFY the bot actually came up instead of declaring victory blind (v2.0)
-  // — "setup complete!" with a dead bot was the #1 silent failure mode. The
-  // bot's first act is appending a fresh line to its log; poll for growth
-  // for up to 20s. (Log-based, so it works identically on all 3 platforms.)
-  let botUp = false;
+  // VERIFY AMM actually came up instead of declaring victory blind (v2.0) —
+  // "setup complete!" with nothing running was the #1 silent failure mode.
+  // The signal depends on what should be running (v2.1):
+  //   Telegram ON  → the bot poller appends to telegram-bot.log on startup.
+  //   Telegram OFF → no poller; the wrapper's dashboard writes
+  //                  data/dashboard-port.txt when it binds. Either way we're
+  //                  confirming "the app is alive," cross-platform.
+  let amUp = false;
   const deadline = Date.now() + 20000;
   while (Date.now() < deadline) {
     await new Promise(r2 => setTimeout(r2, 1500));
     try {
-      if (fs.statSync(BOT_LOG).size > logSizeBefore) { botUp = true; break; }
-    } catch { /* log not created yet — keep waiting */ }
+      if (telegramOn && fs.statSync(BOT_LOG).size > botLogBefore) { amUp = true; break; }
+    } catch { /* bot log not created yet */ }
+    try {
+      const m = fs.statSync(PORT_FILE).mtimeMs;
+      if (m > portBefore || (!telegramOn && m > 0)) { amUp = true; break; }
+    } catch { /* port file not written yet */ }
   }
-  if (botUp) {
-    if (startInfo.hasWrapper) {
-      console.log(ok('AMM is running — look for the AMM icon in your system tray.'));
-      console.log(`${c.yellow}!${c.reset} ${c.bold}AMM must stay running for the bot to respond.${c.reset} It starts automatically at every login; if you quit it from the tray, start it again from the desktop icon.`);
-    } else {
-      console.log(ok('Bot is running (confirmed in data/telegram-bot.log).'));
-    }
+
+  if (amUp) {
+    console.log(ok('AMM is running — look for the AMM icon in your system tray.'));
+    console.log(`${c.yellow}!${c.reset} ${c.bold}Keep AMM running.${c.reset} It starts automatically at every login; if you quit it from the tray, reopen it from the desktop icon. ${c.dim}Open the dashboard from the tray menu to see and apply to your jobs.${c.reset}`);
   } else {
     console.log(fail('AMM did not start within 20s.'));
     if (startInfo.hasWrapper) {
-      console.log(`${c.yellow}!${c.reset} Start it manually: double-click the ${c.bold}Automatic Munyun Machine${c.reset} icon on your desktop (or Start menu).`);
-      console.log(`${c.dim}  The bot only answers on Telegram while AMM is running. It will also auto-start at your next login.${c.reset}`);
+      console.log(`${c.yellow}!${c.reset} Start it manually: double-click the ${c.bold}Automatic Munyun Machine${c.reset} icon on your desktop (or Start menu), then open the dashboard from its tray menu.`);
     } else {
-      console.log(`${c.yellow}!${c.reset} Start it manually with: ${c.bold}npm run bot${c.reset} (foreground, shows errors)`);
-      console.log(`${c.dim}  Then check data/telegram-bot.log for details.${c.reset}`);
+      console.log(`${c.yellow}!${c.reset} Start it manually with: ${c.bold}npm run bot${c.reset} (foreground, shows errors), or run the AMM app.`);
     }
   }
 
-  // Final Telegram ping. Tailor the message based on whether resume was
-  // uploaded and whether the bot verifiably started.
-  const resumeNudge = resumeSkipped
-    ? "\n\n📄 <b>Don't forget your resume.</b> Send <code>/resume</code> to upload it — match quality is poor without one."
-    : '';
-  const botWarning = botUp
-    ? (startInfo.hasWrapper
-        ? '\n\n🟢 <b>AMM is running in your system tray.</b> Keep it running — I only answer while it\'s up. It starts automatically at every login.'
-        : '')
-    : (startInfo.hasWrapper
-        ? '\n\n⚠️ <b>AMM did not start.</b> Double-click the AMM icon on your desktop — commands here won\'t answer until it\'s running.'
-        : '\n\n⚠️ <b>The background bot did not start.</b> On your computer, run <code>npm run bot</code> in the install folder to see why — commands here won\'t answer until it\'s running.');
-  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: `🎉 <b>Automatic Munyun Machine — setup complete!</b>\n\nTry <code>/scrape</code> to get your first batch of 100 ranked jobs.${resumeNudge}${botWarning}`,
-      parse_mode: 'HTML'
-    }),
-    signal: AbortSignal.timeout(15000)
-  }).catch(() => {});
+  // Final Telegram ping — ONLY when Telegram was set up. A desktop-only
+  // install has no token to ping with; the console + dashboard are the
+  // completion surface.
+  if (telegramOn) {
+    const resumeNudge = resumeSkipped
+      ? "\n\n📄 <b>Don't forget your resume.</b> Send <code>/resume</code> to upload it — match quality is poor without one."
+      : '';
+    const botWarning = amUp
+      ? '\n\n🟢 <b>AMM is running in your system tray.</b> Keep it running — I only answer while it\'s up. It starts automatically at every login.'
+      : '\n\n⚠️ <b>AMM did not start.</b> Open the AMM app on your computer — commands here won\'t answer until it\'s running.';
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `🎉 <b>Automatic Munyun Machine — setup complete!</b>\n\nYou apply from the desktop dashboard; I'll also push each batch here. Try <code>/scrape</code> for your first 100 ranked jobs.${resumeNudge}${botWarning}`,
+        parse_mode: 'HTML'
+      }),
+      signal: AbortSignal.timeout(15000)
+    }).catch(() => {});
+  }
 }
 
 // ---- main ----
@@ -600,13 +623,19 @@ async function step10Finalize(token, chatId, resumeSkipped) {
     cfgRW.set('weather.timezone', city.timezone);
 
     const resumeSkipped = parsed === null;
+    const telegramOn = !!(token && chatId);
     await step10Finalize(token, chatId, resumeSkipped);
 
-    banner('🎉 ALL DONE — check Telegram for next steps');
-    console.log(`${c.dim}Bot is now running in the background.${c.reset}`);
-    console.log(`${c.dim}Daily push registered for ${JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')).schedule.time} Mon-Fri.${c.reset}`);
+    banner('🎉 ALL DONE — open the AMM dashboard to get started');
+    console.log(`${c.dim}AMM is running in your system tray. Open its menu → ${c.bold}Open dashboard${c.reset}${c.dim} to see jobs and apply.${c.reset}`);
+    console.log(`${c.dim}First batch: click ${c.bold}Scrape now${c.reset}${c.dim} in the dashboard (or wait for the daily run at ${JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')).schedule.time} Mon-Fri).${c.reset}`);
+    if (telegramOn) {
+      console.log(`${c.dim}Telegram is connected too — batches will also arrive on your phone.${c.reset}`);
+    } else {
+      console.log(`${c.dim}Want job alerts on your phone? Enable Telegram anytime from the dashboard's Telegram panel.${c.reset}`);
+    }
     if (resumeSkipped) {
-      console.log(`${c.yellow}!${c.reset} Resume not uploaded yet. On Telegram, send ${c.bold}/resume${c.reset} and attach your CV.`);
+      console.log(`${c.yellow}!${c.reset} Resume not uploaded yet — upload it from the dashboard${telegramOn ? ` or send ${c.bold}/resume${c.reset} on Telegram` : ''}. Match quality is poor without one.`);
     }
     console.log(`${c.dim}Edit config.json anytime to customize queries, filters, weather, schedule.${c.reset}\n`);
     rl.close();

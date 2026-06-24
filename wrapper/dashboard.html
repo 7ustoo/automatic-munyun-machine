@@ -3,6 +3,9 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<!-- v2.1: per-process CSRF token, injected by the wrapper at serve time.
+     The page sends it as X-AMM-Token on every state-changing POST. -->
+<meta name="amm-token" content="__AMM_TOKEN__" />
 <title>AMM — Local Dashboard</title>
 <style>
   :root {
@@ -111,6 +114,41 @@
     border-top: 1px solid var(--border); text-align: center;
   }
   footer code { background: var(--panel); padding: 1px 6px; border-radius: 4px; }
+
+  /* v2.1: controls — buttons, inputs, the Telegram setup flow, toasts. */
+  .card h2 .right { float: right; text-transform: none; letter-spacing: 0; }
+  button {
+    font: inherit; cursor: pointer; color: var(--text);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 6px; padding: 7px 14px; font-weight: 600;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; }
+  button.danger { background: transparent; border-color: rgba(248,81,73,.5); color: var(--red); }
+  button.sm { padding: 4px 10px; font-size: 12px; }
+  input[type=text] {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
+    width: 100%; margin: 4px 0;
+  }
+  input[type=text]:focus { outline: none; border-color: var(--accent); }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted-sm { color: var(--muted); font-size: 12px; margin: 6px 0; }
+  .step { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .hidden { display: none !important; }
+  .note { font-size: 12px; margin-top: 6px; }
+  .note.ok { color: var(--green); }
+  .note.bad { color: var(--red); }
+  #toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border);
+    border-radius: 8px; padding: 10px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw;
+  }
+  #toast.show { opacity: 1; }
+  #toast.bad { border-color: rgba(248,81,73,.5); color: var(--red); }
+  #toast.good { border-color: rgba(63,185,80,.5); color: var(--green); }
 </style>
 </head>
 <body>
@@ -133,10 +171,44 @@
     </div>
 
     <div class="card">
-      <h2>Telegram</h2>
+      <h2>Telegram <span class="pill right" id="tg-pill">optional</span></h2>
       <div class="big" id="tg-big"><span class="dot" id="tg-dot"></span><span id="tg-state">—</span></div>
-      <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
-      <div class="stat-row"><span class="k">Consecutive failures</span><span class="v" id="tg-fails">—</span></div>
+
+      <!-- ENABLED view -->
+      <div id="tg-on" class="hidden">
+        <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
+        <div class="muted-sm">Batches are pushed to your phone. You apply here on the desktop either way.</div>
+        <button class="danger sm" id="tg-disable">Disable Telegram</button>
+      </div>
+
+      <!-- DISABLED / setup view -->
+      <div id="tg-off">
+        <div class="muted-sm">Off — the dashboard is your control surface. Connect a bot only if you also want batches on your phone.</div>
+        <button class="sm" id="tg-setup-start">Set up Telegram…</button>
+
+        <div id="tg-setup" class="hidden">
+          <div class="step">
+            <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token it gives you:</div>
+            <input type="text" id="tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
+            <button class="sm primary" id="tg-validate">Validate token</button>
+            <div class="note" id="tg-validate-note"></div>
+          </div>
+          <div class="step hidden" id="tg-step-chat">
+            <div class="muted-sm">2. Open your new bot in Telegram and send it any message, then:</div>
+            <div class="row">
+              <button class="sm primary" id="tg-detect">Detect my chat</button>
+              <span class="muted-sm">or paste your chat id</span>
+              <input type="text" id="tg-chat" placeholder="chat id" style="width:140px" autocomplete="off" />
+            </div>
+            <div class="note" id="tg-detect-note"></div>
+          </div>
+          <div class="step hidden" id="tg-step-save">
+            <button class="sm primary" id="tg-save">Save &amp; enable</button>
+            <button class="sm" id="tg-cancel">Cancel</button>
+            <div class="note" id="tg-save-note"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="card">
@@ -147,10 +219,14 @@
   </div>
 
   <div class="card">
-    <h2>Last batch <span class="pill" id="lb-meta"></span></h2>
+    <h2>Last batch <span class="pill" id="lb-meta"></span>
+      <span class="right"><button class="primary sm" id="scrape-btn">⟳ Scrape now</button></span>
+    </h2>
     <div id="lb-body"></div>
   </div>
 </main>
+
+<div id="toast"></div>
 
 <footer>
   Local dashboard · <code id="install-dir">—</code> · auto-refresh every 5s
@@ -259,14 +335,23 @@ function render(s) {
     ? humanDuration(s.bot.lastHeartbeatAgeSec) + " ago" : "—";
   $("bot-version").textContent = s.bot?.version || "—";
 
+  // v2.1: Telegram is optional. Reflect enabled/disabled; the setup panel
+  // inside #tg-off is owned by the control logic below, not touched here.
+  const tgEnabled = !!s.telegram?.enabled;
   const tgConnected = !!s.telegram?.connected;
+  const tgDotState = !tgEnabled ? "unknown" : (tgConnected ? "alive" : "dead");
   const tgBig = $("tg-big");
   tgBig.classList.remove("alive","stale","dead","unknown");
-  tgBig.classList.add(tgConnected ? "alive" : (botState === "unknown" ? "unknown" : "dead"));
-  $("tg-state").textContent = tgConnected ? "Connected" : "Disconnected";
-  setDot($("tg-dot"), tgConnected ? "alive" : (botState === "unknown" ? "unknown" : "dead"));
+  tgBig.classList.add(tgDotState);
+  setDot($("tg-dot"), tgDotState);
+  $("tg-state").textContent = !tgEnabled ? "Off" : (tgConnected ? "Connected" : "Starting…");
+  $("tg-pill").textContent = tgEnabled ? "on" : "optional";
   $("tg-poll").textContent = s.telegram?.lastPollOk ? "OK" : "Failing";
-  $("tg-fails").textContent = String(s.telegram?.consecutiveFailures ?? 0);
+  // Don't yank the panel out from under a user mid-setup.
+  if (!window.__tgSetupActive) {
+    $("tg-on").classList.toggle("hidden", !tgEnabled);
+    $("tg-off").classList.toggle("hidden", tgEnabled);
+  }
 
   $("profile-big").textContent = s.profile?.active || "—";
   $("profile-all").textContent = (s.profile?.all || []).join(", ") || "—";
@@ -279,6 +364,132 @@ function render(s) {
   }
   $("lb-body").innerHTML = renderJobs(lb.jobs || [], lb.jobCount || 0);
 }
+
+// ---- v2.1: control surface (Scrape now + Telegram setup) ----
+const AMM_TOKEN = document.querySelector('meta[name="amm-token"]')?.content || "";
+
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AMM-Token": AMM_TOKEN },
+    body: JSON.stringify(body || {}),
+    cache: "no-store",
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok && data.error == null) data = { ok: false, error: "HTTP " + res.status };
+  return data;
+}
+
+let toastTimer = null;
+function toast(msg, kind) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.className = "show" + (kind ? " " + kind : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ""; }, 3500);
+}
+
+function note(id, msg, ok) {
+  const el = $(id);
+  el.textContent = msg || "";
+  el.className = "note" + (msg ? (ok ? " ok" : " bad") : "");
+}
+
+// --- Scrape now ---
+$("scrape-btn").addEventListener("click", async () => {
+  const btn = $("scrape-btn");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Scraping…";
+  try {
+    const r = await postJSON("/api/scrape");
+    toast(r.ok ? "Scrape started — your batch will appear here in 1–2 min." : ("Could not start: " + (r.error || "error")), r.ok ? "good" : "bad");
+  } catch (e) {
+    toast("Could not start scrape: " + e.message, "bad");
+  } finally {
+    setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 4000);
+  }
+});
+
+// --- Telegram setup flow ---
+let tgToken = "", tgChat = "";
+
+$("tg-setup-start").addEventListener("click", () => {
+  window.__tgSetupActive = true;
+  $("tg-setup").classList.remove("hidden");
+  $("tg-setup-start").classList.add("hidden");
+  $("tg-token").focus();
+});
+
+function resetTgSetup() {
+  window.__tgSetupActive = false;
+  tgToken = ""; tgChat = "";
+  $("tg-setup").classList.add("hidden");
+  $("tg-setup-start").classList.remove("hidden");
+  $("tg-step-chat").classList.add("hidden");
+  $("tg-step-save").classList.add("hidden");
+  $("tg-token").value = ""; $("tg-chat").value = "";
+  note("tg-validate-note", ""); note("tg-detect-note", ""); note("tg-save-note", "");
+}
+$("tg-cancel").addEventListener("click", resetTgSetup);
+
+$("tg-validate").addEventListener("click", async () => {
+  const token = $("tg-token").value.trim();
+  if (!token) return note("tg-validate-note", "Paste the token first.", false);
+  note("tg-validate-note", "Validating…", true);
+  const r = await postJSON("/api/telegram/validate", { token });
+  if (r.ok) {
+    tgToken = token;
+    note("tg-validate-note", "✓ Connected as @" + r.username, true);
+    $("tg-step-chat").classList.remove("hidden");
+  } else {
+    note("tg-validate-note", "✗ " + (r.error || "invalid token"), false);
+  }
+});
+
+$("tg-detect").addEventListener("click", async () => {
+  if (!tgToken) return;
+  const btn = $("tg-detect");
+  btn.disabled = true;
+  note("tg-detect-note", "Listening for your message (send your bot any message now)…", true);
+  try {
+    const r = await postJSON("/api/telegram/detect", { token: tgToken });
+    if (r.ok) {
+      tgChat = r.chatId;
+      $("tg-chat").value = r.chatId;
+      note("tg-detect-note", '✓ Got chat ' + r.chatId + (r.text ? ' ("' + r.text + '")' : ''), true);
+      $("tg-step-save").classList.remove("hidden");
+    } else {
+      note("tg-detect-note", "✗ " + (r.error || "no message received"), false);
+    }
+  } finally { btn.disabled = false; }
+});
+
+// Typing a chat id manually also unlocks Save.
+$("tg-chat").addEventListener("input", () => {
+  const v = $("tg-chat").value.trim();
+  if (/^-?\d+$/.test(v)) { tgChat = v; $("tg-step-save").classList.remove("hidden"); }
+});
+
+$("tg-save").addEventListener("click", async () => {
+  if (!tgToken || !tgChat) return note("tg-save-note", "Need both a token and a chat id.", false);
+  note("tg-save-note", "Saving + sending a test message…", true);
+  const r = await postJSON("/api/telegram/save", { token: tgToken, chatId: tgChat });
+  if (r.ok) {
+    toast("Telegram connected — check your phone for the test message.", "good");
+    resetTgSetup();
+    tick();
+  } else {
+    note("tg-save-note", "✗ " + (r.error || "could not save"), false);
+  }
+});
+
+$("tg-disable").addEventListener("click", async () => {
+  const r = await postJSON("/api/telegram/disable");
+  toast(r.ok ? "Telegram disabled — desktop only now." : ("Could not disable: " + (r.error || "error")), r.ok ? "good" : "bad");
+  if (r.ok) tick();
+});
 
 tick();
 setInterval(tick, 5000);

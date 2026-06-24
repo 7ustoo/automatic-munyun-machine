@@ -18,7 +18,9 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -27,6 +29,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -39,23 +42,46 @@ type dashboardServer struct {
 	installDir string
 	listener   net.Listener
 	srv        *http.Server
+	sup        *supervisor // v2.1: lets POST endpoints start/stop the bot poller
+	csrfToken  string      // v2.1: required on POST; injected into the served HTML
 }
 
 // startDashboard binds a free port on 127.0.0.1 and starts serving in a
 // goroutine. Returns immediately once the listener is bound so the caller
 // can read Port()/URL() right away. The chosen port is also written to
 // data/dashboard-port.txt for any external reader (CLI, scripts, debug).
-func startDashboard(installDir string) (*dashboardServer, error) {
+//
+// v2.1: takes the supervisor so the action endpoints (Scrape now, enable/
+// disable Telegram) can drive the bot. A per-process CSRF token guards every
+// state-changing POST — a random web page can reach 127.0.0.1 but can't read
+// the served HTML (same-origin), so it can't learn the token.
+func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, fmt.Errorf("dashboard listen: %w", err)
 	}
 
-	d := &dashboardServer{installDir: installDir, listener: ln}
+	tokBytes := make([]byte, 16)
+	if _, err := rand.Read(tokBytes); err != nil {
+		return nil, fmt.Errorf("dashboard csrf token: %w", err)
+	}
+
+	d := &dashboardServer{
+		installDir: installDir,
+		listener:   ln,
+		sup:        sup,
+		csrfToken:  hex.EncodeToString(tokBytes),
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.handleIndex)
 	mux.HandleFunc("/api/status", d.handleStatus)
+	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
+	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
+	mux.HandleFunc("/api/telegram/validate", d.guardPost(d.handleTelegramValidate))
+	mux.HandleFunc("/api/telegram/detect", d.guardPost(d.handleTelegramDetect))
+	mux.HandleFunc("/api/telegram/save", d.guardPost(d.handleTelegramSave))
+	mux.HandleFunc("/api/telegram/disable", d.guardPost(d.handleTelegramDisable))
 
 	d.srv = &http.Server{
 		Handler:           mux,
@@ -113,7 +139,11 @@ func (d *dashboardServer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write(dashboardHTML)
+	// Inject the per-process CSRF token into the page. The placeholder lives
+	// in a <meta> tag; the page's JS reads it and sends it as X-AMM-Token on
+	// every POST.
+	page := strings.Replace(string(dashboardHTML), "__AMM_TOKEN__", d.csrfToken, 1)
+	_, _ = w.Write([]byte(page))
 }
 
 func (d *dashboardServer) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -153,6 +183,7 @@ type botInfo struct {
 }
 
 type telegramInfo struct {
+	Enabled             bool `json:"enabled"` // v2.1: token present in .env
 	Connected           bool `json:"connected"`
 	LastPollOk          bool `json:"lastPollOk"`
 	ConsecutiveFailures int  `json:"consecutiveFailures"`
@@ -214,6 +245,10 @@ func buildStatusAt(installDir string, now time.Time) statusResponse {
 	readHeartbeatInto(installDir, now, &out)
 	readConfigInto(installDir, &out)
 	readLastBatchInto(installDir, out.Profile.Active, &out)
+
+	// v2.1: Telegram is optional; the page shows enabled/disabled + a setup
+	// panel. "Connected" still requires an alive, polling bot.
+	out.Telegram.Enabled = telegramEnabled(installDir)
 
 	return out
 }

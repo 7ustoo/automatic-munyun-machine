@@ -10,6 +10,29 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.1.0] — 2026-06-13
+
+Desktop-first: the local dashboard is now the primary surface, and Telegram is an optional add-on you turn on from the GUI.
+
+### Added
+
+- **Telegram is now optional.** AMM runs fully without it — the batch still scrapes, scores, and lands in the dashboard + `jobs(date).txt`. The setup wizard's first step is now a single "Set up Telegram phone notifications now? [y/N]" (default **no**), which skips the @BotFather token dance entirely for anyone who just wants the desktop app. "Is Telegram on?" is defined in one place (`scripts/telegram-config.mjs#telegramConfigured` — token + chat present and well-shaped); the wizard, `daily-batch.mjs`, and the Go wrapper all agree on it.
+- **Set up Telegram from the dashboard.** The dashboard's Telegram card is now interactive: paste your bot token → Validate → "send your bot a message" → Detect my chat (or paste the chat id) → Save & enable. A Disable button turns it back off. Backed by `scripts/telegram-setup.mjs` (validate/detect/save/disable) — all Telegram API talk stays in Node; the wrapper just relays its JSON.
+- **"Scrape now" button in the dashboard.** Trigger a fresh batch from the GUI (same as the tray's "Run scrape now"), so the dashboard is a self-contained control surface — no need to reach for Telegram or the tray.
+- **Localhost CSRF protection** for the new state-changing endpoints: the wrapper mints a per-process token, injects it into the served page, and requires it (plus a loopback `Host`) on every POST. A random web page can reach `127.0.0.1` but can't read the page, so it can't forge the token. Covered by Go tests.
+
+### Changed
+
+- **The wrapper supervises the bot poller only while Telegram is enabled.** A desktop-only install no longer crash-loops a token-less bot — the supervisor idles and the dashboard runs. Enabling Telegram from the GUI brings the poller up within a few seconds (no restart); disabling it stops the poller immediately. The first-run "needs setup" gate is now keyed on `config.json` existing, decoupled from Telegram (`isSetUp` vs `telegramEnabled` in the wrapper).
+- **Setup wizard messaging is desktop-first** — the closing screen points at the dashboard ("Open dashboard → Scrape now") and only mentions Telegram if you connected it. The "AMM is running" verification now also accepts the dashboard coming up (via `data/dashboard-port.txt`), so it works for token-less installs too.
+
+### Notes
+
+- Existing installs are unaffected: a `.env` with a token = Telegram stays on, exactly as before.
+- 19 new tests (Go CSRF guard + token injection + the setup/telegram split; node `telegramConfigured`).
+
+---
+
 ## [2.0.4] — 2026-06-13
 
 ### Fixed

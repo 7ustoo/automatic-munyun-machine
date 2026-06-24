@@ -36,6 +36,10 @@ const (
 	supervisorMaxRestarts   = 3
 	supervisorRestartWindow = 1 * time.Hour
 	supervisorRespawnDelay  = 2 * time.Second // brief pause so OS reaps the dead child
+	// v2.1: how often runForever rechecks whether Telegram got enabled while
+	// it's idling. Short enough that enabling Telegram from the dashboard
+	// brings the bot up within a few seconds.
+	supervisorIdleRecheck = 4 * time.Second
 )
 
 func newSupervisor(botPath, installDir string) *supervisor {
@@ -49,11 +53,26 @@ func newSupervisor(botPath, installDir string) *supervisor {
 // either (a) the wrapper is shutting down (stopped.Load() == true), or
 // (b) the restart throttle is exhausted.
 func (s *supervisor) runForever() {
+	idleLogged := false
 	for {
 		if s.stopped.Load() {
 			log.Printf("supervisor: stopped flag set, exiting loop")
 			return
 		}
+
+		// v2.1: Telegram is optional. When it's off there's no poller to
+		// supervise — idle and recheck instead of spawning a token-less bot
+		// that would exit immediately and burn the restart budget. Enabling
+		// Telegram from the dashboard is picked up here within a few seconds.
+		if !telegramEnabled(s.installDir) {
+			if !idleLogged {
+				log.Printf("supervisor: Telegram off — idling (no bot poller). Dashboard is the surface.")
+				idleLogged = true
+			}
+			time.Sleep(supervisorIdleRecheck)
+			continue
+		}
+		idleLogged = false
 
 		if !s.checkRestartBudget() {
 			log.Printf("supervisor: restart budget exhausted (%d restarts in last 1h). Wrapper exiting; scheduler will restart at next trigger.", supervisorMaxRestarts)
@@ -100,6 +119,14 @@ func (s *supervisor) runForever() {
 		if s.stopped.Load() {
 			log.Printf("supervisor: child exited during shutdown (err=%v) — clean", waitErr)
 			return
+		}
+
+		// v2.1: if Telegram was turned off while the bot ran (dashboard
+		// "Disable", which kills the child), the exit is deliberate — don't
+		// count it as a crash. The loop top will idle.
+		if !telegramEnabled(s.installDir) {
+			log.Printf("supervisor: bot exited and Telegram is now off — idling, not a crash")
+			continue
 		}
 
 		log.Printf("supervisor: child exited unexpectedly (err=%v) — will respawn after %v", waitErr, supervisorRespawnDelay)
@@ -163,6 +190,21 @@ func (s *supervisor) Restart() {
 	}
 	log.Printf("supervisor: Restart() — killing child pid=%d for respawn", child.Process.Pid)
 	_ = child.Process.Kill() // Kill (not Terminate) so the bot doesn't hang on cleanup
+}
+
+// KillChild kills the running bot poller (if any) without setting the
+// terminal stopped flag. v2.1: called when Telegram is disabled from the
+// dashboard. runForever's post-Wait check sees Telegram is now off and idles
+// instead of respawning. No-op when no child is running.
+func (s *supervisor) KillChild() {
+	s.mu.Lock()
+	child := s.child
+	s.mu.Unlock()
+	if child == nil || child.Process == nil {
+		return
+	}
+	log.Printf("supervisor: KillChild() — stopping bot poller pid=%d (Telegram disabled)", child.Process.Pid)
+	_ = child.Process.Kill()
 }
 
 // ChildPID returns the current node child's PID, or 0 if none. Used by tray

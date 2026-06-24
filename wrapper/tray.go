@@ -210,7 +210,7 @@ func (s *trayState) pollHeartbeat() {
 
 	for {
 		if s.needsSetup {
-			if isConfigured(s.installDir) {
+			if isSetUp(s.installDir) {
 				s.exitNeedsSetupMode()
 			} else {
 				// Still waiting on setup. Keep the icon gray + status label
