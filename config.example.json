@@ -56,7 +56,9 @@
     "maxPagesPerQuery": 50,
     "_maxPagesPerQueryComment": "Hiring.cafe shows ~40 cards per page. Bot clicks Next up to this many times per query. Effective ceiling — per-query early-stop on '0 new cards' usually terminates much sooner.",
     "targetJobsPerBatch": 100,
-    "_targetJobsPerBatchComment": "Cross-query early stop. Once we have ~1.5x this many candidate cards across queries, skip the remaining queries. Default 100 → stop at ~150 candidates.",
+    "_targetJobsPerBatchComment": "How many ranked jobs make the final batch (top-N after scoring).",
+    "searchAllQueries": true,
+    "_searchAllQueriesComment": "v2.3: true (default) = search EVERY keyword, fully paginated to maxPagesPerQuery, so jobs under later keywords are never missed. false = old behavior: stop scraping more keywords once ~1.5x targetJobsPerBatch candidates are found (faster, but can skip keywords).",
     "seenJobsFreshnessDays": 60,
     "_seenJobsFreshnessComment": "Days before an unapplied previously-seen job rolls back into the supply pool. Applied jobs (in applications.md) are always blocked.",
     "_percentBands": "score 30+ → 90-100%; 20-29 → 75-89%; 10-19 → 50-74%; 5-9 → 30-49%; 0-4 → 0-29%"

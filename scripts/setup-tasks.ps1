@@ -59,10 +59,12 @@ $dayEnums = $days | ForEach-Object { [System.DayOfWeek]$_ }
 # upgrading from v0.1 can manually `schtasks /delete /tn career-ops-bot`
 # and `…career-ops-daily-batch`.)
 
-# Daily batch at scheduled time, scheduled days
+# Daily batch at scheduled time, scheduled days.
+# v2.3: 45-min ceiling (was 20) — full-scan searches every keyword to the end,
+# which takes longer than the old early-stop on heavy-supply days.
 $action7  = New-ScheduledTaskAction -Execute $RUN_BATCH_CMD
 $trigger7 = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayEnums -At $time
-$set7     = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 20)
+$set7     = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
 Register-ScheduledTask -TaskName 'munyun-daily-batch' -Action $action7 -Trigger $trigger7 -Settings $set7 -Description "AMM daily 100-job batch ($time, $($days -join ','))" -Force | Out-Null
 Write-Host "[OK] Registered: munyun-daily-batch ($time, $($days -join ','))"
 

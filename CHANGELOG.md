@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.3.0] — 2026-06-14
+
+Three fixes: it searches every keyword now, the tray shows the AMM logo, and the dashboard window reliably opens after install.
+
+### Fixed
+
+- **The scraper now searches every keyword, fully.** It used to stop scraping additional keywords once it had ~1.5× the target candidates (`targetJobsPerBatch`), so later keywords were never searched — which is why plenty of real jobs were missed and queries looked empty. New default `scoring.searchAllQueries: true` searches **every** configured keyword to the end (each paginated to `maxPagesPerQuery`), then moves on. Set it `false` to restore the old early-stop. The daily scheduled run's time budget was raised 20 → 45 min to accommodate the fuller scan.
+- **The tray icon is the AMM logo**, not a gray square. It also no longer shows as "dead" when Telegram is off — with Telegram optional there's no bot heartbeat by design, so the tray now reads "running — Telegram off (desktop dashboard)" with the logo, instead of a red/gray error state. (New `scripts/build/make-tray-ico.mjs` generates a BMP/DIB `logo-tray.ico` — the system-tray loader can't read the PNG-compressed `logo.ico` used for the installer/favicon.)
+- **The dashboard window reliably opens right after setup.** The wizard used to fire two launches (the `--background` scheduled task + a direct one) that raced for the single-instance lock — when the background one won, nothing opened and AMM just sat in the tray. Now setup launches the app once, with no flag, so the window comes up. The scheduled task stays registered for quiet auto-start at future logins.
+
+---
+
 ## [2.2.0] — 2026-06-14
 
 It's a real app now: launching AMM opens a proper window with the dashboard, instead of running only in the background.

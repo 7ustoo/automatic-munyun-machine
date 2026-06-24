@@ -32,3 +32,18 @@ var iconRedPNG []byte
 
 //go:embed icon-gray.png
 var iconGrayPNG []byte
+
+// v2.3: the AMM brand logo, shown as the tray icon for healthy/idle states
+// (instead of a plain gray dot). The color-coded icons above are kept for
+// genuine warning/error states (stale heartbeat / dead bot).
+//
+// Windows uses logo-tray.ico — a BMP/DIB-encoded ICO (scripts/build/
+// make-tray-ico.mjs). NOT logo.ico: that one is PNG-compressed and the
+// system-tray loader (fyne/systray → Win32) can't read PNG entries
+// ("unable to load icon from file"). logo.ico stays the favicon/installer icon.
+//
+//go:embed logo-tray.ico
+var iconLogoICO []byte
+
+//go:embed logo.png
+var iconLogoPNG []byte

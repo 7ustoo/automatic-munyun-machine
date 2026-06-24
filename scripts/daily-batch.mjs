@@ -333,6 +333,11 @@ async function _scrapeWith(ctx) {
   // exceeds the target with some headroom for floor losses, we stop
   // scraping additional queries — saves time on heavy-supply days.
   const TARGET_JOBS = SCORING.targetJobsPerBatch ?? 100;
+  // v2.3: by default search EVERY configured keyword, fully paginated — don't
+  // skip later keywords just because the early ones filled the target. Set
+  // scoring.searchAllQueries:false to restore the old "stop once we have
+  // ~1.5x target candidates" speed optimization.
+  const SEARCH_ALL_QUERIES = SCORING.searchAllQueries !== false;
   const _appliedSet  = loadAppliedHrefs();
   const _blockedSet  = loadBlockedSeen();
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
@@ -411,14 +416,15 @@ async function _scrapeWith(ctx) {
       _crossQuerySeen.add(r.href);
       if (!_appliedSet.has(r.href) && !_blockedSet.has(r.href)) runningFreshEstimate++;
     }
-    // 50% headroom for filter+floor losses — stop scraping once we have
-    // ~1.5x the target candidate cards. Conservative; usually means we'll
-    // end up delivering close to TARGET_JOBS after filters trim.
-    if (runningFreshEstimate >= TARGET_JOBS * 1.5) {
-      log(`  ✓ target hit early — running fresh estimate ${runningFreshEstimate} ≥ ${Math.round(TARGET_JOBS * 1.5)} (target ${TARGET_JOBS} × 1.5 headroom). Skipping remaining queries.`);
+    // v2.3: only early-stop when explicitly opted out of full-scan. By
+    // default we search every keyword to the end so a plethora of jobs under
+    // later keywords is never missed.
+    if (!SEARCH_ALL_QUERIES && runningFreshEstimate >= TARGET_JOBS * 1.5) {
+      log(`  ✓ target hit early — running fresh estimate ${runningFreshEstimate} ≥ ${Math.round(TARGET_JOBS * 1.5)}. Skipping remaining queries (searchAllQueries=false).`);
       break;
     }
   }
+  log(`Searched ${Object.keys(results).length}/${QUERIES.length} keywords${SEARCH_ALL_QUERIES ? ' (full scan — every keyword, every page)' : ''}.`);
 
   // Persist per-query 7-day rolling supply history. Surfaces in /diagnose
   // so a user can see "Detection Engineer has averaged 0 cards/day for a
