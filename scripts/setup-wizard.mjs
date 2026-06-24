@@ -65,20 +65,31 @@ function registerSchedulerForPlatform() {
 //      lock (wrapper/singleinstance.go) makes a duplicate launch exit
 //      cleanly, so this is pure belt-and-suspenders.
 async function startBotForPlatform() {
-  const r = runScheduledTask('bot');
+  // v2.3: launch the wrapper ONCE, with no flag, so it becomes the primary
+  // instance and opens the dashboard app window right after setup. Previously
+  // we ALSO fired the scheduled task (which now starts with --background) —
+  // the two raced for the single-instance lock, and when the background one
+  // won, no window opened. The scheduled task stays registered for future
+  // logins; we just don't trigger it here. Fall back to the scheduler only
+  // when there's no wrapper binary (source checkout without `make build`).
   const wrapper = wrapperBinaryPath(ROOT);
   let direct = false;
   if (wrapper) {
     try {
       spawn(wrapper, [], { cwd: ROOT, detached: true, stdio: 'ignore' }).unref();
       direct = true;
-    } catch { /* messaging below covers the both-failed case */ }
+    } catch { /* fall through to the scheduler */ }
   }
-  if (!r.ok && !direct) {
-    console.log(fail(`Could not auto-start AMM: ${r.output}`));
-    console.log(`${c.dim}It will start at next login. Or run the bot manually with: npm run bot${c.reset}`);
+  let scheduled = false;
+  if (!direct) {
+    const r = runScheduledTask('bot');
+    scheduled = r.ok;
+    if (!r.ok) {
+      console.log(fail(`Could not auto-start AMM: ${r.output}`));
+      console.log(`${c.dim}It will start at next login. Or run the app manually.${c.reset}`);
+    }
   }
-  return { scheduled: r.ok, direct, hasWrapper: !!wrapper };
+  return { scheduled, direct, hasWrapper: !!wrapper };
 }
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

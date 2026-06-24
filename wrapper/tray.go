@@ -213,10 +213,14 @@ func (s *trayState) pollHeartbeat() {
 			if isSetUp(s.installDir) {
 				s.exitNeedsSetupMode()
 			} else {
-				// Still waiting on setup. Keep the icon gray + status label
-				// pointed at the Setup menu item.
+				// Still waiting on setup. Logo icon + a clear status label.
 				s.setStatus(iconGray, "Status: setup required — click 'Run setup wizard'")
 			}
+		} else if !telegramEnabled(s.installDir) {
+			// v2.3: Telegram is optional. With it off there's no bot poller and
+			// no heartbeat — that's healthy, not dead. Show the logo and say so
+			// instead of a misleading "no heartbeat / DEAD".
+			s.setStatus(iconGreen, "Status: running — Telegram off (desktop dashboard). Open dashboard from this menu.")
 		} else {
 			s.refreshHeartbeat()
 		}
@@ -310,29 +314,23 @@ func (s *trayState) setIcon(state iconState) {
 	useICO := runtime.GOOS == "windows"
 	var data []byte
 	switch state {
-	case iconGreen:
-		if useICO {
-			data = iconGreenICO
-		} else {
-			data = iconGreenPNG
-		}
-	case iconYellow:
+	case iconYellow: // stale heartbeat — keep the warning color
 		if useICO {
 			data = iconYellowICO
 		} else {
 			data = iconYellowPNG
 		}
-	case iconRed:
+	case iconRed: // dead bot (Telegram on) — keep the alert color
 		if useICO {
 			data = iconRedICO
 		} else {
 			data = iconRedPNG
 		}
-	default: // iconGray
+	default: // v2.3: healthy / idle / startup → the AMM brand logo
 		if useICO {
-			data = iconGrayICO
+			data = iconLogoICO
 		} else {
-			data = iconGrayPNG
+			data = iconLogoPNG
 		}
 	}
 	systray.SetIcon(data)
