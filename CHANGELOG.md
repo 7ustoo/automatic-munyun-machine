@@ -10,6 +10,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.2.0] — 2026-06-14
+
+It's a real app now: launching AMM opens a proper window with the dashboard, instead of running only in the background.
+
+### Added
+
+- **AMM opens as an actual application window.** Double-click the desktop icon and a standalone, titled window comes up with the dashboard and the AMM logo in the title bar — no browser tabs, no address bar. Under the hood it's the installed Chrome/Edge in app-mode with its own isolated profile (nothing extra to bundle), so it looks and behaves like a native app. If it's already running quietly in the background, clicking the icon brings the window up. The login auto-start stays quiet in the tray (`--background`) so a window doesn't pop on every boot.
+- **Download the jobs `.txt` from the app.** A “⬇ Download .txt” button in the Ranked jobs card serves the newest `jobs(<date>).txt` — the full, search-friendly batch — straight from the dashboard. (`GET /api/jobs-txt`.)
+
+### Notes
+
+- Verified live: the window opens via the resolved browser in app-mode, `--background` opens no window, the favicon serves the AMM logo, and the `.txt` downloads with the right filename. 5 new Go tests (browser resolution, app-mode args, port parsing).
+
+---
+
 ## [2.1.0] — 2026-06-13
 
 Desktop-first: the local dashboard is now a full control surface — see your ranked jobs, apply/save/track, tune settings, manage searches — and Telegram is an optional add-on you turn on from the GUI.

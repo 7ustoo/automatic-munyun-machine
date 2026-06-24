@@ -73,12 +73,15 @@ node scripts/setup-wizard.mjs
 9. **Your city.** Auto-geocoded for the morning weather report.
 10. **Schedule + finalize.** Pick time + days. Wizard registers the scheduler, starts AMM (the tray app), and confirms it's running. Open the dashboard from the tray menu and click **Scrape now** for your first batch. (If you connected Telegram, you also get a ✅ ping there.)
 
-## Desktop dashboard
+## The app
 
-The tray icon's **Open dashboard** opens a local page (`127.0.0.1`, your machine only) where you:
+Double-click the **Automatic Munyun Machine** icon and it opens as a real app window — the dashboard, with the AMM logo in the title bar. (If it's already running in the background, clicking the icon brings the window up; it auto-starts quietly at login so a window doesn't pop on every boot.) You can also reopen it any time from the tray icon's **Open dashboard**.
 
-- see today's ranked batch and open any job to apply,
-- click **Scrape now** to pull a fresh batch on demand,
+It's a local page (`127.0.0.1`, your machine only) where you:
+
+- see today's ranked batch and apply, save, mark-applied, or see *why* each job matched,
+- click **Scrape now** to pull a fresh batch on demand, or **Download .txt** to save the full batch,
+- tune your settings and search terms,
 - turn **Telegram** on or off — the panel walks you through pasting a bot token, connecting your chat, and enabling phone notifications, with a one-click Disable later.
 
 It's the primary way to use AMM; Telegram is an optional notification channel layered on top.
