@@ -79,6 +79,68 @@ func (d *dashboardServer) handleScrape(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+// --- v2.1 control surface: job actions, settings, search terms ---
+// All of these exec scripts/dashboard-api.mjs and relay its one-line JSON,
+// so the job/config logic stays in Node (profile-aware config-rw, the
+// Playwright job-action, applications.md format).
+
+func (d *dashboardServer) execDashboardAPI(timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	script := filepath.Join(d.installDir, "scripts", "dashboard-api.mjs")
+	cmd := exec.CommandContext(ctx, findNode(), append([]string{script}, args...)...)
+	cmd.Dir = d.installDir
+	applyChildHideWindow(cmd)
+	out, err := cmd.Output()
+	return out, err
+}
+
+func (d *dashboardServer) relayDashboardAPI(w http.ResponseWriter, timeout time.Duration, args ...string) []byte {
+	out, err := d.execDashboardAPI(timeout, args...)
+	if err != nil && len(out) == 0 {
+		log.Printf("dashboard: dashboard-api %v failed: %v", args[:1], err)
+		writeJSONError(w, http.StatusOK, "Could not run the helper. Is Node installed?")
+		return nil
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	trimmed := append([]byte(strings.TrimSpace(string(out))), '\n')
+	_, _ = w.Write(trimmed)
+	return out
+}
+
+// handleJobAction: Save / Mark-applied on a batch job by index. The Playwright
+// hiring.cafe action can take up to ~90s, so the exec budget is generous.
+func (d *dashboardServer) handleJobAction(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	action := b["action"]
+	if action != "save" && action != "applied" {
+		writeJSONError(w, http.StatusOK, "action must be save or applied")
+		return
+	}
+	d.relayDashboardAPI(w, 100*time.Second, "job-action", action, b["idx"])
+}
+
+func (d *dashboardServer) handleSettingsSet(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "settings-set", b["path"], b["value"])
+}
+
+func (d *dashboardServer) handleJobsAdd(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "jobs-add", b["term"])
+}
+
+func (d *dashboardServer) handleJobsRemove(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "jobs-remove", b["term"])
+}
+
+func (d *dashboardServer) handleJobsMode(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "jobs-mode", b["mode"])
+}
+
 // execTelegramSetup runs scripts/telegram-setup.mjs <args...> and returns its
 // single line of stdout (already JSON). timeout bounds the detect poll.
 func (d *dashboardServer) execTelegramSetup(timeout time.Duration, args ...string) ([]byte, error) {

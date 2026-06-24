@@ -76,8 +76,15 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", d.handleIndex)
 	mux.HandleFunc("/api/status", d.handleStatus)
+	mux.HandleFunc("/api/batch", d.handleBatch)       // GET: full ranked batch (all jobs + matched)
+	mux.HandleFunc("/api/settings", d.handleSettings) // GET: editable knobs + search terms
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
+	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
+	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
+	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
+	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
+	mux.HandleFunc("/api/jobs/mode", d.guardPost(d.handleJobsMode))
 	mux.HandleFunc("/api/telegram/validate", d.guardPost(d.handleTelegramValidate))
 	mux.HandleFunc("/api/telegram/detect", d.guardPost(d.handleTelegramDetect))
 	mux.HandleFunc("/api/telegram/save", d.guardPost(d.handleTelegramSave))
@@ -153,6 +160,20 @@ func (d *dashboardServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(status)
 }
 
+// handleBatch (GET) returns the full ranked batch — all jobs with their
+// matched keywords — for the dashboard's job list + "Why" popovers.
+func (d *dashboardServer) handleBatch(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_ = json.NewEncoder(w).Encode(readFullBatch(d.installDir))
+}
+
+// handleSettings (GET) relays the node helper's editable-settings snapshot
+// (yoe, salary, filters, schedule, search mode, search terms).
+func (d *dashboardServer) handleSettings(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 15*time.Second, "settings-get")
+}
+
 // --- Status aggregation (pure, testable) ---
 
 type statusResponse struct {
@@ -204,15 +225,16 @@ type lastBatchInfo struct {
 }
 
 type batchJob struct {
-	Idx       int    `json:"idx"`
-	Title     string `json:"title"`
-	Company   string `json:"company"`
-	Yoe       *int   `json:"yoe"`
-	MatchPct  int    `json:"matchPct"`
-	Score     int    `json:"score"`
-	Query     string `json:"q"`
-	DirectURL string `json:"directUrl"`
-	ViewURL   string `json:"viewjobUrl"`
+	Idx       int      `json:"idx"`
+	Title     string   `json:"title"`
+	Company   string   `json:"company"`
+	Yoe       *int     `json:"yoe"`
+	MatchPct  int      `json:"matchPct"`
+	Score     int      `json:"score"`
+	Query     string   `json:"q"`
+	Matched   []string `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
+	DirectURL string   `json:"directUrl"`
+	ViewURL   string   `json:"viewjobUrl"`
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the
@@ -342,26 +364,38 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 	out.LastBatch.GeneratedAt = lb.GeneratedAt
 	out.LastBatch.JobCount = len(lb.Jobs)
 
-	limit := len(lb.Jobs)
-	if limit > dashboardJobLimit {
-		limit = dashboardJobLimit
+	out.LastBatch.Jobs = parseBatchJobs(lb.Jobs, dashboardJobLimit)
+}
+
+// parseBatchJobs decodes raw last-batch.json job entries into batchJobs.
+// limit <= 0 returns all of them (the /api/batch full list); a positive
+// limit caps the count (the /api/status glance).
+func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
+	n := len(raw)
+	if limit > 0 && limit < n {
+		n = limit
 	}
-	for i := 0; i < limit; i++ {
+	jobs := make([]batchJob, 0, n)
+	for i := 0; i < n; i++ {
 		var j struct {
-			Idx       int     `json:"idx"`
-			Title     string  `json:"title"`
-			Company   string  `json:"company"`
-			Yoe       *int    `json:"yoe"`
-			MatchPct  int     `json:"matchPct"`
-			Score     float64 `json:"score"`
-			Query     string  `json:"q"`
-			DirectURL string  `json:"directUrl"`
-			ViewURL   string  `json:"viewjobUrl"`
+			Idx       int      `json:"idx"`
+			Title     string   `json:"title"`
+			Company   string   `json:"company"`
+			Yoe       *int     `json:"yoe"`
+			MatchPct  int      `json:"matchPct"`
+			Score     float64  `json:"score"`
+			Query     string   `json:"q"`
+			Matched   []string `json:"matched"`
+			DirectURL string   `json:"directUrl"`
+			ViewURL   string   `json:"viewjobUrl"`
 		}
-		if err := json.Unmarshal(lb.Jobs[i], &j); err != nil {
+		if err := json.Unmarshal(raw[i], &j); err != nil {
 			continue
 		}
-		out.LastBatch.Jobs = append(out.LastBatch.Jobs, batchJob{
+		if j.Matched == nil {
+			j.Matched = []string{}
+		}
+		jobs = append(jobs, batchJob{
 			Idx:       j.Idx,
 			Title:     j.Title,
 			Company:   j.Company,
@@ -369,10 +403,50 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 			MatchPct:  j.MatchPct,
 			Score:     int(j.Score),
 			Query:     j.Query,
+			Matched:   j.Matched,
 			DirectURL: j.DirectURL,
 			ViewURL:   j.ViewURL,
 		})
 	}
+	return jobs
+}
+
+// readFullBatch returns the entire active-profile batch (all jobs, with
+// matched keywords) for GET /api/batch. Empty result when no batch exists.
+func readFullBatch(installDir string) lastBatchInfo {
+	info := lastBatchInfo{Jobs: []batchJob{}}
+	var active string
+	if data, err := os.ReadFile(filepath.Join(installDir, "config.json")); err == nil {
+		var cfg struct {
+			ActiveProfile string `json:"active_profile"`
+		}
+		if json.Unmarshal(data, &cfg) == nil {
+			active = cfg.ActiveProfile
+		}
+	}
+	if active == "" {
+		return info
+	}
+	data, err := os.ReadFile(filepath.Join(installDir, "data", "profiles", active, "last-batch.json"))
+	if err != nil {
+		return info
+	}
+	var lb struct {
+		Date        string            `json:"date"`
+		Profile     string            `json:"profile"`
+		GeneratedAt string            `json:"generatedAt"`
+		Jobs        []json.RawMessage `json:"jobs"`
+	}
+	if json.Unmarshal(data, &lb) != nil {
+		return info
+	}
+	info.Available = true
+	info.Date = lb.Date
+	info.Profile = lb.Profile
+	info.GeneratedAt = lb.GeneratedAt
+	info.JobCount = len(lb.Jobs)
+	info.Jobs = parseBatchJobs(lb.Jobs, 0)
+	return info
 }
 
 // parseAnyRFC3339 accepts both nanosecond and second-precision ISO8601.

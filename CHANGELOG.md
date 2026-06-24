@@ -12,10 +12,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [2.1.0] — 2026-06-13
 
-Desktop-first: the local dashboard is now the primary surface, and Telegram is an optional add-on you turn on from the GUI.
+Desktop-first: the local dashboard is now a full control surface — see your ranked jobs, apply/save/track, tune settings, manage searches — and Telegram is an optional add-on you turn on from the GUI.
 
 ### Added
 
+- **The dashboard is now a complete job-application UI.** The ranked batch renders as a full list (all 100, not a top-10 glance), each row with **Apply** (opens the direct ATS link), **Why** (expands the CV keywords that matched), **Save**, and **Mark applied** (records locally so the job is deduped from future batches, plus a best-effort hiring.cafe action). New `scripts/dashboard-api.mjs` backs every action; the wrapper execs it and relays JSON. New endpoints: `GET /api/batch`, `POST /api/job/action`.
+- **Settings panel in the dashboard.** Edit max YOE, salary floor, match floor, daily scrape time, clearance filter, application-form filter, and search-suggestion mode — written through the profile-aware `config-rw`. New `GET /api/settings`, `POST /api/settings/set`.
+- **Search-term management in the dashboard.** See, add, and remove the terms AMM searches (titles or keywords) as chips. New `POST /api/jobs/{add,remove,mode}`.
 - **Telegram is now optional.** AMM runs fully without it — the batch still scrapes, scores, and lands in the dashboard + `jobs(date).txt`. The setup wizard's first step is now a single "Set up Telegram phone notifications now? [y/N]" (default **no**), which skips the @BotFather token dance entirely for anyone who just wants the desktop app. "Is Telegram on?" is defined in one place (`scripts/telegram-config.mjs#telegramConfigured` — token + chat present and well-shaped); the wizard, `daily-batch.mjs`, and the Go wrapper all agree on it.
 - **Set up Telegram from the dashboard.** The dashboard's Telegram card is now interactive: paste your bot token → Validate → "send your bot a message" → Detect my chat (or paste the chat id) → Save & enable. A Disable button turns it back off. Backed by `scripts/telegram-setup.mjs` (validate/detect/save/disable) — all Telegram API talk stays in Node; the wrapper just relays its JSON.
 - **"Scrape now" button in the dashboard.** Trigger a fresh batch from the GUI (same as the tray's "Run scrape now"), so the dashboard is a self-contained control surface — no need to reach for Telegram or the tray.
