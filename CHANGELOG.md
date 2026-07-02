@@ -12,7 +12,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [2.4.0] — 2026-07-02
 
-Full project audit + the launch chain fixed for real: double-clicking AMM always brings up the dashboard window, and installer upgrades actually replace the running app.
+Full project audit + the launch chain fixed for real: double-clicking AMM always brings up the dashboard window, and installer upgrades actually replace the running app. Plus a new minimal export: your apply links as .txt or Excel .csv.
+
+### Added
+
+- **Apply-links export as .txt or Excel .csv.** The dashboard's download button is now two: **Export .txt** and **Export .csv** (`GET /api/export?format=txt|csv`), and Telegram gained `/export csv`. Both produce a minimal list of exactly three things per job — number, job title, apply link (the resolved direct ATS URL, falling back to the hiring.cafe page) — built on demand from the active profile's `last-batch.json` so numbering matches the dashboard table. The CSV ships with a UTF-8 BOM + CRLF rows so Excel opens it cleanly. New `scripts/export-batch.mjs` (pure builders, unit-tested); the detailed `jobs(date).txt` archive written at scrape time is unchanged.
+- Fixed in passing: Telegram's `/export` had been reading the pre-multi-profile `data/` path since v1.0 — it now exports the active profile's latest batch like everything else.
 
 ### Fixed
 

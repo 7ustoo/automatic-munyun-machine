@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import * as cfgRW from './config-rw.mjs';
 import { paths as profilePaths } from './profile-store.mjs';
 import { withFileLock } from './io-helpers.mjs';
+import { loadExport } from './export-batch.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -161,6 +162,8 @@ const [, , cmd, a, b] = process.argv;
     case 'jobs-remove':  return jobsRemove(a);
     case 'jobs-mode':    return jobsMode(a);
     case 'job-action':   return jobAction(a, b);
+    // v2.4: minimal export (number · title · apply link) as txt or csv.
+    case 'export':       return out(loadExport(a));
     default:
       out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-mode|job-action> [args]' });
       process.exit(2);

@@ -83,7 +83,8 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/status", d.handleStatus)
 	mux.HandleFunc("/api/batch", d.handleBatch)       // GET: full ranked batch (all jobs + matched)
 	mux.HandleFunc("/api/settings", d.handleSettings) // GET: editable knobs + search terms
-	mux.HandleFunc("/api/jobs-txt", d.handleJobsTxt)  // GET: download newest jobs(date).txt
+	mux.HandleFunc("/api/export", d.handleExport)   // GET ?format=txt|csv: number·title·apply-link export (v2.4)
+	mux.HandleFunc("/api/jobs-txt", d.handleExport) // legacy alias (pre-v2.4 bookmark) → txt export
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
@@ -191,36 +192,43 @@ func (d *dashboardServer) handleFavicon(w http.ResponseWriter, r *http.Request) 
 	_, _ = w.Write(logoPNG)
 }
 
-// handleJobsTxt (GET) streams the newest jobs(<date>).txt from the active
-// profile as a download — the search-friendly full batch the user can keep.
-func (d *dashboardServer) handleJobsTxt(w http.ResponseWriter, r *http.Request) {
-	var active string
-	if data, err := os.ReadFile(filepath.Join(d.installDir, "config.json")); err == nil {
-		var cfg struct {
-			ActiveProfile string `json:"active_profile"`
-		}
-		_ = json.Unmarshal(data, &cfg)
-		active = cfg.ActiveProfile
+// handleExport (GET /api/export?format=txt|csv) serves the minimal batch
+// export — number · job title · apply link — built on demand by
+// scripts/export-batch.mjs from the active profile's last-batch.json.
+// v2.4: replaces the old jobs(<date>).txt passthrough; the CSV variant
+// opens straight in Excel. Logic stays in Node (execDashboardAPI) per the
+// never-reimplement-in-Go rule.
+func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
+	format := r.URL.Query().Get("format")
+	if format != "csv" {
+		format = "txt"
 	}
-	if active == "" {
-		active = "default"
-	}
-	dir := filepath.Join(d.installDir, "data", "profiles", active)
-	matches, _ := filepath.Glob(filepath.Join(dir, "jobs(*).txt"))
-	if len(matches) == 0 {
-		http.Error(w, "No batch yet — run a scrape first.", http.StatusNotFound)
-		return
-	}
-	sort.Strings(matches) // names are date-stamped, so lexical sort = chronological
-	newest := matches[len(matches)-1]
-	data, err := os.ReadFile(newest)
+	out, err := d.execDashboardAPI(20*time.Second, "export", format)
 	if err != nil {
-		http.Error(w, "Could not read the batch file.", http.StatusInternalServerError)
+		http.Error(w, "Export failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-	w.Header().Set("Content-Disposition", `attachment; filename="`+filepath.Base(newest)+`"`)
-	_, _ = w.Write(data)
+	var res struct {
+		OK       bool   `json:"ok"`
+		Error    string `json:"error"`
+		Filename string `json:"filename"`
+		Content  string `json:"content"`
+	}
+	if jsonErr := json.Unmarshal(out, &res); jsonErr != nil || !res.OK {
+		msg := res.Error
+		if msg == "" {
+			msg = "No batch yet — run a scrape first."
+		}
+		http.Error(w, msg, http.StatusNotFound)
+		return
+	}
+	mime := "text/plain; charset=utf-8"
+	if format == "csv" {
+		mime = "text/csv; charset=utf-8"
+	}
+	w.Header().Set("Content-Type", mime)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+res.Filename+`"`)
+	_, _ = w.Write([]byte(res.Content))
 }
 
 // --- Status aggregation (pure, testable) ---
