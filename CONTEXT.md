@@ -1,7 +1,7 @@
 # CONTEXT.md — Automatic Munyun Machine
 
 > **Purpose:** complete project state so a fresh contributor (or fresh Claude Code session) can resume work without re-explaining anything.
-> **Last updated:** 2026-06-12 (v2.0.1 on branch `v2.0.1`: system-browser support — new `browser-launcher.mjs` drives installed Chrome/Edge via Playwright channels instead of requiring the 150 MB bundled-Chromium download; installer ships `node_modules` and makes the Chromium step conditional + visible; AMM icons on setup exe, shortcuts, and `AMM.exe` via go-winres. Version → 2.0.1.)
+> **Last updated:** 2026-07-02 (v2.4.0 on branch `v2.4`: Windows single-instance lock fixed with a real Win32 liveness probe — double-click now hands off to the running instance or takes over a stale one; installer stops a running AMM before upgrading; wrapper/bot Telegram-enabled parity; dashboard-api hardening. See "Recent change history" below — earlier sections of this file may lag a version or two behind.)
 > **Update protocol:** update this file at the end of *any* code change (commit, command added, file moved, schema shift). Treat it like a CHANGELOG-of-state.
 
 ---
@@ -194,6 +194,8 @@ node scripts/telegram-send.mjs "<message>"
 - ⏭ v2.0 — embeddings + optional LLM rerank, salary database, browser extension. **Tauri desktop GUI cut from roadmap entirely** — Telegram-first inline UI replaces it.
 
 ## Recent change history (newest first)
+
+- **2026-07-02** — v2.4.0 (branch `v2.4`). Project audit + launch-chain fixes. Root-cause find: the single-instance lock NEVER worked on Windows (POSIX kill-0 idiom always errors on foreign processes) — double-click spawned silent duplicate instances. Fixed with Win32 OpenProcess probe; double-click now hands off to the healthy instance (health-probed) or takes over a stale one (kill tree → steal lock → open window). Installer stops running AMM before upgrading (upgrades used to keep the old exe alive till reboot). Telegram on/off parity between wrapper and bot (token+chat, validated) ends the half-config crash-loop. dashboard-api: URL validation + locked applications.md writes. Wizard tolerates corrupt config templates. npm test scoped to scripts/__tests__ (Chrome profile ships *.test.js files!). Verified by live two-instance launch tests on Windows.
 
 - **2026-06-14** — v2.3.0 (branch `v2.3`). Three fixes. (1) Scraper: cross-query early-stop gated behind `scoring.searchAllQueries` (default true) so every keyword is searched + fully paginated — fixes "only searching one keyword / no jobs"; daily-batch task time limit 20→45 min. (2) Tray icon = AMM logo: new `scripts/build/make-tray-ico.mjs` produces BMP/DIB `logo-tray.ico` (systray can't load PNG-compressed `logo.ico`); `tray.go` shows the logo for healthy/idle and treats Telegram-off as "running — Telegram off" (not dead). (3) Wizard `startBotForPlatform` launches the wrapper once with no flag (was racing the `--background` scheduled task) so the dashboard window opens after setup. Verified: build + 106 node tests + go tests green; tray systray "load icon" error is a sandbox-only temp-file artifact (the shipped gray icon hits it too) — loads fine on real machines.
 

@@ -45,15 +45,27 @@ func acquireSingleInstanceLock(installDir string) (release func(), err error) {
 	}, nil
 }
 
-// isProcessAlive returns true if the given PID is running. Cross-platform.
-func isProcessAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
+// readLockPID returns the PID recorded in data/wrapper.lock, or 0 when the
+// lock is absent/unreadable. Used by the v2.4 takeover path to identify the
+// stale instance to kill.
+func readLockPID(installDir string) int {
+	data, err := os.ReadFile(filepath.Join(installDir, "data", "wrapper.lock"))
 	if err != nil {
-		return false
+		return 0
 	}
-	// On Windows, FindProcess always succeeds (it doesn't actually probe).
-	// Signal(syscall.Signal(0)) is the cross-platform "ping" — on POSIX
-	// it's the standard kill -0 check; on Windows os.Process.Signal with
-	// signal 0 returns nil for live processes, error for dead ones.
-	return proc.Signal(nullSignal()) == nil
+	pid, err := strconv.Atoi(string(data))
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
 }
+
+// isProcessAlive lives in platform_windows.go / platform_unix.go.
+//
+// v2.4: it used to live here as proc.Signal(syscall.Signal(0)) "cross-
+// platform". That idiom is a lie on Windows — os.Process.Signal to a
+// process we didn't spawn ALWAYS errors there, so every live instance
+// looked dead, every lock looked stale, and a double-click quietly booted
+// a full second instance (two trays, two dashboards) instead of handing
+// off. Caught by the v2.4 live launch test; Windows now probes with
+// OpenProcess + GetExitCodeProcess.

@@ -276,7 +276,8 @@
   <div class="card">
     <h2>Ranked jobs <span class="pill" id="lb-meta"></span>
       <span class="right">
-        <a class="btnlink" href="/api/jobs-txt"><button class="sm" id="download-btn">⬇ Download .txt</button></a>
+        <a class="btnlink" href="/api/export?format=txt"><button class="sm" id="export-txt-btn" title="Numbered list: job title + apply link">⬇ Export .txt</button></a>
+        <a class="btnlink" href="/api/export?format=csv"><button class="sm" id="export-csv-btn" title="Excel sheet: #, Job Title, Apply Link">⬇ Export .csv</button></a>
         <button class="sm" id="refresh-btn">↻ Refresh</button>
         <button class="primary sm" id="scrape-btn">⟳ Scrape now</button>
       </span>

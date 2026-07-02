@@ -15,10 +15,13 @@ package main
 
 import (
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"time"
 )
 
 // chromiumCandidates returns likely Chrome/Edge executable paths for the
@@ -116,19 +119,44 @@ func parsePortFromBytes(data []byte) string {
 	return port
 }
 
-// openAppWindowFromPortFile reads data/dashboard-port.txt and opens the app
-// window at that URL. Used when a second AMM launch finds one already
-// running: rather than a no-op exit, we surface the existing instance's
-// dashboard so double-clicking the icon always shows the app.
-func openAppWindowFromPortFile(installDir string) bool {
+// openAppWindowForRunningInstance hands a double-click off to the AMM that
+// is already running: read its port from data/dashboard-port.txt, PROBE the
+// dashboard to confirm that instance is actually serving, then open the app
+// window at its URL.
+//
+// Returns false when the handoff isn't possible — port file missing (an old
+// pre-v2.2 binary is running; it never wrote one) or the probe fails (stale
+// lock, crashed dashboard). The caller then takes over as the primary
+// instance instead of exiting silently, which was the v2.3 failure mode:
+// double-click appeared to do nothing.
+func openAppWindowForRunningInstance(installDir string) bool {
 	data, err := os.ReadFile(filepath.Join(installDir, "data", "dashboard-port.txt"))
 	if err != nil {
-		log.Printf("appwindow: no dashboard-port.txt (%v) — cannot open window for the running instance", err)
+		log.Printf("appwindow: no dashboard-port.txt (%v) — running instance predates v2.2 or never started its dashboard", err)
 		return false
 	}
 	port := parsePortFromBytes(data)
 	if port == "" {
 		return false
 	}
-	return openAppWindow(installDir, "http://127.0.0.1:"+port)
+	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+		return false
+	}
+	url := "http://127.0.0.1:" + port
+
+	// Probe before opening a window: a stale port file pointing at nothing
+	// would flash an unable-to-connect window and convince the user the app
+	// is broken. 2s is generous for a localhost loopback.
+	client := &http.Client{Timeout: 2 * time.Second}
+	resp, err := client.Get(url + "/api/status")
+	if err != nil {
+		log.Printf("appwindow: running instance not responding on %s (%v)", url, err)
+		return false
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("appwindow: running instance answered %d on %s — treating as unhealthy", resp.StatusCode, url)
+		return false
+	}
+	return openAppWindow(installDir, url)
 }

@@ -25,8 +25,22 @@ func terminateProcess(p *os.Process) error {
 	return p.Signal(syscall.SIGTERM)
 }
 
-// nullSignal returns the no-op signal used for liveness probes. POSIX
-// kill(pid, 0) returns 0 for live processes, ESRCH for dead.
-func nullSignal() os.Signal {
-	return syscall.Signal(0)
+// isProcessAlive: POSIX kill(pid, 0) — returns 0 for live processes, ESRCH
+// for dead. (On Windows this idiom silently fails for foreign processes;
+// see platform_windows.go for the Win32 probe.)
+func isProcessAlive(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return proc.Signal(syscall.Signal(0)) == nil
+}
+
+// killProcessTree force-kills a process and (best-effort) its children.
+// The supervised bot child runs in its own process group (Setpgid in
+// applyChildHideWindow), so killing the wrapper PID alone would orphan it —
+// send SIGKILL to the wrapper's group AND the pid itself.
+func killProcessTree(pid int) {
+	_ = syscall.Kill(-pid, syscall.SIGKILL) // group, if pid is a group leader
+	_ = syscall.Kill(pid, syscall.SIGKILL)
 }

@@ -5,7 +5,7 @@
  * Polls Telegram getUpdates every 3 sec for new messages from your chat.
  * Dispatches commands:
  *   /scrape, /daily, gm, morning  → run daily batch (weather + 100 jobs)
- *   /export                       → download today's batch as a .txt file
+ *   /export [csv]                 → apply-links export (.txt or Excel .csv)
  *   /weather                      → weather only (city from config.json)
  *   /version                      → show bot version + latest GitHub version
  *   /update                       → pull latest code from GitHub + restart
@@ -65,28 +65,28 @@ import {
   LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
 } from './os-paths.mjs';
 import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
+import { telegramConfigured, parseEnvText } from './telegram-config.mjs';
+import { loadExport } from './export-batch.mjs';
 
 // ---------- env ----------
+// v2.4: Telegram is optional (v2.1) — the poller only makes sense when a
+// token + chat id are configured. Exit 0 (not 1) with a friendly note when
+// they aren't: the wrapper's supervisor gates on the same telegramConfigured
+// definition and shouldn't spawn us at all, but if we ARE run directly
+// (npm run bot, old scheduled task), a hard non-zero exit used to read as a
+// crash and could burn the supervisor's restart budget, taking the whole
+// tray app down.
 const ENV_PATH = path.join(ROOT, '.env');
-if (!fs.existsSync(ENV_PATH)) {
-  console.error('❌ Missing .env file at ' + ENV_PATH);
-  console.error('   Run: node scripts/setup-wizard.mjs');
-  process.exit(1);
+const env = fs.existsSync(ENV_PATH) ? parseEnvText(fs.readFileSync(ENV_PATH, 'utf8')) : {};
+
+if (!telegramConfigured(env)) {
+  console.error('Telegram is not set up (no valid TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env).');
+  console.error('The bot poller is only needed for phone notifications — AMM works without it.');
+  console.error('Enable Telegram from the dashboard (tray icon → Open dashboard → Telegram panel).');
+  process.exit(0);
 }
-const env = Object.fromEntries(
-  fs.readFileSync(ENV_PATH, 'utf8')
-    .split('\n')
-    .filter(l => l && !l.startsWith('#') && l.includes('='))
-    .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
-);
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT = String(env.TELEGRAM_CHAT_ID);
-
-if (!TG_TOKEN || !ALLOWED_CHAT || ALLOWED_CHAT === 'undefined') {
-  console.error('❌ Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in ' + ENV_PATH);
-  console.error('   Re-run: node scripts/setup-wizard.mjs');
-  process.exit(1);
-}
 
 // Identifiable in Task Manager / window title of the minimized console.
 process.title = 'munyun-bot';
@@ -394,7 +394,8 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /saved [N]           → list locally-bookmarked jobs (paginated)
 /why N               → explain why job N got its match %
 /history [N]         → past applications (paginated)
-/export              → download today's batch as a .txt file
+/export              → apply-links list (.txt): number · title · link
+/export csv          → same as an Excel sheet (.csv)
 
 <b>Settings — view + edit from your phone</b>
 /settings            → current config in one message
@@ -1266,24 +1267,20 @@ async function handleMessage(msg) {
     process.exit(0);
   }
 
-  // /export — send today's jobs(YYYY-MM-DD).txt as a downloadable attachment.
-  // Falls back to the most recent dated file if today's hasn't been generated yet.
+  // /export [txt|csv] — minimal export of the latest batch: number · job
+  // title · apply link. txt (default) is a readable numbered list; csv opens
+  // straight in Excel. v2.4: built on demand from the ACTIVE profile's
+  // last-batch.json (the old version read the pre-profile data/ dir and had
+  // been silently broken since multi-profile landed).
   if (/^\/?export\b/.test(text)) {
     try {
-      const dir = path.join(ROOT, 'data');
-      const today = new Date().toISOString().slice(0, 10);
-      const todayFile = path.join(dir, `jobs(${today}).txt`);
-      if (fs.existsSync(todayFile)) {
-        await tgSendDocument(chatId, todayFile, `📄 jobs(${today}).txt — today's batch`);
-        return;
-      }
-      const files = fs.readdirSync(dir).filter(f => /^jobs\(\d{4}-\d{2}-\d{2}\)\.txt$/.test(f)).sort();
-      if (!files.length) {
-        return reply(chatId, '<i>No batches yet. Run /scrape to generate one.</i>');
-      }
-      const latest = files[files.length - 1];
-      const latestDate = latest.match(/\d{4}-\d{2}-\d{2}/)[0];
-      await tgSendDocument(chatId, path.join(dir, latest), `📄 ${latest} — most recent batch (no run yet today, last from ${latestDate})`);
+      const fmt = /\bcsv\b/.test(text) ? 'csv' : 'txt';
+      const r = loadExport(fmt);
+      if (!r.ok) return reply(chatId, `<i>${escHtml(r.error)} Run /scrape first.</i>`);
+      const outPath = path.join(profilePaths().dir, r.filename);
+      fs.writeFileSync(outPath, r.content);
+      await tgSendDocument(chatId, outPath,
+        `📄 ${r.filename} — ${r.count} jobs · number · title · apply link${fmt === 'txt' ? '\nWant an Excel sheet? /export csv' : ''}`);
       return;
     } catch (e) {
       return reply(chatId, '❌ Export failed: ' + escHtml(e.message));
