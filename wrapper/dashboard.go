@@ -143,6 +143,10 @@ func (d *dashboardServer) Shutdown() {
 	if err := d.srv.Shutdown(ctx); err != nil {
 		log.Printf("dashboard: shutdown: %v", err)
 	}
+	// v2.4: drop the port breadcrumb on clean exit so a later double-click
+	// doesn't probe a dead port. (Crash exits leave it behind — the probe in
+	// openAppWindowForRunningInstance handles that case.)
+	_ = os.Remove(filepath.Join(d.installDir, "data", "dashboard-port.txt"))
 }
 
 func (d *dashboardServer) handleIndex(w http.ResponseWriter, r *http.Request) {

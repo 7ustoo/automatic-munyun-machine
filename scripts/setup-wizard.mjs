@@ -516,8 +516,18 @@ async function step10Finalize(token, chatId, resumeSkipped) {
   const telegramOn = !!(token && chatId);
   step(10, 10, 'Schedule & finalize');
 
-  // Load config (defaults from example) and let user tweak schedule
-  const cfg = JSON.parse(fs.readFileSync(fs.existsSync(CONFIG_PATH) ? CONFIG_PATH : CONFIG_EXAMPLE, 'utf8'));
+  // Load config (defaults from example) and let user tweak schedule.
+  // v2.4: tolerate BOTH files missing/corrupt (bad checkout, hand-edited
+  // JSON) instead of crashing the wizard at its final step.
+  let cfg;
+  try {
+    cfg = JSON.parse(fs.readFileSync(fs.existsSync(CONFIG_PATH) ? CONFIG_PATH : CONFIG_EXAMPLE, 'utf8'));
+  } catch (e) {
+    console.log(fail(`Could not read config template (${e.message}) — starting from built-in defaults.`));
+    cfg = {};
+  }
+  cfg.schedule = cfg.schedule || { time: '07:00', days: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'] };
+  cfg.user = cfg.user || {};
 
   const t = (await ask(arrow(`Daily push time? [default ${cfg.schedule?.time || '07:00'}] `))).trim();
   if (t) cfg.schedule.time = t;

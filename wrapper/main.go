@@ -27,6 +27,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 
@@ -93,24 +94,39 @@ func main() {
 	log.Printf("install_dir=%s", installDir)
 	log.Printf("bot_path=%s", botPath)
 
-	// Single-instance guard. If another AMM is already running, log a notice
-	// and exit cleanly. This prevents the double-tray-icon scenario when the
-	// watchdog restarts the scheduled task while a healthy wrapper is still
-	// alive. See risk #4 in the plan.
+	// Single-instance guard. If another AMM is already running, hand off to
+	// it; if it turns out to be unresponsive, take over. This prevents both
+	// the double-tray-icon scenario (watchdog restart racing a healthy
+	// wrapper) AND the v2.3 "double-click does nothing" scenario (a stale or
+	// pre-v2.2 instance holds the lock but can't show a window).
 	released, err := acquireSingleInstanceLock(installDir)
 	if err != nil {
-		// v2.2: AMM is already running (almost always: started in the
-		// background at login, now the user double-clicked the icon). Don't
-		// just exit silently — bring up the app window for the running
-		// instance, so clicking the icon always shows the dashboard. Skip
-		// this when WE were launched in the background (avoid a window loop).
-		if !*flagBackground {
-			log.Printf("Another AMM instance is running — opening its dashboard window.")
-			openAppWindowFromPortFile(installDir)
-		} else {
+		if *flagBackground {
+			// Login auto-start racing a live instance — the healthy case.
 			log.Printf("Single-instance lock failed: %v — another AMM is running. Exiting.", err)
+			os.Exit(0)
 		}
-		os.Exit(0) // exit 0 so scheduler doesn't flag this as a crash
+		// Foreground double-click: surface the running instance's dashboard.
+		log.Printf("Another AMM instance is running — opening its dashboard window.")
+		if openAppWindowForRunningInstance(installDir) {
+			os.Exit(0)
+		}
+		// v2.4: the running instance can't show a window (old binary from
+		// before the port file existed — upgrades used to leave the old exe
+		// running — or a crashed dashboard). Take over: kill its process
+		// tree (also frees the Telegram token from its bot child), grab the
+		// lock, and continue starting up as the primary. The window opens
+		// through the normal launch path below.
+		log.Printf("Running instance is unresponsive — taking over as primary.")
+		if pid := readLockPID(installDir); pid > 0 && pid != os.Getpid() {
+			killProcessTree(pid)
+		}
+		_ = os.Remove(filepath.Join(installDir, "data", "wrapper.lock"))
+		released, err = acquireSingleInstanceLock(installDir)
+		if err != nil {
+			log.Printf("Takeover failed (%v) — giving up.", err)
+			os.Exit(0)
+		}
 	}
 	defer released()
 
@@ -168,26 +184,38 @@ func isSetUp(installDir string) bool {
 	return err == nil
 }
 
-// telegramEnabled returns true when .env carries a non-empty
-// TELEGRAM_BOT_TOKEN — the wrapper's view of "Telegram is on," which gates
-// whether the supervisor runs the bot poller. Mirrors telegramConfigured()
-// in scripts/telegram-config.mjs (token presence is the load-bearing check;
-// the JS side additionally validates shape).
+// telegramTokenRe / telegramChatRe mirror telegramConfigured() in
+// scripts/telegram-config.mjs exactly: BotFather token shape and a numeric
+// chat id (optionally negative for groups).
+var (
+	telegramTokenRe = regexp.MustCompile(`^\d+:[\w-]+$`)
+	telegramChatRe  = regexp.MustCompile(`^-?\d+$`)
+)
+
+// telegramEnabled returns true when .env carries BOTH a plausibly-valid
+// TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID — the wrapper's view of "Telegram
+// is on," which gates whether the supervisor runs the bot poller.
+//
+// v2.4: must match scripts/telegram-config.mjs#telegramConfigured EXACTLY.
+// The old token-only check disagreed with the bot (which requires token AND
+// chat): a half-finished Telegram setup made the supervisor spawn a bot that
+// exited immediately, burn its 3-per-hour restart budget, and take the whole
+// tray app down with it.
 func telegramEnabled(installDir string) bool {
 	data, err := os.ReadFile(filepath.Join(installDir, ".env"))
 	if err != nil {
 		return false
 	}
+	token, chat := "", ""
 	for _, line := range strings.Split(string(data), "\n") {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "TELEGRAM_BOT_TOKEN=") {
-			parts := strings.SplitN(trimmed, "=", 2)
-			if len(parts) == 2 && strings.TrimSpace(parts[1]) != "" {
-				return true
-			}
+		if v, ok := strings.CutPrefix(trimmed, "TELEGRAM_BOT_TOKEN="); ok {
+			token = strings.TrimSpace(v)
+		} else if v, ok := strings.CutPrefix(trimmed, "TELEGRAM_CHAT_ID="); ok {
+			chat = strings.TrimSpace(v)
 		}
 	}
-	return false
+	return telegramTokenRe.MatchString(token) && telegramChatRe.MatchString(chat)
 }
 
 // resolveInstallDir returns the AMM install directory. By default it's the

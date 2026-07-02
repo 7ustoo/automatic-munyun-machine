@@ -3,9 +3,11 @@
  * Daily 100-job batch.
  *   1. Launches a headless Chromium with the persistent profile (Cloudflare
  *      cookies live there); warmup probe verifies hiring.cafe is browsable.
- *   2. Runs every configured hiring.cafe search (default 16), paginates to
- *      maxPagesPerQuery (default 50), with target-driven cross-query early
- *      stop once running fresh estimate ≥ targetJobsPerBatch × 1.5.
+ *   2. Runs EVERY configured hiring.cafe search (default 16), paginating
+ *      each until its Next button is gone / no fresh cards (hard ceiling
+ *      maxPagesPerQuery, default 50). v2.3: full scan is the default —
+ *      the old cross-query early stop (quit once fresh estimate ≥ 1.5 ×
+ *      targetJobsPerBatch) only applies with scoring.searchAllQueries:false.
  *   3. Filters (clearance, skip-companies, drop-titles, max YOE), dedups,
  *      subtracts applied + previously-seen, scores against the parsed CV.
  *   4. Slices top targetJobsPerBatch (default 100) above matchFloorPercent.
@@ -322,10 +324,11 @@ async function _scrapeWith(ctx) {
                         : formEase === 'long'  ? ['TimeConsuming']
                         : null; // 'all' or anything else → no filter
 
-  // v1.0.x: pagination. Hiring.cafe shows ~40 cards per page. We click the
-  // "Next" link (a[aria-label*="next"]) up to MAX_PAGES_PER_QUERY-1 times to
-  // pull additional pages. Stops early if Next disappears/disables OR new
-  // page returns no fresh cards (already seen this query).
+  // v1.0.x: pagination. Hiring.cafe shows ~40 cards per page. Page 1 loads
+  // with the search; we then click the "Next" link (a[aria-label*="next"])
+  // for pages 2..MAX_PAGES_PER_QUERY — i.e. up to MAX_PAGES_PER_QUERY pages
+  // total per query. Stops early if Next disappears/disables OR a new page
+  // returns no fresh cards (already seen this query).
   const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 50;
 
   // v1.0.x: target-driven cross-query early stop. After each query's

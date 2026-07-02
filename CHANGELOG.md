@@ -10,6 +10,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.4.0] — 2026-07-02
+
+Full project audit + the launch chain fixed for real: double-clicking AMM always brings up the dashboard window, and installer upgrades actually replace the running app.
+
+### Fixed
+
+- **The single-instance lock never worked on Windows — the root cause behind ghost launches.** The liveness probe used the POSIX `kill -0` idiom (`os.Process.Signal(0)`), which on Windows *always* errors for processes the checker didn't spawn — so a live AMM always looked dead, its lock always looked stale, and double-clicking the icon quietly booted a second full instance (two tray icons, two dashboards) instead of surfacing the running one. Caught by a live launch test; the probe is now a real Win32 `OpenProcess` + `GetExitCodeProcess` check. (`wrapper/platform_windows.go`)
+- **Double-click now always opens the dashboard window.** With the lock actually working, a second launch hands off to the healthy running instance: it health-probes the running dashboard (2s), opens its window, and exits. If the running instance can't serve a window — a stale binary from a pre-v2.2 install, or a crashed dashboard — the new launch **takes over**: kills the stale process tree, grabs the lock, and starts as the primary with the window. No more "double-click does nothing." (`wrapper/main.go`, `wrapper/appwindow.go`)
+- **Installer upgrades now replace a running AMM.** Windows locks running executables, so installing over a live AMM silently kept the OLD `AMM.exe` running until reboot — which made every "fixed in this release" look broken on upgraded machines. `PrepareToInstall` now stops the AMM process tree (`taskkill /T /F`) before copying files. (`installer/amm.iss`)
+- **Half-configured Telegram can no longer take down the whole tray app.** The wrapper considered Telegram "on" if a token existed; the bot demanded token *and* chat ID — so a token without a chat id made the supervisor spawn a bot that died instantly, burn its 3-per-hour restart budget, and exit the wrapper. Both sides now share one definition (valid token shape *and* numeric chat id), and the bot exits `0` with friendly guidance instead of crashing when Telegram isn't configured. (`wrapper/main.go`, `scripts/telegram-bot.mjs`)
+- **Dashboard job actions hardened**: hiring.cafe URLs are shape-validated before being handed to a child process, and `applications.md` writes are serialized with the same `proper-lockfile` discipline as `config.json` — a dashboard "Applied" click during a running scrape can no longer race the batch's dedup read. (`scripts/dashboard-api.mjs`)
+- **Setup wizard survives a missing/corrupt config template** at the finalize step instead of crashing. (`scripts/setup-wizard.mjs`)
+- **`npm test` no longer trips over Chrome's own files.** The app-window browser profile (`data/app-window/`) contains extension files named `*.test.js`, which the bare `node --test` runner happily picked up. The runner is now scoped to `scripts/__tests__`.
+
+### Changed
+
+- The dashboard removes its `dashboard-port.txt` breadcrumb on clean shutdown, and stale ports are health-probed before any window opens against them.
+- `daily-batch.mjs` header/comments updated to describe the v2.3 full-scan default (docs drift).
+
+---
+
 ## [2.3.0] — 2026-06-14
 
 Three fixes: it searches every keyword now, the tray shows the AMM logo, and the dashboard window reliably opens after install.

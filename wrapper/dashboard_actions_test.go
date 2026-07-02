@@ -121,13 +121,13 @@ func TestHandleIndex_InjectsToken(t *testing.T) {
 	}
 }
 
-// /api/status must report telegram.enabled from .env token presence (v2.1).
+// /api/status must report telegram.enabled from .env token+chat (v2.4 parity).
 func TestBuildStatus_TelegramEnabledFlag(t *testing.T) {
 	dir := t.TempDir()
 	if buildStatus(dir).Telegram.Enabled {
 		t.Errorf("empty dir → telegram.enabled true; want false")
 	}
-	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=123:abc\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, ".env"), []byte("TELEGRAM_BOT_TOKEN=123:abc\nTELEGRAM_CHAT_ID=42\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if !buildStatus(dir).Telegram.Enabled {

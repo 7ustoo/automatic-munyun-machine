@@ -28,6 +28,7 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as cfgRW from './config-rw.mjs';
 import { paths as profilePaths } from './profile-store.mjs';
+import { withFileLock } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -121,6 +122,12 @@ async function jobAction(action, idxRaw) {
   try { job = loadBatchJob(idx); } catch { return out({ ok: false, error: 'No batch on disk yet — run a scrape first.' }); }
   if (!job) return out({ ok: false, error: `Job #${idx} not in the latest batch.` });
   const url = job.viewjobUrl || ('https://hiring.cafe/viewjob/' + job.id);
+  // v2.4: never hand an arbitrary string from last-batch.json to a child
+  // process — the batch is built from scraped page content. viewjob URLs
+  // have exactly one shape; anything else is refused.
+  if (!/^https:\/\/hiring\.cafe\/viewjob\/[A-Za-z0-9_-]+$/.test(url)) {
+    return out({ ok: false, error: 'Job has a malformed hiring.cafe URL — re-run a scrape.' });
+  }
 
   // "applied" always records locally so the job is deduped from future
   // batches, even if hiring.cafe isn't signed in.
@@ -129,7 +136,10 @@ async function jobAction(action, idxRaw) {
       const line = `\n| - | ${new Date().toISOString().slice(0, 10)} | ${job.company || ''} | ${job.title || ''} | - | APPLIED | - | - | via dashboard | ${url} |`;
       const apps = profilePaths().applications;
       fs.mkdirSync(path.dirname(apps), { recursive: true });
-      fs.appendFileSync(apps, line);
+      // v2.4: serialize with other writers (a mid-scrape batch reads this
+      // file for dedup; Telegram /applied appends to it too) — same
+      // proper-lockfile discipline as config.json.
+      await withFileLock(apps, () => { fs.appendFileSync(apps, line); });
     } catch (e) { /* local log best-effort */ }
   }
 

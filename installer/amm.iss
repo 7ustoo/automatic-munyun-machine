@@ -122,6 +122,24 @@ begin
   Result := FileExists(ExpandConstant('{app}\.env'));
 end;
 
+// v2.4: stop a RUNNING AMM before copying files. Windows locks executables
+// that are running, so upgrades over a live install silently failed to
+// replace wrapper\dist\AMM.exe — the tray kept running the OLD binary until
+// the next reboot, which made every "fixed in this release" look broken on
+// upgraded machines. taskkill /T also takes down the supervised node bot
+// child so nothing keeps polling with stale code either.
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM AMM.exe /T /F',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { taskkill exits non-zero when nothing matched — that's the normal
+    fresh-install case, ignore it. Give the OS a beat to release file locks. }
+  Sleep(800);
+  Result := '';
+end;
+
 [Run]
 ; Post-install. v2.0.1: npm install is GONE — node_modules ships inside the
 ; installer payload (see [Files]). Chromium download only runs when no

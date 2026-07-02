@@ -65,28 +65,27 @@ import {
   LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
 } from './os-paths.mjs';
 import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
+import { telegramConfigured, parseEnvText } from './telegram-config.mjs';
 
 // ---------- env ----------
+// v2.4: Telegram is optional (v2.1) — the poller only makes sense when a
+// token + chat id are configured. Exit 0 (not 1) with a friendly note when
+// they aren't: the wrapper's supervisor gates on the same telegramConfigured
+// definition and shouldn't spawn us at all, but if we ARE run directly
+// (npm run bot, old scheduled task), a hard non-zero exit used to read as a
+// crash and could burn the supervisor's restart budget, taking the whole
+// tray app down.
 const ENV_PATH = path.join(ROOT, '.env');
-if (!fs.existsSync(ENV_PATH)) {
-  console.error('❌ Missing .env file at ' + ENV_PATH);
-  console.error('   Run: node scripts/setup-wizard.mjs');
-  process.exit(1);
+const env = fs.existsSync(ENV_PATH) ? parseEnvText(fs.readFileSync(ENV_PATH, 'utf8')) : {};
+
+if (!telegramConfigured(env)) {
+  console.error('Telegram is not set up (no valid TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID in .env).');
+  console.error('The bot poller is only needed for phone notifications — AMM works without it.');
+  console.error('Enable Telegram from the dashboard (tray icon → Open dashboard → Telegram panel).');
+  process.exit(0);
 }
-const env = Object.fromEntries(
-  fs.readFileSync(ENV_PATH, 'utf8')
-    .split('\n')
-    .filter(l => l && !l.startsWith('#') && l.includes('='))
-    .map(l => { const i = l.indexOf('='); return [l.slice(0, i).trim(), l.slice(i + 1).trim()]; })
-);
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const ALLOWED_CHAT = String(env.TELEGRAM_CHAT_ID);
-
-if (!TG_TOKEN || !ALLOWED_CHAT || ALLOWED_CHAT === 'undefined') {
-  console.error('❌ Missing TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID in ' + ENV_PATH);
-  console.error('   Re-run: node scripts/setup-wizard.mjs');
-  process.exit(1);
-}
 
 // Identifiable in Task Manager / window title of the minimized console.
 process.title = 'munyun-bot';
