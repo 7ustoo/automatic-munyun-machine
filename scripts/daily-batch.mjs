@@ -215,6 +215,9 @@ const EXTRACT_FN = `(() => {
     const cardText = card.innerText || '';
     const lines = cardText.split('\\n').map(l => l.trim()).filter(Boolean);
     const ageIdx = lines.findIndex(l => /^\\d+[wdhmoy]+$/.test(l));
+    // v2.5: capture the posted-age token ("5h", "3d", "2w", "1mo") so the
+    // batch can filter by recency. Kept raw; parsed to days in Node.
+    const postedAge = ageIdx >= 0 ? lines[ageIdx] : '';
     // Try the post-age line, then the first line, then a heuristic search
     // — but validate each candidate before accepting.
     const candidates = [];
@@ -233,6 +236,7 @@ const EXTRACT_FN = `(() => {
       href: a.href,
       title: title.substring(0, 80),
       yoe,
+      postedAge,
       company: compM ? compM.split(':')[0] : '',
       cardText: cardText.substring(0, 1500)
     });
@@ -468,6 +472,7 @@ function recordQueryStats(byQuery) {
 // termRegex fixes the Security+/C++ hole: plain \b after a trailing
 // non-word char never matches, so those terms previously scored zero.
 import { escRx, termRegex } from './term-match.mjs';
+import { recencyMaxDays, withinRecency } from './job-recency.mjs';
 
 // Build filter regexes from config.json
 const DROP_TITLE_PATTERNS = (CFG.filters?.dropTitlePatterns || []).map(p => p.replace(/\s+/g, '\\s+'));
@@ -617,18 +622,24 @@ function filterAndDedupe(byQuery) {
   }
   const filterClearance = CFG.filters?.filterClearance !== false; // default true
   const maxYoe = CFG.user?.maxYoeAcceptable ?? 5;
+  // v2.5: recency filter. filters.maxJobAge is a preset key (today|3days|
+  // week|month|any) or a raw day count; recencyMaxDays → max age in days
+  // (null = keep everything). Jobs whose card age we can't read are kept.
+  const maxAgeDays = recencyMaxDays(CFG.filters?.maxJobAge);
   let droppedClearance = 0;
+  let droppedStale = 0;
   const kept = all.filter(r => {
     if (r.yoe !== null && r.yoe > maxYoe) return false;
     if (r.title && DROP_TITLE.test(r.title)) return false;
     if (r.company && SKIP_CO.test(r.company)) return false;
+    if (!withinRecency(r.postedAge, maxAgeDays)) { droppedStale++; return false; }
     if (filterClearance) {
       const body = (r.title || '') + '\n' + (r.cardText || '');
       if (CLEARANCE_RX.test(body)) { droppedClearance++; return false; }
     }
     return true;
   });
-  return { all, kept, droppedClearance };
+  return { all, kept, droppedClearance, droppedStale };
 }
 
 function loadAppliedHrefs() {
@@ -937,6 +948,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       title: r.title,
       company: r.company,
       yoe: r.yoe,
+      postedAge: r.postedAge || '',
       q: r.q,
       score: r.score ?? 0,
       matchPct: r.matchPct ?? 0,
@@ -1000,8 +1012,8 @@ if (IS_CLI) (async () => {
       }
       throw e;
     }
-    const { all, kept, droppedClearance } = filterAndDedupe(byQuery);
-    log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance})`);
+    const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery);
+    log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance}, droppedStale=${droppedStale})`);
     const applied = loadAppliedHrefs();
     const blockedSeen = loadBlockedSeen(); // decayed: jobs > freshness window are no longer blocked
     const blockAll = new Set([...applied, ...blockedSeen]);

@@ -97,6 +97,11 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/telegram/detect", d.guardPost(d.handleTelegramDetect))
 	mux.HandleFunc("/api/telegram/save", d.guardPost(d.handleTelegramSave))
 	mux.HandleFunc("/api/telegram/disable", d.guardPost(d.handleTelegramDisable))
+	// v2.5: resume rescan + self-update.
+	mux.HandleFunc("/api/update/check", d.handleUpdateCheck) // GET: current vs latest
+	mux.HandleFunc("/api/resume/upload", d.guardPost(d.handleResumeUpload))
+	mux.HandleFunc("/api/resume/apply", d.guardPost(d.handleResumeApply))
+	mux.HandleFunc("/api/update/apply", d.guardPost(d.handleUpdateApply))
 
 	d.srv = &http.Server{
 		Handler:           mux,

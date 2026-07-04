@@ -28,6 +28,8 @@ import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import * as cfgRW from './config-rw.mjs';
 import { paths as profilePaths } from './profile-store.mjs';
+import { parseResume, writeParsedCV } from './resume-parser.mjs';
+import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock } from './io-helpers.mjs';
 import { loadExport } from './export-batch.mjs';
 
@@ -51,6 +53,7 @@ function settingsGet() {
       matchFloorPercent: cfg.scoring?.matchFloorPercent ?? 25,
       scheduleTime: cfg.schedule?.time || '07:00',
       searchMode: cfg.search?.mode === 'keywords' ? 'keywords' : 'titles',
+      maxJobAge: cfg.filters?.maxJobAge || 'any',
       queries: (cfg.queries || []).map(q => q.term)
     }
   });
@@ -62,7 +65,7 @@ function settingsSet(dotPath, jsonValue) {
   try { value = JSON.parse(jsonValue); } catch { value = jsonValue; }
   const allowed = new Set([
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
-    'filters.filterClearance', 'filters.applicationFormEase',
+    'filters.filterClearance', 'filters.applicationFormEase', 'filters.maxJobAge',
     'scoring.matchFloorPercent', 'schedule.time', 'search.mode'
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
@@ -72,6 +75,7 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'scoring.matchFloorPercent') value = Math.max(0, Math.min(100, parseInt(value) || 0));
   if (dotPath === 'filters.filterClearance') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'filters.applicationFormEase' && !['all', 'simple', 'long'].includes(value)) value = 'all';
+  if (dotPath === 'filters.maxJobAge' && !['today', '3days', 'week', 'month', 'any'].includes(value)) value = 'any';
   if (dotPath === 'search.mode') value = value === 'keywords' ? 'keywords' : 'titles';
   if (dotPath === 'schedule.time' && !/^\d{1,2}:\d{2}$/.test(String(value))) return out({ ok: false, error: 'time must be HH:MM' });
   cfgRW.set(dotPath, value);
@@ -153,6 +157,56 @@ async function jobAction(action, idxRaw) {
   out({ ok: true, hcafe, output: r.output.slice(0, 200) });
 }
 
+// ---- resume rescan (v2.5) ----
+// Re-parse an uploaded resume into the active profile's cv-parsed.json, then
+// suggest fresh search terms from it (titles or keywords per search.mode).
+// The Go wrapper saves the upload to a temp file and passes its path here.
+async function resumeParse(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) return out({ ok: false, error: 'resume file not found' });
+  let parsed;
+  try {
+    parsed = await parseResume(filePath);
+  } catch (e) {
+    return out({ ok: false, error: 'Could not parse that file: ' + String(e.message || e) });
+  }
+  if (!parsed.titles.length && !parsed.skills.length && !parsed.certs.length && !parsed.compliance.length) {
+    return out({ ok: false, error: 'No recognizable skills/titles found in that resume. Try a text-based PDF/DOCX (not a scan).' });
+  }
+  writeParsedCV(parsed);
+  const mode = cfgRW.read().search?.mode === 'keywords' ? 'keywords' : 'titles';
+  const suggestions = (mode === 'keywords' ? suggestKeywords(parsed, { max: 12 }) : suggestRoles(parsed, { max: 12 }))
+    .map(s => s.title);
+  out({
+    ok: true,
+    parsed: {
+      titles: parsed.titles.length, certs: parsed.certs.length,
+      skills: parsed.skills.length, compliance: parsed.compliance.length,
+      primaryClusters: parsed.primaryClusters || []
+    },
+    mode,
+    suggestions
+  });
+}
+
+// Replace the search-term list with the given terms (used by "Apply these"
+// after a rescan). Empty/blank terms ignored; dedup by lowercased term.
+function resumeApply(termsJson) {
+  let terms;
+  try { terms = JSON.parse(termsJson); } catch { terms = null; }
+  if (!Array.isArray(terms)) return out({ ok: false, error: 'expected a JSON array of terms' });
+  const clean = [];
+  const seen = new Set();
+  for (const t of terms) {
+    const term = String(t || '').trim();
+    if (!term || seen.has(term.toLowerCase())) continue;
+    seen.add(term.toLowerCase());
+    clean.push({ key: (term.replace(/[^a-z0-9]/gi, '').slice(0, 20)) || `q${clean.length}`, term });
+  }
+  if (!clean.length) return out({ ok: false, error: 'no valid terms to apply' });
+  cfgRW.set('queries', clean);
+  out({ ok: true, list: clean.map(q => q.term) });
+}
+
 const [, , cmd, a, b] = process.argv;
 (async () => {
   switch (cmd) {
@@ -162,10 +216,12 @@ const [, , cmd, a, b] = process.argv;
     case 'jobs-remove':  return jobsRemove(a);
     case 'jobs-mode':    return jobsMode(a);
     case 'job-action':   return jobAction(a, b);
+    case 'resume-parse': return resumeParse(a);
+    case 'resume-apply': return resumeApply(a);
     // v2.4: minimal export (number · title · apply link) as txt or csv.
     case 'export':       return out(loadExport(a));
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-mode|job-action> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-mode|job-action|resume-parse|resume-apply> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });
