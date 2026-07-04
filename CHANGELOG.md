@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.4.1] — 2026-07-02
+
+### Added
+
+- **`.xlsx` export with clickable apply links.** CSV is plain text (RFC 4180) — it structurally cannot mark a cell as a hyperlink, so the `.csv` export's links are inert text in Excel. The new `.xlsx` export is a real Excel workbook where the Apply Link column is native clickable hyperlinks (blue, underlined), verified end-to-end by opening the generated file in Excel via COM automation. Available as a third dashboard button (`⬇ Export .xlsx`) and `/export xlsx` on Telegram. Built by a new zero-dependency writer (`scripts/xlsx-writer.mjs` — hand-rolled OOXML parts in a STORED-entry ZIP with table-driven CRC-32, ~200 lines instead of a multi-megabyte spreadsheet library), covered by 9 unit tests including the standard CRC-32 check vector and XML-escaping of scraped titles.
+
+---
+
 ## [2.4.0] — 2026-07-02
 
 Full project audit + the launch chain fixed for real: double-clicking AMM always brings up the dashboard window, and installer upgrades actually replace the running app. Plus a new minimal export: your apply links as .txt or Excel .csv.

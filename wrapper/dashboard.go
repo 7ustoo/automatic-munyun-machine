@@ -20,6 +20,7 @@ import (
 	"context"
 	"crypto/rand"
 	_ "embed"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -200,7 +201,7 @@ func (d *dashboardServer) handleFavicon(w http.ResponseWriter, r *http.Request) 
 // never-reimplement-in-Go rule.
 func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	format := r.URL.Query().Get("format")
-	if format != "csv" {
+	if format != "csv" && format != "xlsx" {
 		format = "txt"
 	}
 	out, err := d.execDashboardAPI(20*time.Second, "export", format)
@@ -209,10 +210,11 @@ func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var res struct {
-		OK       bool   `json:"ok"`
-		Error    string `json:"error"`
-		Filename string `json:"filename"`
-		Content  string `json:"content"`
+		OK            bool   `json:"ok"`
+		Error         string `json:"error"`
+		Filename      string `json:"filename"`
+		Content       string `json:"content"`
+		ContentBase64 string `json:"contentBase64"` // xlsx (binary) rides base64
 	}
 	if jsonErr := json.Unmarshal(out, &res); jsonErr != nil || !res.OK {
 		msg := res.Error
@@ -222,13 +224,26 @@ func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, http.StatusNotFound)
 		return
 	}
+	var body []byte
 	mime := "text/plain; charset=utf-8"
-	if format == "csv" {
+	switch format {
+	case "xlsx":
+		mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+		decoded, decErr := base64.StdEncoding.DecodeString(res.ContentBase64)
+		if decErr != nil {
+			http.Error(w, "Export failed: bad xlsx payload", http.StatusInternalServerError)
+			return
+		}
+		body = decoded
+	case "csv":
 		mime = "text/csv; charset=utf-8"
+		body = []byte(res.Content)
+	default:
+		body = []byte(res.Content)
 	}
 	w.Header().Set("Content-Type", mime)
 	w.Header().Set("Content-Disposition", `attachment; filename="`+res.Filename+`"`)
-	_, _ = w.Write([]byte(res.Content))
+	_, _ = w.Write(body)
 }
 
 // --- Status aggregation (pure, testable) ---
