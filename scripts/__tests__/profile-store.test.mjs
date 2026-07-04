@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { paths, getActiveProfile, listProfiles, _internals } from '../profile-store.mjs';
+import { paths, getActiveProfile, listProfiles, renameProfile, _internals } from '../profile-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..', '..');
@@ -43,6 +43,22 @@ test('PROFILE_FIELDS is the expected set', () => {
     [..._internals.PROFILE_FIELDS].sort(),
     ['filters', 'queries', 'schedule', 'scoring', 'telegram', 'user', 'weather']
   );
+});
+
+test('renameProfile() rejects invalid slugs before touching disk', () => {
+  // Validation runs before readRawConfig(), so a bad slug throws without I/O.
+  assert.throws(() => renameProfile('default', ''), /1-32 chars/);
+  assert.throws(() => renameProfile('default', 'has spaces'), /1-32 chars/);
+  assert.throws(() => renameProfile('default', 'x'.repeat(33)), /1-32 chars/);
+  assert.throws(() => renameProfile('default', 'weird$char'), /1-32 chars/);
+});
+
+test('renameProfile() is a no-op when oldSlug === newSlug', () => {
+  // Fast-path early return before any config read — safe to exercise against
+  // the real config file.
+  const r = renameProfile('default', 'default');
+  assert.equal(r.renamed, 'default');
+  assert.equal(r.dataMoved, false);
 });
 
 test('PROFILE_DATA_FILES enumerates per-profile data files only', () => {

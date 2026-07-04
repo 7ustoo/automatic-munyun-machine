@@ -45,6 +45,21 @@ func TestBuildStatus_EmptyInstall(t *testing.T) {
 	if s.LastBatch.Jobs == nil {
 		t.Error("LastBatch.Jobs is nil; want empty slice (JSON marshals nil as null, [] as [])")
 	}
+	// v2.7: empty install means missing config.json, which means needsSetup=true.
+	if !s.NeedsSetup {
+		t.Error("NeedsSetup = false; want true when config.json is missing")
+	}
+}
+
+func TestBuildStatus_NeedsSetupFalseWithConfig(t *testing.T) {
+	// v2.7: once config.json exists, needsSetup flips to false. Tray-poll uses
+	// the same signal to exit the "needs setup" mode.
+	dir := t.TempDir()
+	writeFile(t, dir, "config.json", `{"active_profile":"default","profiles":{"default":{"user":{"name":"J"}}}}`)
+	s := buildStatusAt(dir, testNow)
+	if s.NeedsSetup {
+		t.Error("NeedsSetup = true; want false when config.json exists")
+	}
 }
 
 func TestBuildStatus_AliveHeartbeat(t *testing.T) {

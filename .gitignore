@@ -43,6 +43,8 @@ build/
 tmp/
 *.zip
 *.tar.gz
+# Stray local wrapper build (real build output goes to wrapper/dist/ via `make`)
+wrapper/wrapper.exe
 
 # Local Claude Code state
 .claude/

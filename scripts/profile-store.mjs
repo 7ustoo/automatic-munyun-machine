@@ -180,6 +180,44 @@ export function setActiveProfile(slug) {
   return slug;
 }
 
+// Rename a profile. Renames the profiles[<slug>] key in config.json, moves
+// data/profiles/<old>/ → data/profiles/<new>/, and updates active_profile
+// if it was pointing at the renamed profile. Slug format matches addProfile.
+// Fails cleanly if newSlug already exists or the source is missing.
+export function renameProfile(oldSlug, newSlug) {
+  if (!/^[a-z0-9_-]{1,32}$/i.test(newSlug)) {
+    throw new Error('Profile slug must be 1-32 chars: letters, digits, dash, underscore.');
+  }
+  if (oldSlug === newSlug) return { renamed: oldSlug, dataMoved: false };
+  const raw = readRawConfig();
+  if (!raw.profiles) throw new Error('Run migrateIfNeeded() before renameProfile().');
+  if (!raw.profiles[oldSlug]) throw new Error(`Profile "${oldSlug}" not found.`);
+  if (raw.profiles[newSlug]) throw new Error(`Profile "${newSlug}" already exists.`);
+
+  // Rebuild the profiles object preserving insertion order so the UI list
+  // doesn't jump around after a rename. JSON key order isn't semantically
+  // meaningful but users expect stability.
+  const rebuilt = {};
+  for (const k of Object.keys(raw.profiles)) {
+    rebuilt[k === oldSlug ? newSlug : k] = raw.profiles[k];
+  }
+  raw.profiles = rebuilt;
+  if (raw.active_profile === oldSlug) raw.active_profile = newSlug;
+  atomicWriteConfig(raw);
+
+  // Move the on-disk data dir. Same-filesystem rename is atomic; a cross-
+  // device fallback isn't worth it here — data/profiles/ lives next to
+  // config.json which we just wrote to.
+  let dataMoved = false;
+  const oldDir = path.join(PROFILES_DIR, oldSlug);
+  const newDir = path.join(PROFILES_DIR, newSlug);
+  if (fs.existsSync(oldDir) && !fs.existsSync(newDir)) {
+    try { fs.renameSync(oldDir, newDir); dataMoved = true; }
+    catch (e) { console.error(`profile-store: data dir rename failed: ${e.message}`); }
+  }
+  return { renamed: newSlug, from: oldSlug, dataMoved };
+}
+
 // Delete a profile. Cannot delete the active one. Optionally wipes data dir.
 export function deleteProfile(slug, opts = {}) {
   const raw = readRawConfig();

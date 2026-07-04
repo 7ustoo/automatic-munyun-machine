@@ -133,6 +133,14 @@ function bundledChromiumPath() {
 // to know about profile-store. Missing/legacy/broken config → {}.
 async function readBrowserCfg() {
   try {
+    // v2.7: readActiveConfig() copies config.example.json → config.json when
+    // the file is missing. During dashboard first-run setup (step 3 launches
+    // login-once → resolveBrowser BEFORE setup-init writes the config), that
+    // side effect would flip the wrapper's needsSetup mid-flow. No config =
+    // no browser override; skip the read entirely.
+    const { fileURLToPath } = await import('node:url');
+    const cfgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'config.json');
+    if (!fs.existsSync(cfgPath)) return {};
     const { readActiveConfig } = await import('./profile-store.mjs');
     return readActiveConfig().browser || {};
   } catch {

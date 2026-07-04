@@ -1,6 +1,6 @@
-# CLAUDE.md
+# AGENTS.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project
 
@@ -14,7 +14,7 @@ Automatic Munyun Machine (AMM) — a local-first Windows tool that scrapes hirin
 npm install
 npx playwright install chromium       # one-time; pulls Chromium into the user profile
 
-npm run setup       # dev/CI escape hatch — interactive 10-step CLI wizard. v2.7: end users are onboarded from the dashboard's setup panel (rendered when needsSetup=true); this CLI is not surfaced to end users anywhere anymore.
+npm run setup       # interactive 10-step setup wizard (creates .env + config.json)
 npm run daily       # one-shot scrape + Telegram push (also: node scripts/daily-batch.mjs)
 npm run bot         # long-running Telegram poller
 npm run login       # opens Chromium so user signs into hiring.cafe (persists session)
@@ -50,13 +50,11 @@ Plus `scripts/daily-batch.mjs` (one-shot scraper, fired by its own scheduled tas
 
 The wrapper code lives in `wrapper/` (its own Go module, build with `cd wrapper && make build`). It's a small native shell around the JS payload, not a replacement for it. All bot logic stays in `scripts/telegram-bot.mjs`.
 
-**v2.1 — desktop-first, Telegram optional.** The wrapper's localhost dashboard (`wrapper/dashboard.go` + `dashboard.html`) is the primary surface: it serves the ranked batch from `last-batch.json` and has state-changing POST endpoints (`/api/scrape`, `/api/telegram/{validate,detect,save,disable}`) guarded by a per-process CSRF token (`wrapper/dashboard_actions.go`). Telegram is now optional — "is it on" = a token in `.env`, defined once in `scripts/telegram-config.mjs#telegramConfigured` and mirrored in the wrapper's `telegramEnabled`. The supervisor runs the bot poller **only while Telegram is enabled** and idles otherwise (`isSetUp` = config.json exists, decoupled from Telegram). `daily-batch.mjs` no-ops its Telegram sends when off but always writes `last-batch.json` + `jobs(date).txt`. Telegram setup from the GUI flows through `scripts/telegram-setup.mjs` (the wrapper execs it and relays its JSON — never reimplement Telegram in Go).
-
 1. **`scripts/daily-batch.mjs`** — the scraper. Launches a persistent-profile Playwright Chromium, runs each `config.queries[]` term against hiring.cafe, scores results against `data/cv-parsed.json`, resolves direct ATS apply URLs, and pushes the top 100 to Telegram (chunked messages + a `jobs(YYYY-MM-DD).txt` attachment). Triggered by Task Scheduler `munyun-daily-batch` weekdays at 07:00, by `/scrape` from the bot, or manually via `npm run daily`. Writes `data/last-batch.json` so `/why N` can explain a score after the fact.
 
 2. **`scripts/telegram-bot.mjs`** — the long-running poller. `getUpdates` every ~3s, dispatches ~30 commands (see README's command tables). Stateful only via `data/bot-offset.json` (poll cursor) + a small in-memory `runningJob` lock. Most settings commands route through `scripts/config-rw.mjs` for atomic writes; commands that mutate scheduling/login spawn helper scripts. Started at logon by Task Scheduler `munyun-bot` via `scripts/start-bot.cmd`.
 
-3. **Helper scripts** (one job each, spawnable from the bot): `setup-wizard.mjs`, `login-once.mjs`, `job-action.mjs` (does `/save`/`/applied`/`/auth` against hiring.cafe with the persistent profile), `resume-parser.mjs` + `cv-keywords.json` (PDF/DOCX/MD → keyword arrays), `role-suggester.mjs` (CV → suggested job titles), `geocode.mjs` (open-meteo wrapper, no key), `update-checker.mjs` (GitHub Releases poll for `/version` + `/update`), `file-picker.mjs` (Win32 OpenFileDialog), `browser-launcher.mjs` (v2.0.1 — resolves installed Chrome → Edge → bundled Chromium; ALL Playwright launch sites must go through `resolveBrowser()` and spread its `launchOptions`, never hardcode a browser).
+3. **Helper scripts** (one job each, spawnable from the bot): `setup-wizard.mjs`, `login-once.mjs`, `job-action.mjs` (does `/save`/`/applied`/`/auth` against hiring.cafe with the persistent profile), `resume-parser.mjs` + `cv-keywords.json` (PDF/DOCX/MD → keyword arrays), `role-suggester.mjs` (CV → suggested job titles), `geocode.mjs` (open-meteo wrapper, no key), `update-checker.mjs` (GitHub Releases poll for `/version` + `/update`), `file-picker.mjs` (Win32 OpenFileDialog).
 
 Scoring lives inline in `daily-batch.mjs`: keyword overlap between job text and CV's `{titles, certs, skills, compliance}` arrays, weighted by `config.scoring.*`, then mapped to a calibrated percentage band (see the `_percentBands` comment in `config.example.json`).
 

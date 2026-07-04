@@ -22,38 +22,12 @@ import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { geocode } from './geocode.mjs';
 import * as cfgRW from './config-rw.mjs';
 import { pickResumeFile } from './file-picker.mjs';
-import { IS_WIN32, IS_DARWIN, IS_LINUX, POWERSHELL, runScheduledTask, wrapperBinaryPath } from './os-paths.mjs';
+import { POWERSHELL, runScheduledTask, wrapperBinaryPath } from './os-paths.mjs';
+import { registerSchedulerForPlatform } from './scheduler-register.mjs';
 
-// Absolute path to powershell.exe (Win32 only; null elsewhere) — exported
-// here for backward-compat with any code reading POWERSHELL_EXE; new code
-// should import POWERSHELL from os-paths directly.
+// Absolute path to powershell.exe (Win32 only; null elsewhere) — kept as an
+// export for backward-compat with any code reading POWERSHELL_EXE.
 const POWERSHELL_EXE = POWERSHELL;
-
-// Helper: invoke the platform-appropriate setup script. Returns
-// { code, out } in the same shape the wizard's PS spawn used.
-function registerSchedulerForPlatform() {
-  return new Promise((resolve) => {
-    let cmd, args, useShell = false;
-    if (IS_WIN32) {
-      cmd = POWERSHELL_EXE;
-      args = ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'setup-tasks.ps1')];
-    } else if (IS_DARWIN) {
-      cmd = 'bash';
-      args = [path.join(__dirname, 'setup-tasks-mac.sh')];
-    } else if (IS_LINUX) {
-      cmd = 'bash';
-      args = [path.join(__dirname, 'setup-tasks-linux.sh')];
-    } else {
-      return resolve({ code: -1, out: `Unsupported platform: ${process.platform}` });
-    }
-    const child = spawn(cmd, args, { cwd: ROOT, windowsHide: true });
-    let out = '';
-    child.stdout.on('data', d => { out += d.toString(); });
-    child.stderr.on('data', d => { out += d.toString(); });
-    child.on('exit', code => resolve({ code, out }));
-    child.on('error', e => resolve({ code: -1, out: 'spawn failed: ' + e.message }));
-  });
-}
 
 // Helper: start AMM now (post-registration). Two attempts, both safe to
 // fire together:

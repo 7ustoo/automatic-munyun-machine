@@ -84,8 +84,10 @@ Source: "..\*"; DestDir: "{app}"; \
 ; v2.0.1: shortcuts point at the branded .ico directly — AMM.exe itself only
 ; carries an embedded icon when built with the go-winres step (CI does this;
 ; see wrapper/Makefile build-win), so the .ico is the reliable source.
+; v2.7: dropped the "Setup wizard" Start menu shortcut — first-run setup now
+; lives in the dashboard, opened by AMM.exe itself. The terminal wizard
+; (scripts/setup-wizard.mjs) survives as a dev escape hatch via `npm run setup`.
 Name: "{group}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\logo.ico"
-Name: "{group}\Setup wizard"; Filename: "{app}\scripts\setup-wizard.mjs"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
 Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\logo.ico"; Tasks: desktopicon
 
@@ -152,21 +154,15 @@ Filename: "cmd.exe"; \
   Check: NeedsChromium; \
   Flags: waituntilterminated
 
-Filename: "node.exe"; \
-  Parameters: """{app}\scripts\setup-wizard.mjs"""; \
-  WorkingDir: "{app}"; \
-  Description: "Run the {#MyAppName} setup wizard"; \
-  Flags: postinstall nowait
-
-; v2.0.4: upgrades over a configured install (.env exists) usually skip the
-; wizard — start the tray app straight from the finish page instead. The
-; wrapper's single-instance lock makes an accidental double-launch (wizard
-; checked too) exit cleanly. Fresh installs never see this entry; the
-; wizard's last step launches AMM and explains the tray icon.
+; v2.7: fresh installs and upgrades both launch AMM.exe — no terminal wizard.
+; On fresh installs, the wrapper detects config.json is missing and its
+; dashboard renders the first-run setup panel. On upgrades, the wrapper opens
+; the normal dashboard. The wrapper's single-instance lock handles double-
+; launches cleanly (the installer runs one, the user may launch from the
+; desktop icon), and `skipifsilent` ensures silent installs don't pop windows.
 Filename: "{app}\wrapper\dist\AMM.exe"; \
   WorkingDir: "{app}"; \
-  Description: "Start {#MyAppName} in the system tray (required for the bot to work)"; \
-  Check: IsConfigured; \
+  Description: "Start {#MyAppName} (opens the setup dashboard on first launch)"; \
   Flags: postinstall nowait skipifsilent
 
 [UninstallRun]
