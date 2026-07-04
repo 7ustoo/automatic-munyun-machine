@@ -5,7 +5,7 @@
  * Polls Telegram getUpdates every 3 sec for new messages from your chat.
  * Dispatches commands:
  *   /scrape, /daily, gm, morning  → run daily batch (weather + 100 jobs)
- *   /export [csv]                 → apply-links export (.txt or Excel .csv)
+ *   /export [csv|xlsx]            → apply-links export (.txt, .csv, or .xlsx with clickable links)
  *   /weather                      → weather only (city from config.json)
  *   /version                      → show bot version + latest GitHub version
  *   /update                       → pull latest code from GitHub + restart
@@ -395,7 +395,8 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /why N               → explain why job N got its match %
 /history [N]         → past applications (paginated)
 /export              → apply-links list (.txt): number · title · link
-/export csv          → same as an Excel sheet (.csv)
+/export csv          → same as a plain-text sheet (.csv)
+/export xlsx         → Excel workbook with CLICKABLE apply links
 
 <b>Settings — view + edit from your phone</b>
 /settings            → current config in one message
@@ -1267,20 +1268,22 @@ async function handleMessage(msg) {
     process.exit(0);
   }
 
-  // /export [txt|csv] — minimal export of the latest batch: number · job
-  // title · apply link. txt (default) is a readable numbered list; csv opens
-  // straight in Excel. v2.4: built on demand from the ACTIVE profile's
-  // last-batch.json (the old version read the pre-profile data/ dir and had
-  // been silently broken since multi-profile landed).
+  // /export [txt|csv|xlsx] — minimal export of the latest batch: number ·
+  // job title · apply link. txt (default) is a readable numbered list; csv
+  // is a plain-text sheet; xlsx (v2.4.1) is a real Excel workbook whose
+  // Apply Link column is native clickable hyperlinks (CSV structurally
+  // can't carry links — it's plain text per RFC 4180).
   if (/^\/?export\b/.test(text)) {
     try {
-      const fmt = /\bcsv\b/.test(text) ? 'csv' : 'txt';
+      const fmt = /\b(xlsx|excel)\b/.test(text) ? 'xlsx' : /\bcsv\b/.test(text) ? 'csv' : 'txt';
       const r = loadExport(fmt);
       if (!r.ok) return reply(chatId, `<i>${escHtml(r.error)} Run /scrape first.</i>`);
       const outPath = path.join(profilePaths().dir, r.filename);
-      fs.writeFileSync(outPath, r.content);
+      // xlsx is binary and rides the export contract base64-encoded.
+      if (fmt === 'xlsx') fs.writeFileSync(outPath, Buffer.from(r.contentBase64, 'base64'));
+      else fs.writeFileSync(outPath, r.content);
       await tgSendDocument(chatId, outPath,
-        `📄 ${r.filename} — ${r.count} jobs · number · title · apply link${fmt === 'txt' ? '\nWant an Excel sheet? /export csv' : ''}`);
+        `📄 ${r.filename} — ${r.count} jobs · number · title · apply link${fmt === 'txt' ? '\nClickable Excel links? /export xlsx' : ''}`);
       return;
     } catch (e) {
       return reply(chatId, '❌ Export failed: ' + escHtml(e.message));

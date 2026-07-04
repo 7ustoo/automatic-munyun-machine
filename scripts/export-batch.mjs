@@ -2,13 +2,18 @@
 /**
  * Minimal batch export (v2.4): number · job title · apply link — nothing else.
  *
- * Two formats:
- *   txt — plain numbered list, one job per block, easy to read/paste
- *   csv — Excel-ready sheet (UTF-8 BOM so Excel detects the encoding,
- *         CRLF rows, proper quoting) with columns: #, Job Title, Apply Link
+ * Three formats:
+ *   txt  — plain numbered list, one job per block, easy to read/paste
+ *   csv  — Excel-ready sheet (UTF-8 BOM so Excel detects the encoding,
+ *          CRLF rows, proper quoting) with columns: #, Job Title, Apply Link.
+ *          NOTE: CSV is plain text (RFC 4180) — it cannot carry hyperlinks,
+ *          so the Apply Link column is inert text in Excel.
+ *   xlsx — real Excel workbook (v2.4.1) where the Apply Link column is a
+ *          NATIVE clickable hyperlink (blue + underlined). Built by
+ *          scripts/xlsx-writer.mjs, zero dependencies.
  *
  * Consumed by:
- *   - the dashboard (GET /api/export?format=txt|csv → dashboard-api.mjs export)
+ *   - the dashboard (GET /api/export?format=txt|csv|xlsx → dashboard-api.mjs export)
  *   - the Telegram /export command (sends the file as an attachment)
  *
  * Built on demand from the ACTIVE profile's last-batch.json, so numbering
@@ -18,12 +23,15 @@
  * Usage (CLI, used by the Go wrapper):
  *   node scripts/export-batch.mjs txt   → {"ok":true,"filename":...,"content":...}
  *   node scripts/export-batch.mjs csv
+ *   node scripts/export-batch.mjs xlsx  → {"ok":true,"filename":...,"contentBase64":...}
+ *     (xlsx is binary — it rides the one-line-JSON contract base64-encoded)
  */
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths as profilePaths } from './profile-store.mjs';
+import { buildXlsx } from './xlsx-writer.mjs';
 
 // ---- pure builders (unit-tested) ----
 
@@ -66,10 +74,24 @@ export function buildExportCsv(rows) {
   return '\uFEFF' + [head, ...body].join('\r\n') + '\r\n';
 }
 
+// Excel workbook with the Apply Link column as native clickable hyperlinks —
+// the thing CSV structurally can't do. Returns a Buffer.
+export function buildExportXlsx(rows, date = '') {
+  return buildXlsx({
+    sheetName: ('Apply links ' + date).trim().slice(0, 31), // Excel caps tab names at 31 chars
+    columns: [
+      { header: '#', width: 6 },
+      { header: 'Job Title', width: 60 },
+      { header: 'Apply Link', width: 80, hyperlink: true }
+    ],
+    rows: rows.map(r => [r.n, r.title, r.applyUrl])
+  });
+}
+
 // ---- loader (reads the active profile's last batch) ----
 
 export function loadExport(format) {
-  const fmt = format === 'csv' ? 'csv' : 'txt';
+  const fmt = format === 'csv' ? 'csv' : format === 'xlsx' ? 'xlsx' : 'txt';
   let lb;
   try {
     lb = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
@@ -81,8 +103,14 @@ export function loadExport(format) {
     return { ok: false, error: 'The latest batch has no jobs to export.' };
   }
   const date = lb.date || new Date().toISOString().slice(0, 10);
+  const filename = `apply-links(${date}).${fmt}`;
+  if (fmt === 'xlsx') {
+    // Binary format — base64 so it survives the one-line-JSON stdout contract.
+    const contentBase64 = buildExportXlsx(rows, date).toString('base64');
+    return { ok: true, format: fmt, filename, contentBase64, count: rows.length };
+  }
   const content = fmt === 'csv' ? buildExportCsv(rows) : buildExportTxt(rows, date);
-  return { ok: true, format: fmt, filename: `apply-links(${date}).${fmt}`, content, count: rows.length };
+  return { ok: true, format: fmt, filename, content, count: rows.length };
 }
 
 // ---- CLI (the Go wrapper execs this) ----

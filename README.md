@@ -9,7 +9,7 @@
 - **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
 - **Desktop dashboard (primary).** A local control surface in your browser — see the ranked batch, open jobs to apply, and click **Scrape now** for a fresh batch. Opened from the system-tray icon, which also shows real-time health (green/yellow/red).
 - **Telegram (optional, since v2.1).** Want batches on your phone too? Turn Telegram on right from the dashboard — paste a bot token, connect your chat, done. Skip it and AMM is a pure desktop app; no bot token needed. When on, you also get `/scrape`, `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
-- **Export your apply links as .txt or Excel .csv.** One click in the dashboard (or `/export` on Telegram) downloads the latest batch as a clean list — number, job title, apply link — in plain text or an Excel-ready spreadsheet. The full detailed `jobs(YYYY-MM-DD).txt` archive is still written every run and sent to Telegram when it's enabled.
+- **Export your apply links as .txt, .csv, or Excel .xlsx.** One click in the dashboard (or `/export` on Telegram) downloads the latest batch as a clean list — number, job title, apply link. The `.xlsx` workbook has the Apply Link column as real clickable hyperlinks (CSV is plain text and can't carry links — pick `.xlsx` if you want to click straight from Excel). The full detailed `jobs(YYYY-MM-DD).txt` archive is still written every run and sent to Telegram when it's enabled.
 - **Local-first.** Everything runs on your machine. Nothing leaves your computer except (if you enable it) the Telegram messages.
 
 ## Install
@@ -98,7 +98,8 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/applied N` | Mark applied (also logs to applications.md) |
 | `/why N` | Explain why job #N got its match % |
 | `/export` | Apply-links list from the latest batch (`apply-links(date).txt`): number · job title · apply link |
-| `/export csv` | Same three columns as an Excel-ready `.csv` sheet |
+| `/export csv` | Same three columns as a plain-text `.csv` sheet (links are text — CSV can't carry hyperlinks) |
+| `/export xlsx` | Same three columns as an Excel `.xlsx` workbook with **clickable** apply links |
 
 ### Settings — edit from your phone (NEW in v0.3)
 | Command | Action |
