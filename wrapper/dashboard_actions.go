@@ -299,6 +299,87 @@ func (d *dashboardServer) handleUpdateApply(w http.ResponseWriter, r *http.Reque
 	d.relaySelfUpdate(w, 210*time.Second, "apply")
 }
 
+// --- v2.6: profile CRUD ---
+// The Node helper owns all profile-store logic (slug validation, atomic config
+// writes, data-dir moves). These handlers just relay bodies + responses so the
+// wrapper never re-implements profile state — same rule as Telegram setup.
+
+// handleProfileList (GET) returns { active, profiles:[{slug,active,userName,hasCV}] }
+// for the dashboard's profiles panel. Read-only, so no CSRF/POST guard.
+func (d *dashboardServer) handleProfileList(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "profile-list")
+}
+
+func (d *dashboardServer) handleProfileAdd(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "profile-add", b["slug"])
+}
+
+func (d *dashboardServer) handleProfileRename(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "profile-rename", b["oldSlug"], b["newSlug"])
+}
+
+func (d *dashboardServer) handleProfileDelete(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "profile-delete", b["slug"])
+}
+
+// handleProfileSwitch changes the active profile. Every subsequent read
+// (settings, batch, resume, terms) now routes through the new one, so the
+// page needs to reload to pick up the switched context — the client JS
+// does that on a successful response.
+func (d *dashboardServer) handleProfileSwitch(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "profile-switch", b["slug"])
+}
+
+// --- v2.7: first-run setup ---
+// Same "wrapper never re-implements Node" rule as v2.1's Telegram flow and
+// v2.6's profile CRUD: every handler here relays scripts/dashboard-api.mjs
+// output verbatim. The dashboard's setup panel drives the whole flow.
+
+// handleSetupGeocode (GET ?q=): open-meteo lookup. Read-only.
+func (d *dashboardServer) handleSetupGeocode(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	d.relayDashboardAPI(w, 10*time.Second, "setup-geocode", q)
+}
+
+// handleSetupHcafeLoginStart (POST): spawns login-once.mjs (visible Chromium
+// window). Returns immediately with the child PID. Guarded because it starts
+// a subprocess with a visible window — a cross-origin page shouldn't be able
+// to open Chromium on the user's screen.
+func (d *dashboardServer) handleSetupHcafeLoginStart(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "setup-hcafe-login-start")
+}
+
+// handleSetupHcafeLoginStatus (GET): reports {running, authed}. When the
+// child has exited, the helper runs a job-action.mjs auth verification — up
+// to ~90s of Playwright startup + navigation, so the exec budget accounts
+// for the worst case.
+func (d *dashboardServer) handleSetupHcafeLoginStatus(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 100*time.Second, "setup-hcafe-login-status")
+}
+
+// handleSetupInit (POST): body is the initial-config JSON blob. Read the raw
+// body and pass it as a single argv element rather than JSON-encoding a nested
+// object into readBody's map[string]string.
+func (d *dashboardServer) handleSetupInit(w http.ResponseWriter, r *http.Request) {
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1<<16))
+	if err != nil {
+		writeJSONError(w, http.StatusOK, "could not read setup payload")
+		return
+	}
+	d.relayDashboardAPI(w, 10*time.Second, "setup-init", string(body))
+}
+
+// handleSetupFinalize (POST): registers scheduler tasks. Long budget because
+// schtasks / launchctl / systemctl operations can take several seconds when
+// the system is busy.
+func (d *dashboardServer) handleSetupFinalize(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 45*time.Second, "setup-finalize")
+}
+
 // jsonOK reports whether a helper line parsed to {"ok":true,...}.
 func jsonOK(line []byte) bool {
 	var v struct {

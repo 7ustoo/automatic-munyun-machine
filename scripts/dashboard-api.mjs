@@ -25,13 +25,24 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import * as cfgRW from './config-rw.mjs';
-import { paths as profilePaths } from './profile-store.mjs';
+import {
+  paths as profilePaths,
+  listProfiles,
+  getActiveProfile,
+  addProfile,
+  setActiveProfile,
+  deleteProfile,
+  renameProfile,
+  _internals as profileInternals
+} from './profile-store.mjs';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
-import { withFileLock } from './io-helpers.mjs';
+import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { loadExport } from './export-batch.mjs';
+import { geocode } from './geocode.mjs';
+import { registerSchedulerForPlatform } from './scheduler-register.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -172,8 +183,17 @@ async function resumeParse(filePath) {
   if (!parsed.titles.length && !parsed.skills.length && !parsed.certs.length && !parsed.compliance.length) {
     return out({ ok: false, error: 'No recognizable skills/titles found in that resume. Try a text-based PDF/DOCX (not a scan).' });
   }
-  writeParsedCV(parsed);
-  const mode = cfgRW.read().search?.mode === 'keywords' ? 'keywords' : 'titles';
+  // v2.7: on a fresh install (dashboard setup step 1 — config.json not
+  // written yet), cfgRW.read() and profilePaths() would copy the example
+  // config into place as a side effect, flipping the wrapper's needsSetup
+  // mid-setup. Write the CV to the explicit 'default' profile (skips the
+  // active-profile config read) and default the mode; setup-init owns
+  // config.json creation at the final step.
+  const freshInstall = !fs.existsSync(path.join(ROOT, 'config.json'));
+  writeParsedCV(parsed, freshInstall ? 'default' : undefined);
+  const mode = freshInstall
+    ? 'titles'
+    : (cfgRW.read().search?.mode === 'keywords' ? 'keywords' : 'titles');
   const suggestions = (mode === 'keywords' ? suggestKeywords(parsed, { max: 12 }) : suggestRoles(parsed, { max: 12 }))
     .map(s => s.title);
   out({
@@ -207,8 +227,228 @@ function resumeApply(termsJson) {
   out({ ok: true, list: clean.map(q => q.term) });
 }
 
+// ---- setup (v2.7) ----
+// Powers the dashboard-native first-run flow. Replaces the terminal wizard's
+// step 3 (hiring.cafe warmup), step 9 (city geocode), step 10 (schedule +
+// scheduler registration + config write). Together with the existing
+// resume-parse / resume-apply subcommands and the /api/telegram/* flow, the
+// entire onboarding lives in the dashboard.
+
+// setup-geocode: proxy to open-meteo. Same as the wizard's step 9. Pure
+// lookup — no filesystem side effects. Returns exactly the geocode() shape.
+async function setupGeocode(query) {
+  const q = String(query || '').trim();
+  if (!q) return out({ ok: false, error: 'city name is required' });
+  try {
+    const r = await geocode(q);
+    if (!r) return out({ ok: false, error: 'no match for "' + q + '"' });
+    out({ ok: true, ...r });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+// setup-hcafe-login-start: spawn login-once.mjs detached and return the PID.
+// The child owns a Playwright browser window that the user closes when the
+// Cloudflare challenge clears. The dashboard polls setup-hcafe-login-status
+// until the PID exits, then verifies auth. Persists PID under data/ so a
+// dashboard refresh mid-flight doesn't lose track of the child.
+function setupHcafeLoginStart() {
+  try {
+    const scriptPath = path.join(ROOT, 'scripts', 'login-once.mjs');
+    if (!fs.existsSync(scriptPath)) return out({ ok: false, error: 'login-once.mjs missing — corrupt install?' });
+    const child = spawn(process.execPath, [scriptPath], {
+      cwd: ROOT,
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: false
+    });
+    child.unref();
+    const pidPath = path.join(ROOT, 'data', 'hcafe-login.pid');
+    fs.mkdirSync(path.dirname(pidPath), { recursive: true });
+    fs.writeFileSync(pidPath, String(child.pid));
+    out({ ok: true, pid: child.pid });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+// pidIsAlive: cross-platform "is this PID running." process.kill(pid, 0)
+// throws ESRCH when the process is gone, EPERM when it exists but we can't
+// signal it (still counts as alive for our purpose — child was spawned by
+// the same user).
+function pidIsAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
+
+// setup-hcafe-login-status: while running → {running:true}. On exit → run
+// job-action.mjs auth and report {running:false, authed}. The dashboard uses
+// authed=true as the gate to advance past step 3; authed=false re-arms the
+// Launch button so the user can retry.
+async function setupHcafeLoginStatus() {
+  const pidPath = path.join(ROOT, 'data', 'hcafe-login.pid');
+  let pid = 0;
+  try { pid = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10); }
+  catch { return out({ ok: true, running: false, authed: false, started: false }); }
+
+  if (pidIsAlive(pid)) return out({ ok: true, running: true, pid });
+
+  // Child exited — verify hiring.cafe auth. Reuses the wizard's step 3 check.
+  const r = await spawnJobAction('auth', '');
+  out({ ok: true, running: false, authed: r.code === 0, output: (r.output || '').slice(0, 300) });
+}
+
+// buildInitConfig: pure merge of user-collected setup input over config
+// defaults. Exported so unit tests can exercise the merge/normalization
+// logic without touching real config.json. Kept separate from setupInit so
+// the file-write side effect and the transformation are testable in isolation.
+//
+// Blob shape:
+//   {
+//     "user":     { name, maxYoeAcceptable, salaryFloorUsd },
+//     "filters":  { filterClearance, applicationFormEase, maxJobAge },
+//     "weather":  { city, lat, lon, timezone },
+//     "schedule": { time, days? },
+//     "queries":  ["IAM Engineer", "Cloud Security", ...],
+//     "search":   { mode: "titles" | "keywords" }
+//   }
+export function buildInitConfig(input, defaults = {}) {
+  const src = input || {};
+  const def = { ...defaults };
+  delete def._comment;
+
+  // Convert the client's plain string[] queries into the {key, term} shape
+  // config-rw expects. Same key-derivation as jobsAdd(). If the user left it
+  // empty, keep the example's defaults so the first scrape isn't a no-op.
+  const inputQueries = Array.isArray(src.queries) ? src.queries : [];
+  const queries = inputQueries.length
+    ? inputQueries
+        .map(t => String(t || '').trim())
+        .filter(Boolean)
+        .map((term, i) => ({
+          key: (term.replace(/[^a-z0-9]/gi, '').slice(0, 20)) || `q${i}`,
+          term
+        }))
+    : (def.queries || []);
+
+  const profile = {
+    user: { ...(def.user || {}), ...(src.user || {}) },
+    queries,
+    search: { ...(def.search || {}), ...(src.search || {}) },
+    filters: { ...(def.filters || {}), ...(src.filters || {}) },
+    scoring: def.scoring || {},
+    weather: { ...(def.weather || {}), ...(src.weather || {}) },
+    schedule: { ...(def.schedule || {}), ...(src.schedule || {}) },
+    telegram: def.telegram || {}
+  };
+
+  const cfg = {
+    _comment: 'Written by AMM dashboard setup (v2.7). Edit via the dashboard or npm run setup.',
+    active_profile: 'default',
+    profiles: { default: profile }
+  };
+  if (def.browser) cfg.browser = def.browser;
+  return cfg;
+}
+
+// setup-init: one-shot write of config.json in the v1.0 profile shape. Called
+// from the dashboard finish step with a JSON blob of user-collected fields.
+// Merges over config.example.json defaults so scoring weights, drop patterns,
+// and skipCompanies land at sensible values without requiring the user to
+// touch them.
+function setupInit(jsonBlob) {
+  let input;
+  try { input = JSON.parse(jsonBlob || '{}'); }
+  catch { return out({ ok: false, error: 'invalid JSON payload' }); }
+
+  let defaults = {};
+  try {
+    defaults = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
+  } catch { /* fall through with empty defaults */ }
+
+  const cfg = buildInitConfig(input, defaults);
+
+  try {
+    atomicWriteJson(path.join(ROOT, 'config.json'), cfg);
+    out({ ok: true });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+// setup-finalize: register the scheduler tasks. config.json must already be
+// written (the platform scripts read schedule.time / days from it), so this
+// runs AFTER setup-init. The wrapper's tray poll picks up the newly-written
+// config.json on its own and transitions out of needs-setup mode — no extra
+// IPC.
+async function setupFinalize() {
+  try {
+    const r = await registerSchedulerForPlatform();
+    if (r.code === 0) return out({ ok: true });
+    out({ ok: false, error: 'scheduler registration failed', detail: (r.out || '').slice(0, 400) });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+// ---- profiles (v2.6) ----
+// The Telegram bot has had /profile add|switch|delete|list since v1.0; the
+// dashboard was read-only for profiles until v2.6. These handlers mirror
+// the bot's commands so both surfaces stay in sync via the same store.
+
+function profileList() {
+  try {
+    const active = getActiveProfile();
+    const slugs = listProfiles();
+    const raw = profileInternals.readRawConfig();
+    const items = slugs.map(slug => {
+      const p = raw.profiles?.[slug] || {};
+      const cvPath = profilePaths(slug).cvParsed;
+      return {
+        slug,
+        active: slug === active,
+        userName: p.user?.name || '',
+        hasCV: fs.existsSync(cvPath)
+      };
+    });
+    out({ ok: true, active, profiles: items });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+function profileAdd(slug) {
+  try {
+    const r = addProfile(String(slug || '').trim(), {});
+    out({ ok: true, slug: r.slug, clonedFrom: r.clonedFrom, cvCloned: r.cvCloned });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+function profileRename(oldSlug, newSlug) {
+  try {
+    const r = renameProfile(String(oldSlug || '').trim(), String(newSlug || '').trim());
+    out({ ok: true, renamed: r.renamed, from: r.from, dataMoved: r.dataMoved });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+function profileDelete(slug) {
+  try {
+    // Wipe data by default — leaving stranded data/profiles/<slug>/ dirs
+    // after a delete would confuse the next user who reuses the slug.
+    const r = deleteProfile(String(slug || '').trim(), { wipeData: true });
+    out({ ok: true, deleted: r.deleted, dataWiped: r.dataWiped });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+function profileSwitch(slug) {
+  try {
+    const s = setActiveProfile(String(slug || '').trim());
+    out({ ok: true, active: s });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+// Only dispatch CLI when this file was invoked directly (not imported by a
+// test that just wants buildInitConfig). ESM main-module check via
+// pathToFileURL so Windows backslash paths don't false-negative.
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 const [, , cmd, a, b] = process.argv;
-(async () => {
+if (isMain) (async () => {
   switch (cmd) {
     case 'settings-get': return settingsGet();
     case 'settings-set': return settingsSet(a, b);
@@ -220,8 +460,20 @@ const [, , cmd, a, b] = process.argv;
     case 'resume-apply': return resumeApply(a);
     // v2.4: minimal export (number · title · apply link) as txt or csv.
     case 'export':       return out(loadExport(a));
+    // v2.6: profile CRUD from the dashboard.
+    case 'profile-list':   return profileList();
+    case 'profile-add':    return profileAdd(a);
+    case 'profile-rename': return profileRename(a, b);
+    case 'profile-delete': return profileDelete(a);
+    case 'profile-switch': return profileSwitch(a);
+    // v2.7: first-run setup subcommands.
+    case 'setup-geocode':            return setupGeocode(a);
+    case 'setup-hcafe-login-start':  return setupHcafeLoginStart();
+    case 'setup-hcafe-login-status': return setupHcafeLoginStatus();
+    case 'setup-init':               return setupInit(a);
+    case 'setup-finalize':           return setupFinalize();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-mode|job-action|resume-parse|resume-apply> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-mode|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|setup-init|setup-finalize> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });

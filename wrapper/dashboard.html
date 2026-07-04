@@ -167,6 +167,75 @@
   .update-banner .ub-actions { display: flex; align-items: center; gap: 14px; }
   .update-banner.updating { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.20), rgba(63,185,80,.10)); }
 
+  /* v2.7: first-run setup overlay. Full-viewport panel that hides the normal
+     dashboard while config.json is missing. Fades out once setup finishes and
+     the wrapper's tray-poll picks up the freshly-written config. */
+  #setup-overlay {
+    position: fixed; inset: 0; z-index: 100; overflow-y: auto;
+    background: var(--bg); padding: 40px 20px;
+  }
+  #setup-overlay.hidden { display: none !important; }
+  .setup-container { max-width: 720px; margin: 0 auto; }
+  .setup-header { text-align: center; margin-bottom: 32px; }
+  .setup-header h1 { margin: 0 0 6px; font-size: 26px; font-weight: 700; }
+  .setup-header .sub { color: var(--muted); font-size: 14px; }
+  .setup-progress {
+    display: flex; gap: 10px; justify-content: center; margin-top: 20px;
+  }
+  .setup-progress .pdot {
+    width: 10px; height: 10px; border-radius: 50%;
+    background: var(--panel-2); border: 1px solid var(--border);
+  }
+  .setup-progress .pdot.done { background: var(--green); border-color: var(--green); }
+  .setup-progress .pdot.current { background: var(--accent); border-color: var(--accent);
+                                   box-shadow: 0 0 0 3px rgba(88,166,255,.20); }
+  .setup-step { display: none; }
+  .setup-step.active { display: block; }
+  .setup-step .card { padding: 24px; }
+  .setup-step h2 {
+    margin: 0 0 16px; font-size: 12px; font-weight: 600;
+    letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+  }
+  .setup-step .lead { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
+  .setup-step .desc { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
+  .setup-basics-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px;
+  }
+  .setup-basics-grid .full { grid-column: 1 / -1; }
+  .setup-basics-grid label {
+    display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px;
+  }
+  .setup-basics-grid input, .setup-basics-grid select {
+    width: 100%;
+  }
+  #setup-city-note { font-size: 12px; margin-top: 4px; }
+  #setup-city-note.ok { color: var(--green); }
+  #setup-city-note.bad { color: var(--red); }
+  .setup-nav {
+    display: flex; justify-content: space-between; gap: 12px;
+    margin-top: 20px;
+  }
+  #setup-back:disabled { visibility: hidden; }
+  .setup-hcafe-state {
+    padding: 16px; border-radius: 8px; background: var(--panel-2);
+    border: 1px solid var(--border); font-size: 14px; margin-top: 12px;
+  }
+  .setup-hcafe-state.running { border-color: var(--yellow); }
+  .setup-hcafe-state.done { border-color: var(--green); color: var(--green); }
+  .setup-hcafe-state.err { border-color: var(--red); color: var(--red); }
+  .setup-step .terms { margin-top: 12px; }
+
+  /* v2.6: profiles panel — a row per persona with inline actions. */
+  .prof-item {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 8px 10px; border: 1px solid var(--border);
+    border-radius: 6px; margin-bottom: 6px; background: var(--panel-2);
+  }
+  .prof-item.active { border-color: var(--accent); }
+  .prof-name { font-weight: 600; }
+  .prof-name small { color: var(--muted); font-weight: 400; margin-left: 8px; }
+  .prof-actions { display: flex; gap: 4px; }
+
   /* v2.1: settings + search terms + job-action UI */
   .grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
   .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
@@ -198,6 +267,186 @@
 </style>
 </head>
 <body>
+
+<!-- v2.7: first-run setup panel. Overlays everything while status.needsSetup
+     is true; hidden once config.json is written and the client refreshes. -->
+<div id="setup-overlay" class="hidden">
+  <div class="setup-container">
+    <div class="setup-header">
+      <h1>Welcome to Automatic Munyun Machine</h1>
+      <div class="sub">A five-step setup — takes about two minutes.</div>
+      <div class="setup-progress">
+        <span class="pdot" data-pstep="1"></span>
+        <span class="pdot" data-pstep="2"></span>
+        <span class="pdot" data-pstep="3"></span>
+        <span class="pdot" data-pstep="4"></span>
+        <span class="pdot" data-pstep="5"></span>
+      </div>
+    </div>
+
+    <!-- Step 1: Resume -->
+    <div class="setup-step" data-step="1">
+      <div class="card">
+        <h2>Step 1 of 5 — Your resume</h2>
+        <div class="lead">Upload your CV so AMM can match jobs to your skills.</div>
+        <div class="desc">PDF, DOCX, MD, or TXT. Up to 8 MB. Everything stays on this computer.</div>
+        <div class="row">
+          <input type="file" id="setup-resume-file" accept=".pdf,.docx,.md,.txt,.markdown" />
+          <button class="sm primary" id="setup-resume-btn">Scan resume</button>
+        </div>
+        <div class="note" id="setup-resume-note"></div>
+        <div id="setup-resume-suggest" class="step hidden">
+          <div class="muted-sm" id="setup-resume-label">Suggested search terms — click to toggle:</div>
+          <div id="setup-resume-terms" class="terms"></div>
+          <div class="muted-sm">These become your daily job searches. You can change them later.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2: Basics + filters -->
+    <div class="setup-step" data-step="2">
+      <div class="card">
+        <h2>Step 2 of 5 — Your basics</h2>
+        <div class="lead">A few settings so AMM knows what to look for.</div>
+        <div class="desc">You can change any of these later from the dashboard.</div>
+        <div class="setup-basics-grid">
+          <div>
+            <label>Your first name</label>
+            <input type="text" id="setup-name" placeholder="Justin" />
+          </div>
+          <div>
+            <label>Max years of experience</label>
+            <input type="text" id="setup-yoe" class="num" style="width:100%" placeholder="5" />
+          </div>
+          <div>
+            <label>Salary floor ($)</label>
+            <input type="text" id="setup-salary" class="num" style="width:100%" placeholder="90000" />
+          </div>
+          <div>
+            <label>Daily scrape time</label>
+            <input type="text" id="setup-time" class="num" style="width:100%" placeholder="07:00" />
+          </div>
+          <div class="full">
+            <label>Your city (for weather in the daily greeting)</label>
+            <div class="row">
+              <input type="text" id="setup-city" placeholder="Miami" style="flex:1" />
+              <button class="sm" id="setup-city-btn">Look up</button>
+            </div>
+            <div id="setup-city-note"></div>
+          </div>
+          <div>
+            <label>Drop government-clearance jobs</label>
+            <select id="setup-clearance"><option value="true">Yes</option><option value="false">No</option></select>
+          </div>
+          <div>
+            <label>Application forms</label>
+            <select id="setup-forms">
+              <option value="all">All</option>
+              <option value="simple">Simple only</option>
+              <option value="long">Time-consuming only</option>
+            </select>
+          </div>
+          <div>
+            <label>Job recency</label>
+            <select id="setup-recency">
+              <option value="any">Any time</option>
+              <option value="today">Posted today</option>
+              <option value="3days">Last 3 days</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+            </select>
+          </div>
+          <div>
+            <label>Suggest searches as</label>
+            <select id="setup-mode">
+              <option value="titles">Job titles</option>
+              <option value="keywords">Keywords</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 3: Hiring.cafe warmup (required) -->
+    <div class="setup-step" data-step="3">
+      <div class="card">
+        <h2>Step 3 of 5 — Prepare your job feed</h2>
+        <div class="lead">Open hiring.cafe once so AMM can start pulling jobs.</div>
+        <div class="desc">
+          Clicking Launch opens a real Chrome window at hiring.cafe. The site checks that you're
+          not a bot (this can take ~30s). Once you see job listings, close the window and continue.
+          If you already have a hiring.cafe account, sign in — that unlocks the "Save" button in
+          your ranked-jobs list.
+          <br><br>
+          <b>This step is required.</b> Without it, your first daily scrape will fail against
+          hiring.cafe's bot check.
+        </div>
+        <button class="primary" id="setup-hcafe-btn">🚀 Launch browser</button>
+        <div class="setup-hcafe-state hidden" id="setup-hcafe-state"></div>
+      </div>
+    </div>
+
+    <!-- Step 4: Telegram (optional) -->
+    <div class="setup-step" data-step="4">
+      <div class="card">
+        <h2>Step 4 of 5 — Telegram (optional)</h2>
+        <div class="lead">Want batches pushed to your phone too?</div>
+        <div class="desc">
+          AMM's main UI is this dashboard. Telegram is a bonus — it pushes each morning's ranked
+          list to your phone so you can skim over coffee. You can connect it now or from the
+          Telegram card after setup.
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="sm primary" id="setup-tg-connect">Connect Telegram now</button>
+          <button class="sm" id="setup-tg-skip">Skip — desktop only</button>
+        </div>
+
+        <div id="setup-tg-panel" class="hidden">
+          <div class="step">
+            <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token:</div>
+            <input type="text" id="setup-tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
+            <button class="sm primary" id="setup-tg-validate">Validate token</button>
+            <div class="note" id="setup-tg-vnote"></div>
+          </div>
+          <div class="step hidden" id="setup-tg-chatstep">
+            <div class="muted-sm">2. Open your new bot in Telegram and send any message, then:</div>
+            <div class="row">
+              <button class="sm primary" id="setup-tg-detect">Detect my chat</button>
+              <span class="muted-sm">or paste chat id</span>
+              <input type="text" id="setup-tg-chat" placeholder="chat id" style="width:140px" autocomplete="off" />
+            </div>
+            <div class="note" id="setup-tg-dnote"></div>
+          </div>
+          <div class="step hidden" id="setup-tg-savestep">
+            <button class="sm primary" id="setup-tg-savebtn">Save &amp; enable</button>
+            <div class="note" id="setup-tg-snote"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 5: Finish -->
+    <div class="setup-step" data-step="5">
+      <div class="card">
+        <h2>Step 5 of 5 — Finish setup</h2>
+        <div class="lead">Ready to go.</div>
+        <div class="desc">
+          Clicking Finish saves your settings and schedules the daily scrape. AMM starts running
+          in your system tray; the dashboard will refresh into its normal view. Your first batch
+          is one click away — the <b>Scrape now</b> button on the main dashboard.
+        </div>
+        <button class="primary" id="setup-finish-btn">✓ Finish setup</button>
+        <div class="note" id="setup-finish-note"></div>
+      </div>
+    </div>
+
+    <div class="setup-nav">
+      <button class="sm" id="setup-back">← Back</button>
+      <button class="sm primary" id="setup-next">Next →</button>
+    </div>
+  </div>
+</div>
+
 <header>
   <h1>Automatic Munyun Machine <small id="version"></small></h1>
   <span class="banner"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
@@ -272,9 +521,15 @@
     </div>
 
     <div class="card">
-      <h2>Profile</h2>
+      <h2>Profiles <span class="pill right" id="prof-count">—</span></h2>
       <div class="big" id="profile-big">—</div>
-      <div class="stat-row"><span class="k">All profiles</span><span class="v" id="profile-all">—</span></div>
+      <div id="prof-list"></div>
+      <div class="row" style="margin-top:10px">
+        <input type="text" id="prof-new" placeholder='new profile name, e.g. "marketing"' autocomplete="off" spellcheck="false" />
+        <button class="sm primary" id="prof-add-btn">Add</button>
+      </div>
+      <div class="muted-sm">A new profile inherits your current settings + CV. Switch to it and upload a different resume from the Resume card.</div>
+      <div class="note" id="prof-note"></div>
     </div>
   </div>
 
@@ -427,6 +682,17 @@ async function tick() {
 }
 
 function render(s) {
+  // v2.7: setup overlay gate. When config.json is missing, show the setup
+  // panel. IMPORTANT: once shown, never auto-hide — some helpers create
+  // config.json as a side effect partway through setup, which would flip
+  // needsSetup and yank the panel out from under the user. Completion is
+  // explicit: setupFinish() reloads the page into the normal dashboard.
+  if (s.needsSetup && !window.__setupStarted) {
+    window.__setupStarted = true;
+    $("setup-overlay").classList.remove("hidden");
+    setupWire();
+  }
+
   $("version").textContent = "v" + (s.wrapper?.version || "—");
   $("install-dir").textContent = s.wrapper?.installDir || "—";
 
@@ -475,7 +741,6 @@ function render(s) {
   }
 
   $("profile-big").textContent = s.profile?.active || "—";
-  $("profile-all").textContent = (s.profile?.all || []).join(", ") || "—";
 
   const lb = s.lastBatch || {};
   $("lb-meta").textContent = lb.available
@@ -641,6 +906,96 @@ async function addTerm() {
 $("term-add").addEventListener("click", addTerm);
 $("term-input").addEventListener("keydown", e => { if (e.key === "Enter") addTerm(); });
 
+// --- Profiles (v2.6) ---
+// The backend (scripts/profile-store.mjs) owns config.json and data/profiles/*.
+// This UI just calls the API and re-renders. On switch, the whole page reloads
+// so settings/batch/terms/resume all pick up the new active profile.
+async function loadProfiles() {
+  try {
+    const r = await (await fetch("/api/profile/list", { cache: "no-store" })).json();
+    if (!r.ok) return;
+    renderProfiles(r.profiles || []);
+  } catch {}
+}
+
+function renderProfiles(profiles) {
+  $("prof-count").textContent = profiles.length + " profile" + (profiles.length === 1 ? "" : "s");
+  const onlyOne = profiles.length <= 1;
+  $("prof-list").innerHTML = profiles.map(p => {
+    const badge = p.active ? '<span class="pill">active</span>' : '';
+    const cvHint = p.hasCV ? '' : '<small>no resume yet</small>';
+    // Delete is disabled on the active profile (backend refuses too) and on
+    // the only profile (there'd be nothing left to fall back to).
+    const canDelete = !p.active && !onlyOne;
+    return `<div class="prof-item ${p.active ? 'active' : ''}">
+      <span class="prof-name">${escapeHTML(p.slug)} ${badge}${cvHint}</span>
+      <div class="prof-actions">
+        ${p.active ? '' : `<button class="sm primary" data-pact="switch" data-slug="${escapeAttr(p.slug)}">Switch</button>`}
+        <button class="sm" data-pact="rename" data-slug="${escapeAttr(p.slug)}">Rename</button>
+        <button class="sm danger" data-pact="delete" data-slug="${escapeAttr(p.slug)}" ${canDelete ? '' : 'disabled title="Switch to another profile first, or add a second profile before deleting."'}>Delete</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function addProfileFromInput() {
+  const slug = $("prof-new").value.trim();
+  if (!slug) { note("prof-note", "Give the new profile a short name.", false); return; }
+  note("prof-note", "Adding…", true);
+  const r = await postJSON("/api/profile/add", { slug });
+  if (r.ok) {
+    $("prof-new").value = "";
+    note("prof-note", `✓ Added "${slug}". Switch to it and upload a different resume from the Resume card.`, true);
+    setTimeout(() => note("prof-note", ""), 6000);
+    loadProfiles();
+  } else {
+    note("prof-note", "✗ " + (r.error || "could not add"), false);
+  }
+}
+
+$("prof-add-btn").addEventListener("click", addProfileFromInput);
+$("prof-new").addEventListener("keydown", e => { if (e.key === "Enter") addProfileFromInput(); });
+
+$("prof-list").addEventListener("click", async (ev) => {
+  const btn = ev.target.closest("button[data-pact]");
+  if (!btn || btn.disabled) return;
+  const act = btn.dataset.pact;
+  const slug = btn.dataset.slug;
+
+  if (act === "switch") {
+    btn.disabled = true; btn.textContent = "…";
+    const r = await postJSON("/api/profile/switch", { slug });
+    if (r.ok) {
+      toast(`Switched to "${slug}" — reloading.`, "good");
+      // Reload so settings, batch, terms, resume all reload for the new profile.
+      setTimeout(() => location.reload(), 500);
+    } else {
+      toast(r.error || "Could not switch.", "bad");
+      btn.disabled = false; btn.textContent = "Switch";
+    }
+    return;
+  }
+
+  if (act === "rename") {
+    const proposed = prompt(`Rename "${slug}" to:`, slug);
+    if (proposed == null) return;
+    const newSlug = proposed.trim();
+    if (!newSlug || newSlug === slug) return;
+    const r = await postJSON("/api/profile/rename", { oldSlug: slug, newSlug });
+    if (r.ok) { toast(`Renamed "${slug}" → "${newSlug}".`, "good"); loadProfiles(); tick(); }
+    else toast(r.error || "Could not rename.", "bad");
+    return;
+  }
+
+  if (act === "delete") {
+    if (!confirm(`Delete profile "${slug}"?\n\nThis wipes its saved jobs, applications history, and search-term list. Cannot be undone.`)) return;
+    const r = await postJSON("/api/profile/delete", { slug });
+    if (r.ok) { toast(`Deleted "${slug}".`, "good"); loadProfiles(); tick(); }
+    else toast(r.error || "Could not delete.", "bad");
+    return;
+  }
+});
+
 // --- Telegram setup flow ---
 let tgToken = "", tgChat = "";
 
@@ -720,9 +1075,6 @@ $("tg-disable").addEventListener("click", async () => {
   if (r.ok) tick();
 });
 
-tick();
-setInterval(tick, 5000);
-loadBatch();
 // --- Resume rescan (v2.5) ---
 $("resume-upload-btn").addEventListener("click", async () => {
   const input = $("resume-file");
@@ -821,9 +1173,355 @@ $("ub-update").addEventListener("click", async () => {
   }
 });
 
-loadSettings();
-checkForUpdate();
-setInterval(checkForUpdate, 30 * 60 * 1000);
+// v2.7: boot sequence. The first status fetch decides setup-vs-normal BEFORE
+// any data loader runs — loadSettings/loadProfiles hit Node helpers that
+// copy config.example.json into place when config.json is missing, which
+// would silently "complete" setup on page load. During first-run setup only
+// the status poll runs; setupFinish() reloads into the normal boot path.
+(async function boot() {
+  await tick();
+  if (!window.__setupStarted) {
+    loadBatch();
+    loadSettings();
+    loadProfiles();
+    checkForUpdate();
+    setInterval(checkForUpdate, 30 * 60 * 1000);
+  }
+  setInterval(tick, 5000);
+})();
+
+// ============================================================================
+// v2.7: dashboard-native first-run setup. State machine spanning 5 steps.
+// Only wires up when status.needsSetup becomes true. All backend calls hit
+// /api/setup/* + /api/resume/* + /api/telegram/* (all existing endpoints).
+// ============================================================================
+const setupState = {
+  step: 1,
+  resumeUploaded: false,
+  suggestions: [],
+  selected: new Set(),
+  cityGeo: null,      // { lat, lon, city, admin, country, timezone }
+  hcafeAuthed: false,
+  hcafeChildStarted: false,
+  hcafePollTimer: null,
+  tgToken: "",
+  tgChat: "",
+  tgSaved: false,
+  finalizing: false,
+};
+
+function setupShowStep(n) {
+  setupState.step = n;
+  document.querySelectorAll("#setup-overlay .setup-step").forEach(el => {
+    el.classList.toggle("active", parseInt(el.dataset.step, 10) === n);
+  });
+  document.querySelectorAll("#setup-overlay .pdot").forEach(el => {
+    const s = parseInt(el.dataset.pstep, 10);
+    el.classList.toggle("done", s < n);
+    el.classList.toggle("current", s === n);
+  });
+  $("setup-back").disabled = (n === 1);
+  // Step 5's transition is the Finish button, not Next — hide Next there.
+  $("setup-next").classList.toggle("hidden", n === 5);
+  $("setup-next").textContent = "Next →";
+  $("setup-next").disabled = !setupCanProceed(n);
+  window.scrollTo(0, 0);
+}
+
+function setupCanProceed(step) {
+  // Zero suggestions (unusual CV) still passes — setup-init backfills the
+  // example's default queries so the first scrape isn't a no-op.
+  if (step === 1) return setupState.resumeUploaded &&
+    (setupState.suggestions.length === 0 || setupState.selected.size > 0);
+  if (step === 2) {
+    const name = $("setup-name").value.trim();
+    const timeOk = /^\d{1,2}:\d{2}$/.test($("setup-time").value.trim() || "07:00");
+    return !!name && !!setupState.cityGeo && timeOk;
+  }
+  if (step === 3) return setupState.hcafeAuthed;
+  if (step === 4) return setupState.tgSaved || window.__setupTgSkipped === true;
+  if (step === 5) return true; // Finish button drives the transition
+  return true;
+}
+
+function setupWire() {
+  // ---- Step 1: resume ----
+  $("setup-resume-btn").addEventListener("click", async () => {
+    const input = $("setup-resume-file");
+    const file = input.files && input.files[0];
+    if (!file) { note("setup-resume-note", "Pick a resume file first.", false); return; }
+    const btn = $("setup-resume-btn");
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = "Scanning…";
+    note("setup-resume-note", "Parsing your resume…", true);
+    try {
+      const fd = new FormData();
+      fd.append("resume", file);
+      const res = await fetch("/api/resume/upload", {
+        method: "POST",
+        headers: { "X-AMM-Token": AMM_TOKEN },
+        body: fd, cache: "no-store"
+      });
+      const r = await res.json();
+      if (!r.ok) { note("setup-resume-note", "✗ " + (r.error || "could not parse"), false); return; }
+      const p = r.parsed || {};
+      note("setup-resume-note",
+        `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance.`,
+        true);
+      const sugg = r.suggestions || [];
+      setupState.resumeUploaded = true;
+      setupState.suggestions = sugg;
+      setupState.selected = new Set(sugg);
+      $("setup-resume-suggest").classList.remove("hidden");
+      $("setup-resume-label").textContent =
+        `Suggested search terms (${r.mode}) — click to toggle:`;
+      setupRenderSuggestChips();
+      $("setup-next").disabled = !setupCanProceed(1);
+      // The mode the parser picked also seeds step-2's mode dropdown.
+      $("setup-mode").value = r.mode === "keywords" ? "keywords" : "titles";
+    } catch (e) {
+      note("setup-resume-note", "✗ Upload failed: " + e.message, false);
+    } finally {
+      btn.disabled = false; btn.textContent = label;
+    }
+  });
+
+  $("setup-resume-terms").addEventListener("click", (ev) => {
+    const chip = ev.target.closest("span[data-sterm]");
+    if (!chip) return;
+    const term = chip.dataset.sterm;
+    if (setupState.selected.has(term)) setupState.selected.delete(term);
+    else setupState.selected.add(term);
+    setupRenderSuggestChips();
+    $("setup-next").disabled = !setupCanProceed(1);
+  });
+
+  // ---- Step 2: basics + geocode ----
+  $("setup-city-btn").addEventListener("click", setupGeocodeLookup);
+  $("setup-city").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); setupGeocodeLookup(); } });
+  // Any change to a step-2 input re-checks the Next gate.
+  ["setup-name", "setup-yoe", "setup-salary", "setup-time"].forEach(id => {
+    $(id).addEventListener("input", () => { $("setup-next").disabled = !setupCanProceed(2); });
+  });
+
+  // ---- Step 3: hcafe warmup ----
+  $("setup-hcafe-btn").addEventListener("click", setupLaunchHcafe);
+
+  // ---- Step 4: Telegram ----
+  $("setup-tg-skip").addEventListener("click", () => {
+    window.__setupTgSkipped = true;
+    $("setup-tg-connect").disabled = true;
+    $("setup-tg-skip").textContent = "Skipped ✓";
+    $("setup-next").disabled = !setupCanProceed(4);
+  });
+  $("setup-tg-connect").addEventListener("click", () => {
+    $("setup-tg-panel").classList.remove("hidden");
+    $("setup-tg-connect").classList.add("hidden");
+    $("setup-tg-token").focus();
+  });
+  $("setup-tg-validate").addEventListener("click", async () => {
+    const token = $("setup-tg-token").value.trim();
+    if (!token) return note("setup-tg-vnote", "Paste the token first.", false);
+    note("setup-tg-vnote", "Validating…", true);
+    const r = await postJSON("/api/telegram/validate", { token });
+    if (r.ok) {
+      setupState.tgToken = token;
+      note("setup-tg-vnote", "✓ Connected as @" + r.username, true);
+      $("setup-tg-chatstep").classList.remove("hidden");
+    } else {
+      note("setup-tg-vnote", "✗ " + (r.error || "invalid token"), false);
+    }
+  });
+  $("setup-tg-detect").addEventListener("click", async () => {
+    if (!setupState.tgToken) return;
+    const btn = $("setup-tg-detect");
+    btn.disabled = true;
+    note("setup-tg-dnote", "Listening for your message (send your bot any message now)…", true);
+    try {
+      const r = await postJSON("/api/telegram/detect", { token: setupState.tgToken });
+      if (r.ok) {
+        setupState.tgChat = r.chatId;
+        $("setup-tg-chat").value = r.chatId;
+        note("setup-tg-dnote", '✓ Got chat ' + r.chatId, true);
+        $("setup-tg-savestep").classList.remove("hidden");
+      } else {
+        note("setup-tg-dnote", "✗ " + (r.error || "no message received"), false);
+      }
+    } finally { btn.disabled = false; }
+  });
+  $("setup-tg-chat").addEventListener("input", () => {
+    const v = $("setup-tg-chat").value.trim();
+    if (/^-?\d+$/.test(v)) { setupState.tgChat = v; $("setup-tg-savestep").classList.remove("hidden"); }
+  });
+  $("setup-tg-savebtn").addEventListener("click", async () => {
+    if (!setupState.tgToken || !setupState.tgChat) return note("setup-tg-snote", "Need both a token and a chat id.", false);
+    note("setup-tg-snote", "Saving + sending a test message…", true);
+    const r = await postJSON("/api/telegram/save", { token: setupState.tgToken, chatId: setupState.tgChat });
+    if (r.ok) {
+      note("setup-tg-snote", "✓ Test message sent — check your phone.", true);
+      setupState.tgSaved = true;
+      $("setup-next").disabled = !setupCanProceed(4);
+    } else {
+      note("setup-tg-snote", "✗ " + (r.error || "could not save"), false);
+    }
+  });
+
+  // ---- Step 5: finish ----
+  $("setup-finish-btn").addEventListener("click", setupFinish);
+
+  // ---- Nav ----
+  $("setup-back").addEventListener("click", () => {
+    if (setupState.step > 1) setupShowStep(setupState.step - 1);
+  });
+  $("setup-next").addEventListener("click", () => {
+    if (setupState.step < 5 && setupCanProceed(setupState.step)) {
+      setupShowStep(setupState.step + 1);
+    }
+  });
+
+  setupShowStep(1);
+}
+
+function setupRenderSuggestChips() {
+  const html = setupState.suggestions.map(t =>
+    `<span class="chip ${setupState.selected.has(t) ? '' : 'off'}" data-sterm="${escapeAttr(t)}">${escapeHTML(t)}</span>`
+  ).join("");
+  $("setup-resume-terms").innerHTML = html;
+}
+
+async function setupGeocodeLookup() {
+  const q = $("setup-city").value.trim();
+  if (!q) { $("setup-city-note").textContent = "Enter a city."; $("setup-city-note").className = "bad"; return; }
+  $("setup-city-note").textContent = "Looking up…";
+  $("setup-city-note").className = "";
+  try {
+    const r = await (await fetch("/api/setup/geocode?q=" + encodeURIComponent(q), { cache: "no-store" })).json();
+    if (!r.ok) {
+      $("setup-city-note").textContent = "✗ " + (r.error || "not found");
+      $("setup-city-note").className = "bad";
+      setupState.cityGeo = null;
+    } else {
+      setupState.cityGeo = { city: r.city, lat: r.lat, lon: r.lon, timezone: r.timezone };
+      const admin = r.admin ? `, ${r.admin}` : "";
+      const country = r.country ? ` — ${r.country}` : "";
+      $("setup-city-note").textContent =
+        `✓ ${r.city}${admin}${country} (${r.lat.toFixed(4)}, ${r.lon.toFixed(4)}, ${r.timezone})`;
+      $("setup-city-note").className = "ok";
+    }
+  } catch (e) {
+    $("setup-city-note").textContent = "✗ " + e.message;
+    $("setup-city-note").className = "bad";
+  }
+  $("setup-next").disabled = !setupCanProceed(2);
+}
+
+async function setupLaunchHcafe() {
+  const btn = $("setup-hcafe-btn");
+  const state = $("setup-hcafe-state");
+  btn.disabled = true;
+  state.classList.remove("hidden", "done", "err");
+  state.classList.add("running");
+  state.textContent = "Launching Chrome… a browser window should appear in a moment. It may take up to 30 seconds to clear hiring.cafe's bot check. Close the window once you see job listings.";
+  try {
+    const r = await postJSON("/api/setup/hcafe-login/start");
+    if (!r.ok) {
+      state.textContent = "✗ Could not launch: " + (r.error || "unknown");
+      state.classList.remove("running"); state.classList.add("err");
+      btn.disabled = false; return;
+    }
+    setupState.hcafeChildStarted = true;
+    setupPollHcafe();
+  } catch (e) {
+    state.textContent = "✗ " + e.message;
+    state.classList.remove("running"); state.classList.add("err");
+    btn.disabled = false;
+  }
+}
+
+function setupPollHcafe() {
+  const state = $("setup-hcafe-state");
+  const btn = $("setup-hcafe-btn");
+  const poll = async () => {
+    try {
+      const r = await (await fetch("/api/setup/hcafe-login/status", { cache: "no-store" })).json();
+      if (r.running) {
+        state.textContent = "Browser open — close the hiring.cafe window when you see job listings. (Optional: sign in first for save/apply features.)";
+        return;
+      }
+      // Child exited — auth verification done.
+      clearInterval(setupState.hcafePollTimer);
+      setupState.hcafePollTimer = null;
+      if (r.authed) {
+        setupState.hcafeAuthed = true;
+        state.classList.remove("running", "err");
+        state.classList.add("done");
+        state.textContent = "✓ hiring.cafe is ready. Click Next to continue.";
+        btn.disabled = true; btn.textContent = "Done ✓";
+        $("setup-next").disabled = !setupCanProceed(3);
+      } else {
+        state.classList.remove("running");
+        state.classList.add("err");
+        state.textContent = "✗ Couldn't confirm hiring.cafe access. Try again — make sure you saw job listings before closing the window.";
+        btn.disabled = false;
+        btn.textContent = "🚀 Try again";
+      }
+    } catch (e) { /* transient — keep polling */ }
+  };
+  setupState.hcafePollTimer = setInterval(poll, 2500);
+  poll();
+}
+
+async function setupFinish() {
+  if (setupState.finalizing) return;
+  setupState.finalizing = true;
+  const btn = $("setup-finish-btn");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Saving…";
+  note("setup-finish-note", "Writing your settings…", true);
+
+  const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
+  const payload = {
+    user: {
+      name: $("setup-name").value.trim() || "there",
+      maxYoeAcceptable: parseInt($("setup-yoe").value || "5", 10),
+      salaryFloorUsd: parseInt($("setup-salary").value || "90000", 10),
+    },
+    filters: {
+      filterClearance: $("setup-clearance").value === "true",
+      applicationFormEase: $("setup-forms").value,
+      maxJobAge: $("setup-recency").value,
+    },
+    weather: setupState.cityGeo || {},
+    schedule: { time: $("setup-time").value.trim() || "07:00", days },
+    queries: [...setupState.selected],
+    search: { mode: $("setup-mode").value === "keywords" ? "keywords" : "titles" },
+  };
+
+  try {
+    const r1 = await postJSON("/api/setup/init", payload);
+    if (!r1.ok) { note("setup-finish-note", "✗ " + (r1.error || "could not save"), false); btn.disabled = false; btn.textContent = label; setupState.finalizing = false; return; }
+    note("setup-finish-note", "Registering the daily scrape schedule…", true);
+    const r2 = await postJSON("/api/setup/finalize");
+    if (!r2.ok) {
+      // Config was written; scheduler failed. Non-fatal — the user can re-run
+      // scheduler registration from the CLI. Log it and continue.
+      note("setup-finish-note",
+        "⚠ Settings saved, but scheduler registration failed: " + (r2.error || "unknown") + ". You can still use AMM manually.",
+        false);
+    } else {
+      note("setup-finish-note", "✓ Done — reloading the dashboard…", true);
+    }
+    // Reload so the client picks up the new config.json shape + the tray's
+    // supervisor starts. Small delay so the user sees the ✓.
+    setTimeout(() => location.reload(), 1200);
+  } catch (e) {
+    note("setup-finish-note", "✗ " + e.message, false);
+    btn.disabled = false; btn.textContent = label;
+    setupState.finalizing = false;
+  }
+}
 </script>
 </body>
 </html>

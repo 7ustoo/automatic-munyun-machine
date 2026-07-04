@@ -80,15 +80,17 @@ func onTrayReady(sup *supervisor, dash *dashboardServer, installDir, botPath str
 	// --- Menu layout ---
 	// Setup item ONLY visible when configuration is missing — keeps the menu
 	// clean for the common case where everything's already set up.
+	// v2.7: label + tooltip updated — the dashboard is now the setup surface,
+	// not a terminal wizard.
 	if needsSetup {
-		state.miSetup = systray.AddMenuItem("⚙️ Run setup wizard", "Opens the AMM setup wizard in a new terminal window")
+		state.miSetup = systray.AddMenuItem("⚙️ Open setup", "Opens the AMM setup panel in the dashboard window")
 		systray.AddSeparator()
 	}
 
 	// 🟢 Status: alive / 12m uptime / pid 1234   (read-only label)
 	statusInitial := "Status: starting…"
 	if needsSetup {
-		statusInitial = "Status: setup required — click 'Run setup wizard'"
+		statusInitial = "Status: setup required — click 'Open setup'"
 	}
 	state.miStatus = systray.AddMenuItem(statusInitial, "Bot liveness — based on data/heartbeat.json")
 	state.miStatus.Disable() // info-only
@@ -169,7 +171,7 @@ func (s *trayState) handleClicks() {
 	for {
 		select {
 		case <-setupCh:
-			actionRunSetup(s.sup, s.installDir)
+			actionRunSetup(s.sup, s.dash, s.installDir)
 		case <-dashCh:
 			actionOpenDashboard(s.dash, s.installDir)
 		case <-s.miScrape.ClickedCh:

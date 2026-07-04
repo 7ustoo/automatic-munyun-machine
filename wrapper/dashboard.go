@@ -102,6 +102,20 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/resume/upload", d.guardPost(d.handleResumeUpload))
 	mux.HandleFunc("/api/resume/apply", d.guardPost(d.handleResumeApply))
 	mux.HandleFunc("/api/update/apply", d.guardPost(d.handleUpdateApply))
+	// v2.6: profile CRUD from the dashboard. list is read-only (GET);
+	// add/rename/delete/switch mutate config.json + data dirs (POST + CSRF).
+	mux.HandleFunc("/api/profile/list", d.handleProfileList)
+	mux.HandleFunc("/api/profile/add", d.guardPost(d.handleProfileAdd))
+	mux.HandleFunc("/api/profile/rename", d.guardPost(d.handleProfileRename))
+	mux.HandleFunc("/api/profile/delete", d.guardPost(d.handleProfileDelete))
+	mux.HandleFunc("/api/profile/switch", d.guardPost(d.handleProfileSwitch))
+	// v2.7: dashboard-native first-run setup. Geocode + hcafe-login/status are
+	// read-only; hcafe-login/start + init + finalize mutate disk (POST + CSRF).
+	mux.HandleFunc("/api/setup/geocode", d.handleSetupGeocode)
+	mux.HandleFunc("/api/setup/hcafe-login/status", d.handleSetupHcafeLoginStatus)
+	mux.HandleFunc("/api/setup/hcafe-login/start", d.guardPost(d.handleSetupHcafeLoginStart))
+	mux.HandleFunc("/api/setup/init", d.guardPost(d.handleSetupInit))
+	mux.HandleFunc("/api/setup/finalize", d.guardPost(d.handleSetupFinalize))
 
 	d.srv = &http.Server{
 		Handler:           mux,
@@ -254,12 +268,13 @@ func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 // --- Status aggregation (pure, testable) ---
 
 type statusResponse struct {
-	Wrapper   wrapperInfo   `json:"wrapper"`
-	Bot       botInfo       `json:"bot"`
-	Telegram  telegramInfo  `json:"telegram"`
-	Profile   profileInfo   `json:"profile"`
-	LastBatch lastBatchInfo `json:"lastBatch"`
-	Now       string        `json:"now"`
+	Wrapper    wrapperInfo   `json:"wrapper"`
+	Bot        botInfo       `json:"bot"`
+	Telegram   telegramInfo  `json:"telegram"`
+	Profile    profileInfo   `json:"profile"`
+	LastBatch  lastBatchInfo `json:"lastBatch"`
+	NeedsSetup bool          `json:"needsSetup"` // v2.7: gates the dashboard's setup panel
+	Now        string        `json:"now"`
 }
 
 type wrapperInfo struct {
@@ -348,6 +363,10 @@ func buildStatusAt(installDir string, now time.Time) statusResponse {
 	// v2.1: Telegram is optional; the page shows enabled/disabled + a setup
 	// panel. "Connected" still requires an alive, polling bot.
 	out.Telegram.Enabled = telegramEnabled(installDir)
+
+	// v2.7: mirrors wrapper/main.go#isSetUp. The client reads this to decide
+	// whether to render the first-run setup panel over the normal dashboard.
+	out.NeedsSetup = !isSetUp(installDir)
 
 	return out
 }

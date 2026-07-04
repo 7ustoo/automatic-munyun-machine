@@ -10,6 +10,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.7.0] — 2026-07-04
+
+### Added
+
+- **Setup happens in the dashboard, not a terminal.** First-run onboarding is now a five-step interactive panel in the dashboard's app window — the terminal wizard (a black cmd box with `Press Enter…` prompts) is gone from the user-facing surface. Step 1 uploads your resume + picks search terms from the parsed CV; step 2 sets your name / YOE / salary / city (with live geocode lookup) / scrape time / all filter toggles in one form; step 3 opens the required hiring.cafe warmup browser (Cloudflare cleared + optional sign-in) and polls until the child exits; step 4 optionally connects Telegram or skips; step 5 saves everything and registers the daily scheduled scrape. The wrapper's tray poll detects the freshly-written `config.json` on its own and transitions out of "needs setup" mode — no new IPC. Installer no longer spawns a terminal window; the tray's Setup menu item opens the dashboard instead. `scripts/setup-wizard.mjs` survives as a dev/CI escape hatch via `npm run setup`. (New: `scripts/scheduler-register.mjs` extracted from the wizard so both surfaces can register tasks; five new `dashboard-api.mjs` subcommands and matching `/api/setup/*` routes; `needsSetup: bool` on `/api/status`. 16 new unit tests across the setup builder + scheduler platform selector.)
+
+---
+
+## [2.6.0] — 2026-07-03
+
+### Added
+
+- **Manage profiles from the dashboard.** The Profile card is now a full CRUD panel — add a new profile with a name of your choice, switch between profiles, rename, or delete. Multi-profile was already wired end-to-end (per-profile CV, queries, filters, scoring, last-batch — landed in v1.0) but the desktop UI was read-only, so you had to use the Telegram bot's `/profile` commands to manage them. Now the dashboard reaches parity. A newly-added profile inherits your current settings + CV; switch to it and upload a different resume from the Resume card to specialize it. (`/api/profile/{list,add,rename,delete,switch}`; new `renameProfile()` in `scripts/profile-store.mjs`.)
+
+---
+
 ## [2.5.0] — 2026-07-03
 
 ### Added
