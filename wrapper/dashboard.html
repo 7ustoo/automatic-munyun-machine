@@ -151,6 +151,22 @@
   #toast.bad { border-color: rgba(248,81,73,.5); color: var(--red); }
   #toast.good { border-color: rgba(63,185,80,.5); color: var(--green); }
 
+  /* v2.5: update banner — prominent, hard to miss, not dismissible. */
+  .update-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    background: linear-gradient(90deg, rgba(88,166,255,.20), rgba(63,185,80,.14));
+    border: 1px solid var(--accent); border-radius: 10px;
+    padding: 14px 18px; margin-bottom: 20px; flex-wrap: wrap;
+  }
+  .update-banner .ub-main { font-weight: 600; }
+  .update-banner .ub-badge {
+    background: var(--accent); color: #06121f; font-weight: 700; font-size: 11px;
+    text-transform: uppercase; letter-spacing: .04em;
+    padding: 2px 9px; border-radius: 999px; margin-right: 10px;
+  }
+  .update-banner .ub-actions { display: flex; align-items: center; gap: 14px; }
+  .update-banner.updating { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.20), rgba(63,185,80,.10)); }
+
   /* v2.1: settings + search terms + job-action UI */
   .grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
   .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
@@ -171,6 +187,9 @@
     font-size: 15px; line-height: 1; cursor: pointer;
   }
   .chip button:hover { color: var(--red); }
+  /* v2.5: resume-suggestion chips toggle selected/deselected on click. */
+  .terms .chip[data-sterm] { cursor: pointer; padding: 3px 11px; user-select: none; }
+  .terms .chip[data-sterm].off { opacity: .4; text-decoration: line-through; }
   td.actions button { margin-left: 4px; }
   a.btnlink { text-decoration: none; }
   tr.why-row td { background: var(--panel-2); color: var(--muted); font-size: 12px; padding: 8px 12px; }
@@ -186,6 +205,20 @@
 
 <main>
   <div id="err" class="err" style="display:none"></div>
+
+  <!-- v2.5: forced-feel update banner. Appears only when a newer release
+       exists; auto-checked on load + every 30 min. One click does the
+       silent download-install-relaunch. -->
+  <div id="update-banner" class="update-banner hidden">
+    <div class="ub-main">
+      <span class="ub-badge">Update</span>
+      <span id="ub-text">A new version of Automatic Munyun Machine is available.</span>
+    </div>
+    <div class="ub-actions">
+      <a id="ub-notes" href="#" target="_blank" rel="noopener" class="hidden">What's new</a>
+      <button class="primary" id="ub-update">Update now</button>
+    </div>
+  </div>
 
   <div class="grid">
     <div class="card">
@@ -257,9 +290,28 @@
         <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
       <div class="set-row"><label>Application forms</label>
         <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
+      <div class="set-row"><label>Job recency</label>
+        <select id="set-recency"><option value="any">Any time</option><option value="today">Posted today</option><option value="3days">Last 3 days</option><option value="week">This week</option><option value="month">This month</option></select></div>
       <div class="set-row"><label>Suggest searches as</label>
         <select id="set-mode"><option value="titles">Job titles</option><option value="keywords">Keywords</option></select></div>
       <div class="note" id="set-note"></div>
+    </div>
+
+    <!-- Resume rescan (v2.5) -->
+    <div class="card">
+      <h2>Resume</h2>
+      <div class="muted-sm">Upload a new resume to re-scan your skills and get fresh search-term suggestions from it.</div>
+      <div class="row" style="margin-top:8px">
+        <input type="file" id="resume-file" accept=".pdf,.docx,.md,.txt,.markdown" />
+        <button class="sm primary" id="resume-upload-btn">Rescan resume</button>
+      </div>
+      <div class="note" id="resume-note"></div>
+      <div id="resume-suggest" class="step hidden">
+        <div class="muted-sm" id="resume-suggest-label">Suggested search terms from your resume:</div>
+        <div id="resume-suggest-list" class="terms"></div>
+        <button class="sm primary" id="resume-apply-btn">Use these as my search terms</button>
+        <div class="muted-sm">Replaces your current list. Your CV is already updated for scoring either way.</div>
+      </div>
     </div>
 
     <!-- Search terms -->
@@ -547,6 +599,7 @@ async function loadSettings() {
     $("set-time").value = s.scheduleTime;
     $("set-clearance").value = String(s.filterClearance);
     $("set-forms").value = s.applicationFormEase;
+    $("set-recency").value = s.maxJobAge || "any";
     $("set-mode").value = s.searchMode;
     renderTerms(s.queries || []);
   } catch {}
@@ -563,6 +616,7 @@ $("set-floor").addEventListener("change", e => saveSetting("scoring.matchFloorPe
 $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.target.value));
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));
+$("set-recency").addEventListener("change", e => saveSetting("filters.maxJobAge", e.target.value));
 $("set-mode").addEventListener("change", e => saveSetting("search.mode", e.target.value));
 
 // --- Search terms ---
@@ -669,7 +723,107 @@ $("tg-disable").addEventListener("click", async () => {
 tick();
 setInterval(tick, 5000);
 loadBatch();
+// --- Resume rescan (v2.5) ---
+$("resume-upload-btn").addEventListener("click", async () => {
+  const input = $("resume-file");
+  const file = input.files && input.files[0];
+  if (!file) { note("resume-note", "Pick a resume file first (PDF, DOCX, MD, or TXT).", false); return; }
+  const btn = $("resume-upload-btn");
+  btn.disabled = true; const label = btn.textContent; btn.textContent = "Scanning…";
+  note("resume-note", "Parsing your resume…", true);
+  try {
+    const fd = new FormData();
+    fd.append("resume", file);
+    const res = await fetch("/api/resume/upload", { method: "POST", headers: { "X-AMM-Token": AMM_TOKEN }, body: fd, cache: "no-store" });
+    const r = await res.json();
+    if (!r.ok) { note("resume-note", "✗ " + (r.error || "could not parse"), false); return; }
+    const p = r.parsed || {};
+    note("resume-note", `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance. Your CV is updated.`, true);
+    const sugg = r.suggestions || [];
+    if (sugg.length) {
+      window.__resumeSuggest = sugg;
+      $("resume-suggest-label").textContent = `Suggested search terms (${r.mode}) from your resume — click to toggle:`;
+      renderResumeSuggest(sugg, new Set(sugg));
+      $("resume-suggest").classList.remove("hidden");
+    }
+  } catch (e) {
+    note("resume-note", "✗ Upload failed: " + e.message, false);
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+});
+
+function renderResumeSuggest(terms, selected) {
+  window.__resumeSelected = selected;
+  $("resume-suggest-list").innerHTML = terms.map(t =>
+    `<span class="chip ${selected.has(t) ? '' : 'off'}" data-sterm="${escapeAttr(t)}">${escapeHTML(t)}</span>`
+  ).join("");
+}
+$("resume-suggest-list").addEventListener("click", (ev) => {
+  const chip = ev.target.closest("span[data-sterm]");
+  if (!chip) return;
+  const term = chip.dataset.sterm;
+  const sel = window.__resumeSelected || new Set();
+  if (sel.has(term)) sel.delete(term); else sel.add(term);
+  renderResumeSuggest(window.__resumeSuggest || [], sel);
+});
+$("resume-apply-btn").addEventListener("click", async () => {
+  const sel = [...(window.__resumeSelected || new Set())];
+  if (!sel.length) { toast("Pick at least one term.", "bad"); return; }
+  const r = await postJSON("/api/resume/apply", { terms: JSON.stringify(sel) });
+  if (r.ok) {
+    renderTerms(r.list || []);
+    $("resume-suggest").classList.add("hidden");
+    toast(`Search terms updated (${(r.list || []).length}). Scrape now to use them.`, "good");
+  } else {
+    toast(r.error || "Could not apply.", "bad");
+  }
+});
+
+// --- Auto-update (v2.5) ---
+// Checks on load + every 30 min. Banner is unmissable when an update exists;
+// one click does the silent download-install-relaunch (Windows). On other
+// platforms the button links to the releases page instead.
+let __updateInfo = null;
+async function checkForUpdate() {
+  try {
+    const r = await (await fetch("/api/update/check", { cache: "no-store" })).json();
+    __updateInfo = r;
+    const banner = $("update-banner");
+    if (!r || !r.ok || !r.hasUpdate) { banner.classList.add("hidden"); return; }
+    $("ub-text").innerHTML = `Version <b>v${escapeHTML(r.latest)}</b> is available — you're on v${escapeHTML(r.current)}.`;
+    const notes = $("ub-notes");
+    if (r.releaseUrl) { notes.href = r.releaseUrl; notes.classList.remove("hidden"); }
+    $("ub-update").textContent = r.canAutoUpdate ? "Update now" : "Get the update ↗";
+    banner.classList.remove("hidden");
+  } catch { /* offline — no banner */ }
+}
+$("ub-update").addEventListener("click", async () => {
+  const r = __updateInfo || {};
+  if (!r.canAutoUpdate) { if (r.releaseUrl) window.open(r.releaseUrl, "_blank", "noopener"); return; }
+  const btn = $("ub-update");
+  btn.disabled = true; btn.textContent = "Updating…";
+  $("update-banner").classList.add("updating");
+  $("ub-text").innerHTML = `Downloading <b>v${escapeHTML(r.latest)}</b> and installing… the app will close and reopen in a moment.`;
+  try {
+    const res = await postJSON("/api/update/apply");
+    if (!res.ok) {
+      btn.disabled = false; btn.textContent = "Update now";
+      $("update-banner").classList.remove("updating");
+      if (res.releaseUrl) { toast("Automatic update unavailable — opening the releases page.", "bad"); window.open(res.releaseUrl, "_blank", "noopener"); }
+      else toast(res.error || "Update failed to start.", "bad");
+      return;
+    }
+    $("ub-text").textContent = "Installing the update — AMM will restart automatically. You can close this window.";
+  } catch (e) {
+    // The installer likely killed the wrapper mid-request — that's the update working.
+    $("ub-text").textContent = "Updating… AMM will restart automatically.";
+  }
+});
+
 loadSettings();
+checkForUpdate();
+setInterval(checkForUpdate, 30 * 60 * 1000);
 </script>
 </body>
 </html>

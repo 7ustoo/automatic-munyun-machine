@@ -10,6 +10,8 @@
 - **Desktop dashboard (primary).** A local control surface in your browser — see the ranked batch, open jobs to apply, and click **Scrape now** for a fresh batch. Opened from the system-tray icon, which also shows real-time health (green/yellow/red).
 - **Telegram (optional, since v2.1).** Want batches on your phone too? Turn Telegram on right from the dashboard — paste a bot token, connect your chat, done. Skip it and AMM is a pure desktop app; no bot token needed. When on, you also get `/scrape`, `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
 - **Export your apply links as .txt, .csv, or Excel .xlsx.** One click in the dashboard (or `/export` on Telegram) downloads the latest batch as a clean list — number, job title, apply link. The `.xlsx` workbook has the Apply Link column as real clickable hyperlinks (CSV is plain text and can't carry links — pick `.xlsx` if you want to click straight from Excel). The full detailed `jobs(YYYY-MM-DD).txt` archive is still written every run and sent to Telegram when it's enabled.
+- **Full control over what you search (v2.5).** From the dashboard: filter jobs by recency (posted today / last 3 days / this week / this month / any), rescan a new resume to re-tune your CV match and get fresh search-term suggestions, and edit every filter (YOE, salary floor, match floor, clearance, application forms, search terms) live.
+- **Automatic updates (v2.5).** The dashboard tells you when a new version is out and updates itself in one click — silent download, in-place install, and relaunch. No more re-downloading the installer by hand.
 - **Local-first.** Everything runs on your machine. Nothing leaves your computer except (if you enable it) the Telegram messages.
 
 ## Install

@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.5.0] — 2026-07-03
+
+### Added
+
+- **Recency filter — control how recent jobs must be.** New "Job recency" dropdown in the dashboard settings: Any time (default) · Posted today · Last 3 days · This week · This month. Filters on the posted-age token hiring.cafe shows on each card (`5h`/`3d`/`2w`/`1mo`), captured by the scraper (`scripts/job-recency.mjs`). Deliberately client-side rather than guessing hiring.cafe's private date param — a wrong guess there silently returns zero jobs. Fail-open: a job whose age can't be read is never hidden. Config: `filters.maxJobAge`.
+- **Rescan resume from the dashboard.** New "Resume" card: upload a new PDF/DOCX/MD/TXT, and AMM re-parses it into your CV (updating scoring) and suggests fresh search terms from it — pick which to keep and they replace your search list in one click. No wizard re-run. (`/api/resume/upload` + `/api/resume/apply`, backed by the existing resume parser + role/keyword suggester.)
+- **Automatic update detection + one-click install.** The dashboard checks GitHub for a newer release on load (and every 30 min) and shows a prominent banner when one exists. One click downloads the new installer and runs it silently (per-user, no UAC) — it stops the running app, upgrades in place, and relaunches, all without leaving the dashboard. No more manually re-downloading the `.exe`. Windows gets the seamless path; macOS/Linux link to the release page. (`scripts/self-update.mjs`, `/api/update/check` + `/api/update/apply`.)
+
+---
+
 ## [2.4.1] — 2026-07-02
 
 ### Added

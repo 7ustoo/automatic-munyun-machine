@@ -15,6 +15,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -202,6 +203,100 @@ func (d *dashboardServer) handleTelegramDisable(w http.ResponseWriter, r *http.R
 		}
 		log.Printf("dashboard: Telegram disabled from dashboard — bot poller stopped")
 	}
+}
+
+// --- v2.5: resume rescan ---
+
+// handleResumeUpload accepts a multipart resume file, saves it under
+// data/uploads/, and re-parses it into the active profile's CV via
+// dashboard-api resume-parse — which also returns fresh search-term
+// suggestions. Guarded (POST + token). 8 MB cap covers any real resume.
+func (d *dashboardServer) handleResumeUpload(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
+		writeJSONError(w, http.StatusOK, "upload too large or malformed")
+		return
+	}
+	file, header, err := r.FormFile("resume")
+	if err != nil {
+		writeJSONError(w, http.StatusOK, "no resume file in the upload")
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	switch ext {
+	case ".pdf", ".docx", ".md", ".txt", ".markdown":
+	default:
+		writeJSONError(w, http.StatusOK, "unsupported file type "+ext+" — use PDF, DOCX, MD, or TXT")
+		return
+	}
+
+	uploadDir := filepath.Join(d.installDir, "data", "uploads")
+	_ = os.MkdirAll(uploadDir, 0o755)
+	dest := filepath.Join(uploadDir, "resume-upload"+ext)
+	dst, err := os.Create(dest)
+	if err != nil {
+		writeJSONError(w, http.StatusOK, "could not save the upload")
+		return
+	}
+	// Cap the copy too (defense in depth against a lying Content-Length).
+	if _, err := io.Copy(dst, io.LimitReader(file, 8<<20)); err != nil {
+		dst.Close()
+		writeJSONError(w, http.StatusOK, "could not save the upload")
+		return
+	}
+	dst.Close()
+
+	// Parsing a PDF/DOCX + suggesting terms is quick but give it headroom.
+	d.relayDashboardAPI(w, 45*time.Second, "resume-parse", dest)
+}
+
+// handleResumeApply replaces the search-term list with the terms the user
+// picked from the rescan suggestions. Body: { terms: "[\"iam\",\"m365\"]" }.
+func (d *dashboardServer) handleResumeApply(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "resume-apply", b["terms"])
+}
+
+// --- v2.5: self-update ---
+
+func (d *dashboardServer) execSelfUpdate(timeout time.Duration, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	script := filepath.Join(d.installDir, "scripts", "self-update.mjs")
+	cmd := exec.CommandContext(ctx, findNode(), append([]string{script}, args...)...)
+	cmd.Dir = d.installDir
+	applyChildHideWindow(cmd)
+	out, err := cmd.Output()
+	return out, err
+}
+
+func (d *dashboardServer) relaySelfUpdate(w http.ResponseWriter, timeout time.Duration, args ...string) {
+	out, err := d.execSelfUpdate(timeout, args...)
+	if err != nil && len(out) == 0 {
+		log.Printf("dashboard: self-update %v failed: %v", args, err)
+		writeJSONError(w, http.StatusOK, "Could not run the updater. Is Node installed?")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(append([]byte(strings.TrimSpace(string(out))), '\n'))
+}
+
+// handleUpdateCheck (GET) reports current vs latest release + whether a
+// one-click auto-install is possible on this platform. Read-only, so it's
+// not guarded; the network call is bounded + cached by update-checker.
+func (d *dashboardServer) handleUpdateCheck(w http.ResponseWriter, r *http.Request) {
+	d.relaySelfUpdate(w, 15*time.Second, "info")
+}
+
+// handleUpdateApply (guarded POST) downloads the latest installer and spawns
+// the detached silent-install-then-relaunch. Returns immediately with
+// {ok,started}; the running AMM is killed + replaced by the installer moments
+// later, and the updater relaunches it.
+func (d *dashboardServer) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
+	log.Printf("dashboard: user triggered auto-update")
+	d.relaySelfUpdate(w, 210*time.Second, "apply")
 }
 
 // jsonOK reports whether a helper line parsed to {"ok":true,...}.

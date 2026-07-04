@@ -34,6 +34,8 @@
     "filterClearance": true,
     "applicationFormEase": "all",
     "_applicationFormEaseValues": "all (default) | simple (only Simple Apps - no account creation) | long (only Time Consuming Apps)",
+    "maxJobAge": "any",
+    "_maxJobAgeValues": "v2.5: how recent a job must be, filtered on the posted-age shown on each hiring.cafe card. today | 3days | week | month | any (default, no age filter). Also accepts a raw number of days. Set from the dashboard's Recency dropdown.",
     "skipCompanies": ["Alpha FMC", "ECS", "Experis", "Verinext", "First Citizens", "AMD"],
     "dropTitlePatterns": [
       "Manager", "Principal", "Director", "Head of", "VP", "Vice President", "Chief",
