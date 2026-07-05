@@ -92,7 +92,9 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
 	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
 	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
+	mux.HandleFunc("/api/jobs/clear", d.guardPost(d.handleJobsClear)) // v2.8: clear all terms
 	mux.HandleFunc("/api/jobs/mode", d.guardPost(d.handleJobsMode))
+	mux.HandleFunc("/api/suggest", d.guardPost(d.handleSuggest)) // v2.8: re-suggest from current CV
 	mux.HandleFunc("/api/telegram/validate", d.guardPost(d.handleTelegramValidate))
 	mux.HandleFunc("/api/telegram/detect", d.guardPost(d.handleTelegramDetect))
 	mux.HandleFunc("/api/telegram/save", d.guardPost(d.handleTelegramSave))

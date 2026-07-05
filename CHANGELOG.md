@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.8.0] — 2026-07-05
+
+### Added
+
+- **"Clear all" button for your search terms.** The "What we search for" card now has a **Clear all** button next to Add — one click (with a confirm) empties the whole list, instead of removing terms one × at a time. Backed by a new `/api/jobs/clear` route + `jobs-clear` subcommand; profile-scoped, so it only clears the active profile's list.
+
+### Changed
+
+- **The keyword/titles toggle finally makes sense.** The old "Suggest searches as" dropdown was buried in Settings, barely mentioned "keywords," and did nothing visible when you flipped it — it only changed how a *future* resume rescan phrased its suggestions, with no hint of that. It's now **"Search style" and lives in the Resume card**, right next to Rescan and the suggestions it shapes, with a plain-language note. Flipping it **instantly re-suggests from your already-scanned resume** (no re-upload) as click-to-apply chips — Job titles → full roles like "IAM Engineer", Keywords → short terms like "iam". The note spells out that it shapes suggestions only and that you still apply terms + hit Scrape to see results. (New read-only `/api/suggest` route + `suggest-current` subcommand; new pure `suggestTermsForMode()` helper, 6 unit tests. Suite: 153 green.)
+
+---
+
 ## [2.7.0] — 2026-07-04
 
 ### Added

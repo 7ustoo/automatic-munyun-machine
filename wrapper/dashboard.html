@@ -547,12 +547,10 @@
         <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
       <div class="set-row"><label>Job recency</label>
         <select id="set-recency"><option value="any">Any time</option><option value="today">Posted today</option><option value="3days">Last 3 days</option><option value="week">This week</option><option value="month">This month</option></select></div>
-      <div class="set-row"><label>Suggest searches as</label>
-        <select id="set-mode"><option value="titles">Job titles</option><option value="keywords">Keywords</option></select></div>
       <div class="note" id="set-note"></div>
     </div>
 
-    <!-- Resume rescan (v2.5) -->
+    <!-- Resume rescan (v2.5) + search style (v2.8) -->
     <div class="card">
       <h2>Resume</h2>
       <div class="muted-sm">Upload a new resume to re-scan your skills and get fresh search-term suggestions from it.</div>
@@ -561,6 +559,12 @@
         <button class="sm primary" id="resume-upload-btn">Rescan resume</button>
       </div>
       <div class="note" id="resume-note"></div>
+
+      <!-- v2.8: search-style toggle lives next to the suggestions it shapes. -->
+      <div class="set-row" style="margin-top:10px"><label>Search style</label>
+        <select id="set-mode"><option value="titles">Job titles (precise)</option><option value="keywords">Keywords (broad)</option></select></div>
+      <div class="muted-sm" id="mode-hint">Shapes the <b>suggestions</b> only. <b>Job titles</b> → full roles like “IAM Engineer”; <b>Keywords</b> → short terms like “iam”. Flipping this instantly re-suggests from your current resume below — apply the ones you want, then hit <b>Scrape now</b> to see results. It doesn’t change your live search on its own.</div>
+
       <div id="resume-suggest" class="step hidden">
         <div class="muted-sm" id="resume-suggest-label">Suggested search terms from your resume:</div>
         <div id="resume-suggest-list" class="terms"></div>
@@ -575,6 +579,7 @@
       <div class="row">
         <input type="text" id="term-input" placeholder='add a title or keyword, e.g. "iam"' autocomplete="off" />
         <button class="sm primary" id="term-add">Add</button>
+        <button class="sm danger" id="term-clear" title="Remove every search term">Clear all</button>
       </div>
       <div id="terms-list" class="terms"></div>
     </div>
@@ -882,7 +887,28 @@ $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.tar
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));
 $("set-recency").addEventListener("change", e => saveSetting("filters.maxJobAge", e.target.value));
-$("set-mode").addEventListener("change", e => saveSetting("search.mode", e.target.value));
+// v2.8: flipping search style saves the mode AND immediately re-suggests from
+// the already-scanned CV (no re-upload) — reusing the resume-suggest chip UI.
+$("set-mode").addEventListener("change", async e => {
+  const mode = e.target.value;
+  await saveSetting("search.mode", mode);
+  const r = await postJSON("/api/suggest", { mode });
+  if (!r.ok) {
+    note("resume-note", "Style saved. " + (r.error || "Scan a resume to get suggestions."), false);
+    return;
+  }
+  const sugg = r.suggestions || [];
+  if (!sugg.length) {
+    note("resume-note", `Style saved — no ${mode} suggestions from your current resume.`, true);
+    return;
+  }
+  window.__resumeSuggest = sugg;
+  $("resume-suggest-label").textContent = `Suggested search terms (${r.mode}) from your resume — click to toggle, then apply:`;
+  renderResumeSuggest(sugg, new Set(sugg));
+  $("resume-suggest").classList.remove("hidden");
+  $("resume-suggest").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  toast(`${sugg.length} ${mode} suggestions ready — pick and apply.`, "good");
+});
 
 // --- Search terms ---
 function renderTerms(terms) {
@@ -905,6 +931,15 @@ async function addTerm() {
 }
 $("term-add").addEventListener("click", addTerm);
 $("term-input").addEventListener("keydown", e => { if (e.key === "Enter") addTerm(); });
+async function clearTerms() {
+  const n = $("terms-list").querySelectorAll(".chip").length;
+  if (!n) { toast("Nothing to clear — your search list is already empty.", "good"); return; }
+  if (!confirm(`Remove all ${n} search term${n === 1 ? "" : "s"}? You can rebuild the list by adding terms or applying resume suggestions.`)) return;
+  const r = await postJSON("/api/jobs/clear", {});
+  if (r.ok) { renderTerms(r.list || []); toast("Cleared all search terms.", "good"); }
+  else toast(r.error || "Could not clear.", "bad");
+}
+$("term-clear").addEventListener("click", clearTerms);
 
 // --- Profiles (v2.6) ---
 // The backend (scripts/profile-store.mjs) owns config.json and data/profiles/*.
