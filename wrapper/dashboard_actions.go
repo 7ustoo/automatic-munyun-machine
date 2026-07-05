@@ -142,6 +142,18 @@ func (d *dashboardServer) handleJobsMode(w http.ResponseWriter, r *http.Request)
 	d.relayDashboardAPI(w, 15*time.Second, "jobs-mode", b["mode"])
 }
 
+// v2.8: clear the entire search-term list in one shot.
+func (d *dashboardServer) handleJobsClear(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 15*time.Second, "jobs-clear")
+}
+
+// v2.8: re-suggest search terms from the already-parsed CV in the requested
+// flavor (titles|keywords). Read-only; powers the "Search style" toggle.
+func (d *dashboardServer) handleSuggest(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "suggest-current", b["mode"])
+}
+
 // execTelegramSetup runs scripts/telegram-setup.mjs <args...> and returns its
 // single line of stdout (already JSON). timeout bounds the detect poll.
 func (d *dashboardServer) execTelegramSetup(timeout time.Duration, args ...string) ([]byte, error) {

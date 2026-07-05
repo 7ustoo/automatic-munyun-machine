@@ -110,6 +110,37 @@ function jobsMode(mode) {
   cfgRW.set('search.mode', m);
   out({ ok: true, mode: m });
 }
+// v2.8: clear the whole search-term list in one shot (dashboard "Clear all").
+function jobsClear() {
+  cfgRW.set('queries', []);
+  out({ ok: true, list: [] });
+}
+
+// v2.8: pick the suggester flavor and flatten to plain search strings. Pure —
+// unit-tested. Any mode string other than 'keywords' means titles (precise).
+export function suggestTermsForMode(parsed, mode, max = 12) {
+  const flavor = mode === 'keywords' ? 'keywords' : 'titles';
+  const raw = flavor === 'keywords'
+    ? suggestKeywords(parsed, { max })
+    : suggestRoles(parsed, { max });
+  return { mode: flavor, suggestions: raw.map(s => s.title) };
+}
+
+// v2.8: re-suggest search terms from the ALREADY-parsed CV (no re-upload),
+// in the requested flavor. Powers the "Search style" toggle so flipping
+// titles↔keywords immediately shows fresh suggestions to apply. Mode is
+// passed explicitly (the caller's dropdown value) to avoid racing the
+// separate search.mode save. Read-only — never touches config.
+function suggestCurrent(modeArg) {
+  const cvPath = profilePaths().cvParsed;
+  if (!fs.existsSync(cvPath)) {
+    return out({ ok: false, error: 'No scanned resume yet — upload one in the Resume card first.' });
+  }
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(cvPath, 'utf8')); }
+  catch { return out({ ok: false, error: 'Could not read your scanned resume — rescan it in the Resume card.' }); }
+  out({ ok: true, ...suggestTermsForMode(parsed, modeArg) });
+}
 
 // ---- per-job actions ----
 function loadBatchJob(idx) {
@@ -454,7 +485,9 @@ if (isMain) (async () => {
     case 'settings-set': return settingsSet(a, b);
     case 'jobs-add':     return jobsAdd(a);
     case 'jobs-remove':  return jobsRemove(a);
+    case 'jobs-clear':   return jobsClear();
     case 'jobs-mode':    return jobsMode(a);
+    case 'suggest-current': return suggestCurrent(a);
     case 'job-action':   return jobAction(a, b);
     case 'resume-parse': return resumeParse(a);
     case 'resume-apply': return resumeApply(a);
@@ -473,7 +506,7 @@ if (isMain) (async () => {
     case 'setup-init':               return setupInit(a);
     case 'setup-finalize':           return setupFinalize();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-mode|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|setup-init|setup-finalize> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|setup-init|setup-finalize> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });
