@@ -10,6 +10,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [3.0.2] — 2026-07-06
+
+### Fixed
+
+- **Auto-update no longer "loses" your profiles.** The silent installer ran without a `/DIR` flag, so on installs that never went through the installer's own registry entry (git-based installs from `install.ps1`) it installed a **fresh copy** to the default `%LOCALAPPDATA%\automatic-munyun-machine` and relaunched *that* — a blank app with no `config.json`, no `.env`, no profiles. It looked exactly like "the update deleted my profiles," but nothing was ever deleted: the wrong copy was running while your real data sat untouched in the original folder. The updater now passes `/DIR="<current install root>"` so every update lands **in place**, keeping config, profiles, Telegram token, and job history. ⚠️ *Note: this fix takes effect for updates applied **from** v3.0.2 onward — the update **to** v3.0.2 still runs the old updater. Git-based installs should apply this one with `git pull`; installer-based installs are unaffected either way (Inno's registry already pins their directory).*
+- **Updating is now a clean window handoff.** Clicking **Update now** used to leave the old dashboard window sitting there dead ("you can close this window") while the relaunched AMM opened a second one. Now: the banner switches to *"Installing the update — this window will close and the updated app will reopen by itself"*, an **Installing the update…** splash covers the app the moment the installer takes over, and the old window **closes itself** — then the relaunched AMM (v2.9's `--after-update`) opens the fresh one. Close happens via two independent mechanisms: the wrapper force-closes the app window it spawned ~4s after the update starts (new `closeAppWindows()`, PID tracked at launch), and the page also closes itself when the wrapper stops answering (in-page navigation switched from hash-pushes to `history.replaceState` so the window keeps the single history entry Chrome requires for `window.close()`). While an update is applying, the "Could not reach the wrapper" error banner is suppressed — losing the wrapper is the install working, not a failure.
+
+### Notes
+
+- Verified: production-faithful Playwright run (real `--app` window, single history entry) — navigate across views, click Update, kill the wrapper → splash appears and **the window closes itself**; fresh-batch banner regression re-passed; 2 new Go tests for `closeAppWindows` (real child process killed; dead-PID no-op). Suites: 153 node + full Go green.
+
+---
+
 ## [3.0.1] — 2026-07-06
 
 ### Fixed

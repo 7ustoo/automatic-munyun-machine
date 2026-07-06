@@ -116,7 +116,14 @@ async function apply() {
     // Give the dashboard response + AMM a moment to settle before the
     // installer kills the running instance.
     'ping 127.0.0.1 -n 3 >nul',
-    '"' + dest + '" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART >> "' + logPath + '" 2>&1',
+    // v3.0.2: /DIR pins the upgrade to THIS install's root. Without it, Inno
+    // falls back to its registry-remembered dir — or, for git-based installs
+    // that never ran the installer (no registry entry), to the DEFAULT dir
+    // (%LOCALAPPDATA%\automatic-munyun-machine). That second case installed a
+    // FRESH copy next to the real one and relaunched it: no config.json, no
+    // .env, no data/profiles — which looked exactly like "the update deleted
+    // my profiles". The data was never touched; the wrong copy was running.
+    '"' + dest + '" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + ROOT + '" >> "' + logPath + '" 2>&1',
     'echo [%date% %time%] installer exit %errorlevel% >> "' + logPath + '"',
     // Relaunch the freshly-installed AMM. --after-update tells it to wait for
     // its own dashboard to actually start serving, then open the app window —
