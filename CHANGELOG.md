@@ -10,6 +10,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [3.0.1] — 2026-07-06
+
+### Fixed
+
+- **The dashboard now notices every scrape — not just its own.** When a batch finished from the 7am scheduler, Telegram's `/scrape`, or the tray menu, the dashboard sat stale until you refreshed by hand (its only completion-watcher was tied to the page's own Scrape button). The 5s status poll now watches the batch's `generatedAt` stamp: the moment a fresh batch lands — started from *anywhere* — the job list and stat tiles auto-refresh and a green **"Scrape complete — N jobs ranked"** banner appears with a **View jobs** button (plus a toast). The banner stays until dismissed, so a 7am batch still greets you when you sit down at 9. First page load only records a baseline — an old batch doesn't get celebrated as new. The Scrape button's private 12×12s polling loop is gone (the detector owns completion for all sources); its progress bar now clears on batch-land or a 45-min safety timeout. Front-end only — `generatedAt` was already in the status payload.
+
+---
+
 ## [3.0.0] — 2026-07-06
 
 > **The dashboard grows up.** v2.x bolted a control surface onto a status page — one long scroll where the jobs you actually came for sat below the fold, behind status cards and settings forms. v3.0 is a ground-up redesign of `wrapper/dashboard.html` into a real application: sidebar navigation, a jobs-first layout, search/filter/sort over the whole batch, and professional interaction polish throughout. **Zero backend changes** — every wrapper route, API payload, and CSRF check is byte-identical to v2.9; this is a pure front-end release, which is also why nothing about scraping, scheduling, Telegram, or profiles needs re-verifying.
