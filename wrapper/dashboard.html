@@ -135,6 +135,8 @@
   }
   input[type=text]:focus { outline: none; border-color: var(--accent); }
   .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .watch-label { font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
+  .watch-label input { vertical-align: middle; }
   .muted-sm { color: var(--muted); font-size: 12px; margin: 6px 0; }
   .step { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
   .hidden { display: none !important; }
@@ -592,6 +594,7 @@
         <a class="btnlink" href="/api/export?format=csv"><button class="sm" id="export-csv-btn" title="Plain-text sheet: #, Job Title, Apply Link (links are text — CSV can't carry hyperlinks)">⬇ Export .csv</button></a>
         <a class="btnlink" href="/api/export?format=xlsx"><button class="sm" id="export-xlsx-btn" title="Excel workbook: Apply Link column is clickable hyperlinks">⬇ Export .xlsx</button></a>
         <button class="sm" id="refresh-btn">↻ Refresh</button>
+        <label class="watch-label" title="Show the browser window so you can watch it search hiring.cafe"><input type="checkbox" id="watch-scrape" /> 👁 Watch</label>
         <button class="primary sm" id="scrape-btn">⟳ Scrape now</button>
       </span>
     </h2>
@@ -840,9 +843,12 @@ $("scrape-btn").addEventListener("click", async () => {
   const label = btn.textContent;
   btn.textContent = "Scraping…";
   try {
-    const r = await postJSON("/api/scrape");
+    const watch = $("watch-scrape").checked;
+    const r = await postJSON("/api/scrape", { watch: String(watch) });
     if (r.ok) {
-      toast("Scrape started — refreshing the list as jobs come in (1–2 min).", "good");
+      toast(watch
+        ? "Scrape started — the browser window will appear so you can watch it search."
+        : "Scrape started — refreshing the list as jobs come in (1–2 min).", "good");
       // Poll the batch a few times so the new results show up without a manual refresh.
       let tries = 0;
       const iv = setInterval(async () => { tries++; await loadBatch(); if (tries >= 12) clearInterval(iv); }, 12000);

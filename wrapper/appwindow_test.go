@@ -1,11 +1,14 @@
 package main
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 // v2.2: the app window is opened via a resolved Chrome/Edge in --app mode.
@@ -100,5 +103,48 @@ func TestReadLockPID(t *testing.T) {
 	}
 	if got := readLockPID(dir); got != 0 {
 		t.Errorf("garbage lock → want 0, got %d", got)
+	}
+}
+
+// v2.9: waitForDashboardReady polls /api/status until it 200s. On an
+// auto-update relaunch this is what stops us opening the app window before the
+// freshly-restarted dashboard is serving (the "reopened in the tray, no window"
+// bug). A server that 503s a couple times then 200s must be detected as ready.
+func TestWaitForDashboardReady_BecomesReady(t *testing.T) {
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/status" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		hits++
+		if hits < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	if !waitForDashboardReady(srv.URL, 10, 5*time.Millisecond) {
+		t.Errorf("expected ready once the server started answering 200 (hits=%d)", hits)
+	}
+}
+
+// A server that never serves 200 must time out (return false) within the
+// attempt budget — the caller then opens the window anyway rather than hang.
+func TestWaitForDashboardReady_TimesOut(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+	if waitForDashboardReady(srv.URL, 3, 5*time.Millisecond) {
+		t.Errorf("never-200 server must not report ready")
+	}
+}
+
+// No listener at all (connection refused) must also time out cleanly.
+func TestWaitForDashboardReady_NoListener(t *testing.T) {
+	if waitForDashboardReady("http://127.0.0.1:1", 2, 5*time.Millisecond) {
+		t.Errorf("dead port must not report ready")
 	}
 }

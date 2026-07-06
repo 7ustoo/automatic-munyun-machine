@@ -119,6 +119,27 @@ func parsePortFromBytes(data []byte) string {
 	return port
 }
 
+// waitForDashboardReady polls <baseURL>/api/status until it answers HTTP 200
+// or the attempts run out. Used on an auto-update relaunch (--after-update):
+// the freshly upgraded dashboard's HTTP server can start a beat after the
+// process, and opening the app window before it serves lands the user in the
+// tray with a dead window. Returns true once it's serving, false on timeout.
+func waitForDashboardReady(baseURL string, attempts int, delay time.Duration) bool {
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	for i := 0; i < attempts; i++ {
+		resp, err := client.Get(baseURL + "/api/status")
+		if err == nil {
+			code := resp.StatusCode
+			_ = resp.Body.Close()
+			if code == http.StatusOK {
+				return true
+			}
+		}
+		time.Sleep(delay)
+	}
+	return false
+}
+
 // openAppWindowForRunningInstance hands a double-click off to the AMM that
 // is already running: read its port from data/dashboard-port.txt, PROBE the
 // dashboard to confirm that instance is actually serving, then open the app

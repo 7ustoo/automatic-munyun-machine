@@ -175,7 +175,7 @@ func (s *trayState) handleClicks() {
 		case <-dashCh:
 			actionOpenDashboard(s.dash, s.installDir)
 		case <-s.miScrape.ClickedCh:
-			actionRunScrape(s.installDir)
+			actionRunScrape(s.installDir, false) // tray trigger: off-screen like the scheduled run
 		case <-s.miPause.ClickedCh:
 			actionTogglePause(s.installDir, s.miPause)
 		case <-s.miTelegram.ClickedCh:

@@ -118,11 +118,14 @@ async function apply() {
     'ping 127.0.0.1 -n 3 >nul',
     '"' + dest + '" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART >> "' + logPath + '" 2>&1',
     'echo [%date% %time%] installer exit %errorlevel% >> "' + logPath + '"',
-    // Relaunch the freshly-installed AMM (foreground window, as if
-    // double-clicked). The installer replaced AMM.exe in place.
-    'ping 127.0.0.1 -n 2 >nul',
-    'start "" "' + ammExe + '"',
-    'echo [%date% %time%] relaunched AMM >> "' + logPath + '"'
+    // Relaunch the freshly-installed AMM. --after-update tells it to wait for
+    // its own dashboard to actually start serving, then open the app window —
+    // so the update ends with the dashboard popping back up, not just a tray
+    // icon (v2.9). The installer replaced AMM.exe in place; give the file lock
+    // a few seconds to release before launching.
+    'ping 127.0.0.1 -n 4 >nul',
+    'start "" "' + ammExe + '" --after-update',
+    'echo [%date% %time%] relaunched AMM (--after-update) >> "' + logPath + '"'
   ].join('\r\n');
   const batPath = path.join(os.tmpdir(), 'amm-update-' + process.pid + '.cmd');
   fs.writeFileSync(batPath, bat);
