@@ -21,8 +21,45 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"sync"
 	"time"
 )
+
+// v3.0.2: PIDs of app windows THIS wrapper spawned. The window is a separate
+// Chrome process (own --user-data-dir, so no rendezvous with the user's
+// browser) that outlives the wrapper — the update flow closes it explicitly
+// so a dead pre-update window doesn't linger next to the relaunched one.
+var appWindowPIDs struct {
+	mu   sync.Mutex
+	pids []int
+}
+
+func recordAppWindowPID(pid int) {
+	appWindowPIDs.mu.Lock()
+	appWindowPIDs.pids = append(appWindowPIDs.pids, pid)
+	appWindowPIDs.mu.Unlock()
+}
+
+// closeAppWindows force-closes every app window this process spawned.
+// Best-effort: a PID may already be gone (user closed the window), and
+// windows opened by a second-instance handoff belong to a different (dead)
+// process — those are covered by the page's own window.close() during the
+// update handoff.
+func closeAppWindows() {
+	appWindowPIDs.mu.Lock()
+	pids := append([]int(nil), appWindowPIDs.pids...)
+	appWindowPIDs.pids = nil
+	appWindowPIDs.mu.Unlock()
+	for _, pid := range pids {
+		p, err := os.FindProcess(pid)
+		if err != nil {
+			continue
+		}
+		if killErr := p.Kill(); killErr == nil {
+			log.Printf("appwindow: closed app window (pid %d) for update handoff", pid)
+		}
+	}
+}
 
 // chromiumCandidates returns likely Chrome/Edge executable paths for the
 // platform, Chrome first (users who installed it usually prefer it), then
@@ -87,6 +124,7 @@ func openAppWindow(installDir, url string) bool {
 		_ = openURL(url)
 		return false
 	}
+	recordAppWindowPID(cmd.Process.Pid) // v3.0.2: so the update flow can close it
 	_ = cmd.Process.Release()
 	log.Printf("appwindow: opened app window via %s", filepath.Base(browser))
 	return true

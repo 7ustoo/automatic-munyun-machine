@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -147,4 +148,48 @@ func TestWaitForDashboardReady_NoListener(t *testing.T) {
 	if waitForDashboardReady("http://127.0.0.1:1", 2, 5*time.Millisecond) {
 		t.Errorf("dead port must not report ready")
 	}
+}
+
+// --- v3.0.2: update-handoff window close ---
+
+// TestCloseAppWindows spawns a real long-running child, records its PID the
+// way openAppWindow does, and asserts closeAppWindows terminates it and
+// clears the tracked list.
+func TestCloseAppWindows(t *testing.T) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "ping.exe"), "-n", "30", "127.0.0.1")
+	} else {
+		cmd = exec.Command("sleep", "30")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("could not start child: %v", err)
+	}
+	recordAppWindowPID(cmd.Process.Pid)
+
+	closeAppWindows()
+
+	// Reap and confirm it died well before its natural 30s lifetime.
+	done := make(chan error, 1)
+	go func() { done <- cmd.Wait() }()
+	select {
+	case <-done:
+		// killed — expected
+	case <-time.After(5 * time.Second):
+		_ = cmd.Process.Kill()
+		t.Fatalf("child survived closeAppWindows")
+	}
+
+	appWindowPIDs.mu.Lock()
+	n := len(appWindowPIDs.pids)
+	appWindowPIDs.mu.Unlock()
+	if n != 0 {
+		t.Errorf("tracked pid list not cleared: %d left", n)
+	}
+}
+
+// TestCloseAppWindows_GonePID must be a no-op for an already-dead PID.
+func TestCloseAppWindows_GonePID(t *testing.T) {
+	recordAppWindowPID(999999999)
+	closeAppWindows() // must not panic or hang
 }

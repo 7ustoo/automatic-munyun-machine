@@ -309,9 +309,34 @@ func (d *dashboardServer) handleUpdateCheck(w http.ResponseWriter, r *http.Reque
 // the detached silent-install-then-relaunch. Returns immediately with
 // {ok,started}; the running AMM is killed + replaced by the installer moments
 // later, and the updater relaunches it.
+//
+// v3.0.2: on a started update, also close the app window this wrapper spawned
+// (delayed so the page paints its "installing" message first). The window is
+// a separate Chrome process the installer's taskkill never reaches — without
+// this it lingered as a dead window next to the relaunched one. The page has
+// its own window.close() fallback for windows this process didn't spawn.
 func (d *dashboardServer) handleUpdateApply(w http.ResponseWriter, r *http.Request) {
 	log.Printf("dashboard: user triggered auto-update")
-	d.relaySelfUpdate(w, 210*time.Second, "apply")
+	out, err := d.execSelfUpdate(210*time.Second, "apply")
+	if err != nil && len(out) == 0 {
+		log.Printf("dashboard: self-update [apply] failed: %v", err)
+		writeJSONError(w, http.StatusOK, "Could not run the updater. Is Node installed?")
+		return
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	_, _ = w.Write(append([]byte(strings.TrimSpace(string(out))), '\n'))
+
+	var res struct {
+		Ok      bool `json:"ok"`
+		Started bool `json:"started"`
+	}
+	if json.Unmarshal(out, &res) == nil && res.Ok && res.Started {
+		go func() {
+			time.Sleep(4 * time.Second)
+			closeAppWindows()
+		}()
+	}
 }
 
 // --- v2.6: profile CRUD ---

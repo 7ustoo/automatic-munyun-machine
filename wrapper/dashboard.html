@@ -452,6 +452,26 @@
   #modal input[type=text] { margin-top: 12px; }
   #modal .m-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
 
+  /* ---- Update-handoff splash (v3.0.2) ---------------------------------------- */
+  #update-splash {
+    position: fixed; inset: 0; z-index: 300;
+    background:
+      radial-gradient(900px 460px at 50% 20%, rgba(88,166,255,.10), transparent 60%),
+      var(--bg);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 14px; text-align: center; padding: 24px;
+    animation: fadein .2s var(--ease);
+  }
+  #update-splash img { width: 56px; height: 56px; border-radius: 13px; box-shadow: var(--shadow-2); }
+  .us-spin {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 3px solid var(--surface-3); border-top-color: var(--accent);
+    animation: usspin .9s linear infinite;
+  }
+  @keyframes usspin { to { transform: rotate(360deg); } }
+  .us-title { font-size: 17px; font-weight: 700; }
+  .us-sub { color: var(--text-2); font-size: 13px; max-width: 420px; line-height: 1.6; }
+
   /* ---- Footer -------------------------------------------------------------------- */
   footer { color: var(--text-3); font-size: 12px; padding: 14px 24px 20px; text-align: center; }
   footer code { background: var(--surface); padding: 1px 6px; border-radius: 4px; }
@@ -1016,6 +1036,16 @@
   </div>
 </div>
 
+<!-- v3.0.2: update-handoff splash. Covers the app while the installer swaps
+     binaries; this window then closes itself and the relaunched AMM
+     (--after-update) opens the fresh one. -->
+<div id="update-splash" class="hidden">
+  <img src="/favicon.png" alt="" />
+  <div class="us-spin" aria-hidden="true"></div>
+  <div class="us-title">Installing the update…</div>
+  <div class="us-sub" id="us-sub">This window will close — the updated app reopens by itself in a moment.</div>
+</div>
+
 <div id="toast" role="status" aria-live="polite"></div>
 
 <script>
@@ -1082,6 +1112,22 @@ function setView(name) {
     el.classList.toggle("on", el.dataset.view === name));
   $("view-title").textContent = VIEW_TITLES[name];
 }
+// v3.0.2: internal navigation goes through replaceState, NOT location.hash /
+// plain anchor jumps — hash pushes grow the history stack, and Chrome only
+// honors window.close() on app windows with a single history entry. That
+// close() is what makes the update handoff seamless (old window closes, the
+// relaunched AMM opens the new one).
+function navTo(name) {
+  if (!VIEW_TITLES[name]) name = "jobs";
+  history.replaceState(null, "", "#" + name);
+  setView(name);
+}
+document.getElementById("nav").addEventListener("click", (e) => {
+  const a = e.target.closest("a.nav-item");
+  if (!a) return;
+  e.preventDefault();
+  navTo(a.dataset.view);
+});
 window.addEventListener("hashchange", () => setView(currentView()));
 setView(currentView());
 
@@ -1091,7 +1137,7 @@ document.addEventListener("keydown", (e) => {
   const t = e.target;
   if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
   e.preventDefault();
-  if (currentView() !== "jobs") location.hash = "#jobs";
+  if (currentView() !== "jobs") navTo("jobs");
   $("job-search").focus();
 });
 
@@ -1182,14 +1228,44 @@ async function postJSON(path, body) {
 }
 
 // ---- Status poll (every 5s) ----
+// v3.0.2: update handoff. While an update is being applied, losing the
+// wrapper is EXPECTED (the installer kills it to swap binaries) — so instead
+// of the scary "could not reach" banner, two consecutive failed polls flip
+// the page into the splash and this window closes itself. The relaunched
+// AMM (--after-update, v2.9) opens the fresh window once its dashboard is up.
+let updatingState = null; // null | "applying" | "closing"
+let updateDownPolls = 0;
+
+function beginUpdateHandoff() {
+  if (updatingState === "closing") return;
+  updatingState = "closing";
+  $("update-splash").classList.remove("hidden");
+  setTimeout(() => window.close(), 1000);
+  // If close() was refused (shouldn't happen for an --app window with a
+  // single history entry, but browsers get to say no), be honest instead of
+  // spinning forever.
+  setTimeout(() => {
+    $("us-sub").textContent =
+      "It's safe to close this window — the updated app opens by itself when the install finishes.";
+  }, 4000);
+}
+
 async function tick() {
+  if (updatingState === "closing") return;
   try {
     const res = await fetch("/api/status", { cache: "no-store" });
     if (!res.ok) throw new Error("HTTP " + res.status);
     const s = await res.json();
+    updateDownPolls = 0;
     $("err").style.display = "none";
     render(s);
   } catch (e) {
+    if (updatingState === "applying") {
+      // Wrapper went down mid-update — that's the installer doing its job.
+      updateDownPolls++;
+      if (updateDownPolls >= 2) beginUpdateHandoff();
+      return;
+    }
     $("err").style.display = "";
     $("err").innerHTML = '<svg class="ic"><use href="#i-alert"/></svg><span></span>';
     $("err").querySelector("span").textContent =
@@ -1288,7 +1364,7 @@ function onFreshBatch(lb) {
 $("bb-dismiss").addEventListener("click", () => $("batch-banner").classList.add("hidden"));
 $("bb-view").addEventListener("click", () => {
   $("batch-banner").classList.add("hidden");
-  location.hash = "#jobs";
+  navTo("jobs");
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
@@ -1886,10 +1962,16 @@ $("ub-update").addEventListener("click", async () => {
       else toast(res.error || "Update failed to start.", "bad");
       return;
     }
-    $("ub-text").textContent = "Installing the update — AMM will restart automatically. You can close this window.";
+    // v3.0.2: the installer is downloaded and about to run. From here the
+    // status poll owns the transition — when the wrapper dies (installer
+    // swapping binaries), the splash comes up and this window closes itself;
+    // the relaunched AMM opens the new one.
+    updatingState = "applying";
+    $("ub-text").textContent = "Installing the update — this window will close and the updated app will reopen by itself.";
   } catch (e) {
     // The installer likely killed the wrapper mid-request — that's the update working.
-    $("ub-text").textContent = "Updating… AMM will restart automatically.";
+    updatingState = "applying";
+    $("ub-text").textContent = "Installing the update — this window will close and the updated app will reopen by itself.";
   }
 });
 
