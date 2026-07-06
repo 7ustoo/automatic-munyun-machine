@@ -141,16 +141,18 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/test`, `/ping` | Bot health check |
 | `/help` | Show this list |
 
-## Local dashboard (NEW in v1.3)
+## The dashboard (redesigned in v3.0)
 
-The tray menu has an **Open dashboard** item that pops a small status page in your default browser. It shows:
+Double-clicking the AMM icon opens the dashboard — the app's primary surface, redesigned in v3.0 as a full application with sidebar navigation:
 
-- Bot state (alive / stale / dead) + uptime + PID
-- Telegram connection (last poll OK + consecutive failure count)
-- Active profile + all profiles
-- Last batch summary — date, job count, and the top 10 jobs with company / query / match % and a direct-apply link
+- **Jobs** — the whole ranked batch with stat tiles (batch size, average match, strong matches), live search (press `/`), match-strength filters, sorting by rank/match/title/company/YOE, per-job match meters, the source query that found each job, and one-click **Apply / Why / Save / Applied** actions. Export the apply links as `.txt`, `.csv`, or `.xlsx` from the toolbar.
+- **Searches** — add, remove, or clear the terms AMM searches every morning.
+- **Resume** — rescan a new resume, flip between title-style and keyword-style suggestions, and apply them as your search list.
+- **Profiles** — add / switch / rename / delete personas, each with its own resume, searches, and history.
+- **System** — bot health (alive / stale / dead, uptime, heartbeat), the optional Telegram connection with its full in-app setup flow, and a manual update check.
+- **Settings** — YOE, salary floor, match floor, scrape time, and all job filters; every change saves instantly.
 
-The dashboard binds to `127.0.0.1` on an OS-assigned port — it is **not reachable from the LAN or the internet**. The page auto-refreshes every 5 seconds. Telegram remains the primary surface; the dashboard is a glance for moments when you're at your desk.
+First-run setup is a five-step panel in the same window (resume → basics → job-feed warmup → optional Telegram → finish). The dashboard binds to `127.0.0.1` on an OS-assigned port — it is **not reachable from the LAN or the internet** — and auto-refreshes health every 5 seconds. State-changing actions are CSRF-protected with a per-process token.
 
 ## Customize
 

@@ -10,6 +10,32 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [3.0.0] — 2026-07-06
+
+> **The dashboard grows up.** v2.x bolted a control surface onto a status page — one long scroll where the jobs you actually came for sat below the fold, behind status cards and settings forms. v3.0 is a ground-up redesign of `wrapper/dashboard.html` into a real application: sidebar navigation, a jobs-first layout, search/filter/sort over the whole batch, and professional interaction polish throughout. **Zero backend changes** — every wrapper route, API payload, and CSRF check is byte-identical to v2.9; this is a pure front-end release, which is also why nothing about scraping, scheduling, Telegram, or profiles needs re-verifying.
+
+### Added
+
+- **App shell with sidebar navigation.** Six views — **Jobs · Searches · Resume · Profiles · System · Settings** — instead of one endless scroll. Navigation is hash-routed (`#jobs`, `#settings`, …) so a refresh or profile switch keeps your place. The sidebar shows live badges (job count, search-term count) and collapses to an icon rail on narrow windows. The topbar carries the active profile, live health chip, the 👁 Watch toggle, and the one primary action: **Scrape now**.
+- **The Jobs view is a real explorer.** Stat tiles up top (jobs in batch · average match · strong matches ≥ 70% · batch date). Below: live **search** across title/company/source (press `/` from anywhere), a **match-strength filter** (All · ≥ 70% · 50–69% · < 50%), and **sorting** by rank, match %, title, company, or YOE. Each row now shows a **match meter** (thin colored bar + %), the job's **YOE requirement**, and the **source query** that found it — data the scraper always captured but v2.x never displayed.
+- **Session-sticky Applied state.** Marking a job applied greys it out and strikes the title; the mark survives list refreshes and the mid-scrape re-polls (v2.x reset the button on every render). "Why" expanders survive re-renders too.
+- **Custom modal system.** Native `confirm()`/`prompt()` dialogs (Clear-all terms, profile rename/delete) are gone — replaced with in-app modals that match the design, support Esc/Enter/backdrop-click, and return focus where you left it.
+- **Scrape progress feedback.** A slim indeterminate progress bar runs under the topbar while a scrape is in flight; polling stops early and toasts "Fresh batch loaded — N jobs" the moment a new batch lands, instead of always burning the full 12 polls.
+- **Manual update check.** System page gains a "Check for updates" button (the 30-min auto-check and the update banner are unchanged).
+- **Skeleton loading, empty states, richer toasts.** First batch load shimmers instead of flashing empty; a no-batch state offers a one-click Scrape; toasts carry status icons and are `aria-live` polite.
+
+### Changed
+
+- **Design system rebuilt** — deeper background, layered surface tokens, consistent radii/shadows, feather-style inline SVG icon set (self-contained, still zero external resources — the page works fully offline), `prefers-reduced-motion` respected, focus-visible rings throughout.
+- **First-run setup wizard restyled** to match: numbered stepper with labels and connecting lines, same five steps, same wiring — every element ID, API call, and gating rule from v2.7 is preserved verbatim.
+- **Export is a dropdown menu** (.txt / .csv / .xlsx with format hints) instead of three separate buttons.
+
+### Notes
+
+- Verified end-to-end against a stubbed wrapper: all six views, the setup overlay, modals, filters/sort, export menu, and the narrow-viewport rail screenshot-reviewed; zero console errors. Static checks: all 114 JS-referenced element IDs present, CSRF placeholder exactly once (Go test also asserts this), all SVG symbols defined. Suites: 153 node tests + full Go wrapper suite green.
+
+---
+
 ## [2.9.0] — 2026-07-05
 
 ### Added
