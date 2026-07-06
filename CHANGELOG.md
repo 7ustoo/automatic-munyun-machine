@@ -10,6 +10,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [2.9.0] — 2026-07-05
+
+### Added
+
+- **Watch the scrape happen.** The scraper browser was always a real (non-headless) Chromium, but it was parked off-screen at `(10000,10000)` so the daily 7am run never covers your desktop — which also meant you could never *see* it work. New **👁 Watch** checkbox next to "Scrape now": tick it and the scrape runs with the browser window on-screen (at `60,60`), so you can watch it open hiring.cafe, type each search term, and page through results. Unticked (and the scheduled run, and the tray trigger) stay off-screen as before. Implemented with an `AMM_SHOW_BROWSER=1` env flag the wrapper sets on the child scrape — no config, no new schema.
+
+### Fixed
+
+- **After an auto-update, the dashboard now pops back up — not just a tray icon.** The updater relaunches the freshly-installed AMM, but a just-upgraded dashboard's HTTP server can start a beat after the process, so opening the window immediately raced it and left you with a tray icon and no dashboard. The post-update relaunch now passes `--after-update`, and the wrapper waits for its own dashboard to actually answer (`/api/status` 200, up to ~12s) before opening the app window. (`waitForDashboardReady()`, 3 new Go tests.)
+
+---
+
 ## [2.8.0] — 2026-07-05
 
 ### Added

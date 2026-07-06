@@ -51,7 +51,12 @@ func actionOpenDashboard(dash *dashboardServer, installDir string) {
 // actionRunScrape spawns `node scripts/daily-batch.mjs` as a one-shot
 // detached process. Same effect as /scrape via Telegram, but triggerable
 // from the tray when the user is at their desk.
-func actionRunScrape(installDir string) {
+//
+// v2.9: showBrowser toggles "watch the scrape" — it sets AMM_SHOW_BROWSER=1 so
+// daily-batch.mjs places the (always-headful) Chromium window on-screen instead
+// of parking it off-screen. The scheduled 7am run and the tray trigger pass
+// false; only the dashboard's "Watch" checkbox passes true.
+func actionRunScrape(installDir string, showBrowser bool) {
 	scriptPath := filepath.Join(installDir, "scripts", "daily-batch.mjs")
 	if _, err := os.Stat(scriptPath); err != nil {
 		log.Printf("action.scrape: daily-batch.mjs not found at %s", scriptPath)
@@ -59,6 +64,9 @@ func actionRunScrape(installDir string) {
 	}
 	cmd := exec.Command(findNode(), scriptPath)
 	cmd.Dir = installDir
+	if showBrowser {
+		cmd.Env = append(os.Environ(), "AMM_SHOW_BROWSER=1")
+	}
 	applyChildHideWindow(cmd)
 	// Detach: don't wait, don't tie stdio to the wrapper.
 	cmd.Stdout = nil

@@ -252,6 +252,14 @@ async function launchBrowser() {
   // AMM's own profile dir — the user's browsing is untouched.
   const browser = await resolveBrowser();
   log(`Browser: ${browser.label}`);
+  // v2.9: "watch the scrape." The browser is always headful (headless:false),
+  // but by default we park it off-screen (10000,10000) so the daily 7am run
+  // never steals focus or covers the user's desktop. When the dashboard's
+  // "Watch" checkbox fires a scrape, the wrapper sets AMM_SHOW_BROWSER=1 and we
+  // place the window on-screen so the user can watch it drive hiring.cafe.
+  const showBrowser = process.env.AMM_SHOW_BROWSER === '1';
+  const windowPosition = showBrowser ? '--window-position=60,60' : '--window-position=10000,10000';
+  if (showBrowser) log('👁  Visible browser mode — the scrape window will be on-screen.');
   return chromium.launchPersistentContext(profileDir, {
     ...browser.launchOptions,
     headless: false,
@@ -259,7 +267,7 @@ async function launchBrowser() {
     args: [
       '--no-sandbox',
       '--disable-blink-features=AutomationControlled',
-      '--window-position=10000,10000',
+      windowPosition,
       '--window-size=1280,800'
     ],
     viewport: { width: 1280, height: 800 },

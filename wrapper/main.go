@@ -30,6 +30,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"fyne.io/systray"
 )
@@ -58,6 +59,12 @@ var (
 	// as an app window. The login auto-start task passes --background → it
 	// starts quietly in the tray without stealing a window every boot.
 	flagBackground = flag.Bool("background", false, "Start in the tray without opening the dashboard window (used by the login auto-start task)")
+	// v2.9: the auto-updater relaunches with --after-update. A fresh in-place
+	// upgrade means the dashboard HTTP server can lag a beat behind process
+	// start; opening the app window immediately would race it and land the user
+	// in the tray with no window (the reported bug). This flag makes launch wait
+	// for the dashboard to actually serve before opening the window.
+	flagAfterUpdate = flag.Bool("after-update", false, "Relaunched by the auto-updater: wait for the dashboard to be ready, then open its window")
 )
 
 func main() {
@@ -163,7 +170,18 @@ func main() {
 	// v2.2: open the dashboard as an app window on launch, UNLESS we were
 	// started in the background (the login auto-start task). So: double-click
 	// the desktop icon → the window comes up; boot/login → quiet in the tray.
+	// v2.9: on an auto-update relaunch (--after-update), wait for the freshly
+	// upgraded dashboard to actually serve before opening the window — opening
+	// too early races the just-restarted HTTP server and lands the user in the
+	// tray with no dashboard (the reported post-update symptom).
 	if dash != nil && !*flagBackground {
+		if *flagAfterUpdate {
+			if waitForDashboardReady(dash.URL(), 24, 500*time.Millisecond) {
+				log.Printf("after-update: dashboard is serving — opening window")
+			} else {
+				log.Printf("after-update: dashboard not confirmed ready in time — opening window anyway")
+			}
+		}
 		openAppWindow(installDir, dash.URL())
 	}
 

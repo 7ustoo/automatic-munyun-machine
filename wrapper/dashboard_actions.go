@@ -76,8 +76,11 @@ func readBody(r *http.Request) map[string]string {
 // handleScrape triggers a one-shot daily batch — same as the tray's
 // "Run scrape now", reachable from the dashboard so the GUI is self-contained.
 func (d *dashboardServer) handleScrape(w http.ResponseWriter, r *http.Request) {
-	actionRunScrape(d.installDir)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	// v2.9: "watch": true → run with a visible on-screen browser window.
+	b := readBody(r)
+	watch := b["watch"] == "true" || b["watch"] == "1"
+	actionRunScrape(d.installDir, watch)
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "watching": watch})
 }
 
 // --- v2.1 control surface: job actions, settings, search terms ---
