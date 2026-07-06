@@ -400,6 +400,10 @@
   .update-banner .ub-actions { display: flex; align-items: center; gap: 14px; }
   .update-banner.updating { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.2), rgba(63,185,80,.1)); }
 
+  /* v3.0.1: scrape-complete banner — green success variant of the banner. */
+  .batch-banner { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.18), rgba(88,166,255,.10)); animation: viewin .2s var(--ease); }
+  .batch-banner .ub-badge { background: var(--green); }
+
   /* ---- Profiles -------------------------------------------------------------- */
   .prof-item {
     display: flex; align-items: center; justify-content: space-between;
@@ -811,6 +815,22 @@
         </div>
       </div>
 
+      <!-- v3.0.1: scrape-complete banner. Fired by the fresh-batch detector in
+           render() whenever lastBatch.generatedAt changes — so it announces
+           scrapes started ANYWHERE (7am scheduler, Telegram /scrape, the tray,
+           or this page), not just the dashboard's own button. Sticks around
+           until dismissed so a 7am batch still greets you at 9. -->
+      <div id="batch-banner" class="update-banner batch-banner hidden" role="status">
+        <div class="ub-main">
+          <span class="ub-badge">Done</span>
+          <span id="bb-text">Scrape complete.</span>
+        </div>
+        <div class="ub-actions">
+          <button class="primary" id="bb-view">View jobs</button>
+          <button class="ghost icon" id="bb-dismiss" aria-label="Dismiss"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
         <div class="stats">
@@ -1043,6 +1063,7 @@ const state = {
   applied: new Set(),  // idx marked applied this session (survives re-renders)
   whyOpen: new Set(),  // idx with the Why row expanded (survives re-renders)
   loadedOnce: false,
+  lastGen: null,       // v3.0.1: last seen lastBatch.generatedAt (null = no baseline yet)
 };
 
 // ---- v3.0 view router — hash-based so refresh keeps your place ----
@@ -1238,7 +1259,38 @@ function render(s) {
   }
 
   $("profile-big").textContent = s.profile?.active || "—";
+
+  // v3.0.1: fresh-batch detection. lastBatch.generatedAt rides the 5s status
+  // poll, so this catches scrapes started ANYWHERE — the 7am scheduler,
+  // Telegram /scrape, the tray menu, or this page — and auto-refreshes the
+  // list + raises the banner. The first tick only records a baseline so a
+  // plain page load doesn't celebrate an old batch.
+  const gen = s.lastBatch?.generatedAt || "";
+  if (state.lastGen === null) {
+    state.lastGen = gen;
+  } else if (gen && gen !== state.lastGen) {
+    state.lastGen = gen;
+    onFreshBatch(s.lastBatch);
+  }
 }
+
+// v3.0.1: a new batch just landed — refresh everything and announce it.
+let scrapeSafetyTimer = null;
+function onFreshBatch(lb) {
+  $("scrapebar").classList.remove("active");
+  clearTimeout(scrapeSafetyTimer);
+  loadBatch();
+  const what = lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
+  $("bb-text").textContent = `Scrape complete — ${what}${lb?.date ? ` for ${lb.date}` : ""}.`;
+  $("batch-banner").classList.remove("hidden");
+  toast(`Scrape complete — ${what}.`, "good");
+}
+$("bb-dismiss").addEventListener("click", () => $("batch-banner").classList.add("hidden"));
+$("bb-view").addEventListener("click", () => {
+  $("batch-banner").classList.add("hidden");
+  location.hash = "#jobs";
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 
 // ---- Ranked jobs (from /api/batch, refreshed on demand) ----
 async function loadBatch() {
@@ -1451,22 +1503,14 @@ $("scrape-btn").addEventListener("click", async () => {
     if (r.ok) {
       toast(watch
         ? "Scrape started — the browser window will appear so you can watch it search."
-        : "Scrape started — refreshing the list as jobs come in (1–2 min).", "good");
+        : "Scrape started — you'll get a banner here the moment it finishes (1–2 min).", "good");
+      // Completion is owned by the fresh-batch detector in render() — it
+      // auto-refreshes and raises the banner when generatedAt changes. The
+      // safety timer just stops the bar if the scrape dies without a batch
+      // (45 min matches the scheduled run's time budget).
       $("scrapebar").classList.add("active");
-      // Poll the batch so new results show up without a manual refresh; stop
-      // early once a fresh batch lands (generatedAt changes).
-      const before = state.batchMeta.generatedAt;
-      let tries = 0;
-      const iv = setInterval(async () => {
-        tries++;
-        await loadBatch();
-        const fresh = state.batchMeta.generatedAt && state.batchMeta.generatedAt !== before;
-        if (fresh || tries >= 12) {
-          clearInterval(iv);
-          $("scrapebar").classList.remove("active");
-          if (fresh) toast(`Fresh batch loaded — ${state.jobs.length} jobs.`, "good");
-        }
-      }, 12000);
+      clearTimeout(scrapeSafetyTimer);
+      scrapeSafetyTimer = setTimeout(() => $("scrapebar").classList.remove("active"), 45 * 60 * 1000);
     } else {
       toast("Could not start: " + (r.error || "error"), "bad");
     }
