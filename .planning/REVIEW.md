@@ -1,8 +1,10 @@
 # AMM v1.0 Code Review
 
+> **📌 HISTORICAL — mostly remediated (banner added 2026-07-06).** This review is of **v1.0.0**. The **9 HIGH + 7 MEDIUM** findings were closed in **v1.1.0** Phase 1 (see `CHANGELOG.md#[1.1.0]` "Fixed — Hardening"), and v2.0 was a further audit-remediation pass. Retained for the F-* finding IDs referenced elsewhere. It does **not** describe the current v2.9 codebase — a fresh review of current code should be run via `/gsd-code-review` before the next milestone.
+
 **Reviewed:** 2026-05-07
 **Scope:** Full repo, ~20 source files (Tier 1 deep, Tier 2/3 standard). Test files spot-checked.
-**Outcome:** 0 CRITICAL / 9 HIGH / 14 MEDIUM / 11 LOW findings.
+**Outcome:** 0 CRITICAL / 9 HIGH / 14 MEDIUM / 11 LOW findings. *(HIGH + most MEDIUM since closed — see banner.)*
 
 ## Summary
 

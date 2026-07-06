@@ -1,5 +1,7 @@
 # Codebase Concerns
 
+> **⚠️ STALE — v1.0.0 snapshot (banner added 2026-07-06).** Many concerns here were addressed across v1.1 (hardening) and v2.0 (audit remediation). Do not treat as the current defect list — run `/gsd-code-review` on current code and `/gsd-map-codebase` to regenerate. Current truth: `STATE.md` / `PROJECT.md`.
+
 **Analysis Date:** 2026-05-07
 **Repo state:** AMM v1.0.0 shipped; `v1.0` branch tip; preparing v1.1 (Mac/Linux + code signing)
 **Scope:** what is wrong with AMM today — strictly factual, file:line cited

@@ -1,7 +1,9 @@
 # AMM v1.1 — Requirements
 
+> **✅ SHIPPED & SUPERSEDED (banner added 2026-07-06).** Every REQ below was delivered in **v1.1.0** (2026-05-08); see `CHANGELOG.md#[1.1.0]` for the closing commits. Retained as a historical traceability artifact. AMM is now at **v2.9.0** — current truth lives in `STATE.md` / `PROJECT.md`.
+
 **Milestone:** v1.1 — Cross-platform + Hardened
-**Status:** scoped, pre-execution
+**Status:** shipped (was: scoped, pre-execution)
 **Source documents:** `.planning/REVIEW.md` (9 HIGH / 14 MEDIUM / 11 LOW), `.planning/codebase/CONCERNS.md` (10 categories), `.planning/codebase/QUALITY.md` (test gaps), `.planning/codebase/ARCHITECTURE.md` (Win32 coupling inventory), `.planning/codebase/STACK.md` (per-binary porting table)
 
 Each requirement traces to its source finding(s) so the verifier can confirm it shipped.

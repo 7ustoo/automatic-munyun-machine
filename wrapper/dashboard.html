@@ -3,74 +3,182 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="dark" />
 <!-- v2.1: per-process CSRF token, injected by the wrapper at serve time.
      The page sends it as X-AMM-Token on every state-changing POST. -->
 <meta name="amm-token" content="__AMM_TOKEN__" />
 <link rel="icon" type="image/png" href="/favicon.png" />
 <title>Automatic Munyun Machine</title>
 <style>
+  /* ==========================================================================
+     v3.0 design system — "AMM Console".
+     Dark-only, self-contained (no external fonts/CDNs — the page must work
+     fully offline). Everything hangs off these tokens.
+     ========================================================================== */
   :root {
-    --bg: #0d1117;
-    --panel: #161b22;
-    --panel-2: #1c2330;
-    --border: #2d3748;
-    --text: #e6edf3;
-    --muted: #8b949e;
+    --bg: #0a0e15;
+    --surface: #10151e;
+    --surface-2: #161d29;
+    --surface-3: #1d2634;
+    --border: #212b3b;
+    --border-2: #2e3b52;
+    --text: #e9eef6;
+    --text-2: #9aa7ba;
+    --text-3: #657189;
     --accent: #58a6ff;
+    --accent-2: #79b8ff;
+    --accent-dim: rgba(88,166,255,.13);
     --green: #3fb950;
-    --yellow: #d29922;
+    --green-dim: rgba(63,185,80,.14);
+    --yellow: #d9a62e;
+    --yellow-dim: rgba(217,166,46,.14);
     --red: #f85149;
+    --red-dim: rgba(248,81,73,.12);
     --gray: #6e7681;
+    --r-lg: 12px;
+    --r-md: 8px;
+    --r-sm: 6px;
+    --shadow-1: 0 1px 2px rgba(0,0,0,.35);
+    --shadow-2: 0 10px 32px rgba(0,0,0,.5);
+    --sidebar-w: 224px;
+    --topbar-h: 58px;
+    --ease: cubic-bezier(.2,.7,.3,1);
   }
   * { box-sizing: border-box; }
   html, body {
     margin: 0; padding: 0; min-height: 100vh;
     background: var(--bg); color: var(--text);
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-                 Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    font-family: "Segoe UI Variable Text", "Segoe UI", -apple-system, BlinkMacSystemFont,
+                 Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
     font-size: 14px; line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
-  header {
-    background: var(--panel);
+  svg.ic { width: 16px; height: 16px; flex: none; vertical-align: -3px;
+           fill: none; stroke: currentColor; stroke-width: 2;
+           stroke-linecap: round; stroke-linejoin: round; }
+  ::selection { background: rgba(88,166,255,.28); }
+  :focus { outline: none; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+
+  /* ---- App shell -------------------------------------------------------- */
+  #app { display: grid; grid-template-columns: var(--sidebar-w) 1fr; min-height: 100vh; }
+
+  #sidebar {
+    position: sticky; top: 0; height: 100vh;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column; padding: 14px 10px;
+    z-index: 20;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 4px 10px 16px; }
+  .brand img { width: 30px; height: 30px; border-radius: 7px; }
+  .brand-name { font-weight: 700; font-size: 14px; line-height: 1.2; letter-spacing: .01em; }
+  .brand-name span { display: block; color: var(--text-3); font-weight: 500; font-size: 11px; }
+
+  #nav { display: flex; flex-direction: column; gap: 2px; flex: 1; }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 10px; border-radius: var(--r-md);
+    color: var(--text-2); font-weight: 500; text-decoration: none;
+    border: 1px solid transparent;
+    transition: background .12s var(--ease), color .12s var(--ease);
+  }
+  .nav-item:hover { background: var(--surface-2); color: var(--text); text-decoration: none; }
+  .nav-item.on {
+    background: var(--accent-dim); color: var(--accent-2);
+    border-color: rgba(88,166,255,.22);
+  }
+  .nav-item .badge {
+    margin-left: auto; font-style: normal; font-size: 11px; font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--text-3); background: var(--surface-3);
+    border-radius: 999px; padding: 0 7px; line-height: 18px; min-width: 18px; text-align: center;
+  }
+  .nav-item.on .badge { color: var(--accent-2); background: rgba(88,166,255,.16); }
+  .nav-item .badge:empty { display: none; }
+
+  .side-foot {
+    border-top: 1px solid var(--border); padding: 12px 10px 2px;
+    color: var(--text-3); font-size: 12px;
+  }
+  .side-foot .side-version { font-variant-numeric: tabular-nums; }
+
+  /* ---- Topbar ------------------------------------------------------------ */
+  #shell-main { min-width: 0; display: flex; flex-direction: column; }
+  #topbar {
+    position: sticky; top: 0; z-index: 15;
+    height: var(--topbar-h);
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 0 24px;
+    background: rgba(10,14,21,.86); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
-    padding: 16px 24px;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 16px;
   }
-  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
-  header h1 small { color: var(--muted); font-weight: 400; margin-left: 6px; }
-  .banner {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 4px 10px; border-radius: 999px;
+  #view-title { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .01em; }
+  .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+
+  .status-chip, .profile-chip {
+    display: inline-flex; align-items: center; gap: 7px;
+    padding: 5px 11px; border-radius: 999px;
     font-size: 12px; font-weight: 600;
-    background: var(--panel-2); border: 1px solid var(--border);
+    background: var(--surface-2); border: 1px solid var(--border);
+    color: var(--text-2); white-space: nowrap;
   }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); }
+  .profile-chip svg.ic { width: 13px; height: 13px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); flex: none; }
   .dot.alive { background: var(--green); box-shadow: 0 0 0 3px rgba(63,185,80,.15); }
-  .dot.stale { background: var(--yellow); box-shadow: 0 0 0 3px rgba(210,153,34,.15); }
+  .dot.stale { background: var(--yellow); box-shadow: 0 0 0 3px rgba(217,166,46,.15); }
   .dot.dead  { background: var(--red);    box-shadow: 0 0 0 3px rgba(248,81,73,.15); }
 
-  main { max-width: 1100px; margin: 0 auto; padding: 24px; }
-  .grid {
-    display: grid; gap: 16px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    margin-bottom: 24px;
+  /* Watch toggle — a real checkbox under the hood (logic reads .checked). */
+  .watch-toggle {
+    display: inline-flex; align-items: center; gap: 7px; cursor: pointer; user-select: none;
+    padding: 5px 11px; border-radius: 999px; font-size: 12px; font-weight: 600;
+    background: var(--surface-2); border: 1px solid var(--border); color: var(--text-2);
+    transition: color .12s var(--ease), border-color .12s var(--ease);
   }
+  .watch-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .watch-toggle:has(input:checked) { color: var(--accent-2); border-color: rgba(88,166,255,.4); background: var(--accent-dim); }
+  .watch-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Scrape progress — indeterminate bar pinned under the topbar. */
+  #scrapebar { height: 2px; background: transparent; position: sticky; top: var(--topbar-h); z-index: 14; overflow: hidden; }
+  #scrapebar.active::before {
+    content: ""; display: block; height: 100%; width: 40%;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    animation: slide 1.2s linear infinite;
+  }
+  @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(350%); } }
+
+  /* ---- Content + views --------------------------------------------------- */
+  #content { flex: 1; width: 100%; max-width: 1180px; margin: 0 auto; padding: 22px 24px 48px; }
+  .view { display: none; }
+  .view.on { display: block; animation: viewin .18s var(--ease); }
+  @keyframes viewin { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+  /* ---- Cards ------------------------------------------------------------- */
   .card {
-    background: var(--panel); border: 1px solid var(--border);
-    border-radius: 8px; padding: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: 18px; box-shadow: var(--shadow-1);
   }
+  .card + .card { margin-top: 16px; }
   .card h2 {
-    margin: 0 0 12px; font-size: 12px; font-weight: 600;
-    letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 14px; font-size: 12px; font-weight: 650;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2);
+    display: flex; align-items: center; gap: 8px;
   }
-  .stat-row { display: flex; justify-content: space-between; padding: 4px 0; }
-  .stat-row .k { color: var(--muted); }
-  .stat-row .v { font-variant-numeric: tabular-nums; }
+  .card h2 .pill { margin-left: 2px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); }
+  .grid + .card, .card + .grid, .grid + .grid { margin-top: 16px; }
+
+  .stat-row { display: flex; justify-content: space-between; padding: 5px 0; gap: 12px; }
+  .stat-row .k { color: var(--text-2); }
+  .stat-row .v { font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
   .big {
-    font-size: 22px; font-weight: 600;
+    font-size: 20px; font-weight: 650;
     display: flex; align-items: center; gap: 10px; margin-bottom: 10px;
   }
   .big.alive { color: var(--green); }
@@ -78,87 +186,210 @@
   .big.dead  { color: var(--red); }
   .big.unknown { color: var(--gray); }
 
-  table {
-    width: 100%; border-collapse: collapse; font-size: 13px;
+  /* ---- Stat tiles (jobs view) — hero numbers, no chart junk. ------------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .tile {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--r-lg); padding: 14px 16px; box-shadow: var(--shadow-1);
   }
+  .tile .t-label {
+    font-size: 11px; font-weight: 650; letter-spacing: .06em;
+    text-transform: uppercase; color: var(--text-3); margin-bottom: 6px;
+  }
+  .tile .t-value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.15; }
+  .tile .t-sub { font-size: 12px; color: var(--text-3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+
+  /* ---- Buttons ------------------------------------------------------------ */
+  button, .btn {
+    font: inherit; cursor: pointer; color: var(--text);
+    background: var(--surface-2); border: 1px solid var(--border-2);
+    border-radius: var(--r-md); padding: 7px 14px; font-weight: 600;
+    display: inline-flex; align-items: center; gap: 7px; justify-content: center;
+    text-decoration: none; white-space: nowrap;
+    transition: border-color .12s var(--ease), background .12s var(--ease), transform .06s var(--ease);
+  }
+  button:hover:not(:disabled), .btn:hover { border-color: var(--accent); text-decoration: none; color: var(--text); }
+  button:active:not(:disabled), .btn:active { transform: translateY(1px); }
+  button:disabled { opacity: .45; cursor: default; }
+  button.primary, .btn.primary { background: var(--accent); border-color: var(--accent); color: #06121f; }
+  button.primary:hover:not(:disabled), .btn.primary:hover { background: var(--accent-2); border-color: var(--accent-2); color: #06121f; }
+  button.danger { background: transparent; border-color: rgba(248,81,73,.45); color: var(--red); }
+  button.danger:hover:not(:disabled) { border-color: var(--red); background: var(--red-dim); }
+  button.sm, .btn.sm { padding: 4px 11px; font-size: 12.5px; border-radius: var(--r-sm); gap: 6px; }
+  button.icon { padding: 5px 8px; }
+  button.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+  button.ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-2); color: var(--text); }
+
+  /* ---- Inputs ------------------------------------------------------------- */
+  input[type=text], input[type=file], select {
+    font: inherit; color: var(--text); background: var(--bg);
+    border: 1px solid var(--border-2); border-radius: var(--r-md); padding: 7px 10px;
+    transition: border-color .12s var(--ease);
+  }
+  input[type=text] { width: 100%; }
+  input[type=text]:focus, select:focus { outline: none; border-color: var(--accent); }
+  input[type=text]::placeholder { color: var(--text-3); }
+  input.num, select { width: 150px; }
+  input[type=file] { padding: 6px 8px; font-size: 12.5px; color: var(--text-2); max-width: 100%; }
+  input[type=file]::file-selector-button {
+    font: inherit; font-size: 12.5px; font-weight: 600; color: var(--text);
+    background: var(--surface-2); border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    padding: 3px 10px; margin-right: 10px; cursor: pointer;
+  }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted-sm { color: var(--text-2); font-size: 12.5px; margin: 6px 0; }
+  .hint { color: var(--text-3); font-size: 12px; margin-top: 8px; line-height: 1.55; }
+  .step { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .hidden { display: none !important; }
+  .note { font-size: 12.5px; margin-top: 8px; }
+  .note.ok { color: var(--green); }
+  .note.bad { color: var(--red); }
+  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; }
+  .set-row label { color: var(--text-2); }
+  .set-row + .set-row { border-top: 1px solid var(--border); }
+
+  .pill {
+    display: inline-block; padding: 1px 9px; border-radius: 999px;
+    font-size: 11px; font-weight: 600; background: var(--surface-3); color: var(--text-2);
+    border: 1px solid var(--border);
+  }
+  .pill.accent { color: var(--accent-2); background: var(--accent-dim); border-color: rgba(88,166,255,.25); }
+
+  /* ---- Chips (search terms / suggestions) --------------------------------- */
+  .terms { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 6px;
+    background: var(--surface-2); border: 1px solid var(--border-2);
+    border-radius: 999px; padding: 4px 7px 4px 12px; font-size: 13px;
+    transition: border-color .12s var(--ease), opacity .12s var(--ease);
+  }
+  .chip:hover { border-color: var(--accent); }
+  .chip button {
+    border: none; background: none; color: var(--text-3); padding: 0 3px;
+    font-size: 15px; line-height: 1; cursor: pointer;
+  }
+  .chip button:hover { color: var(--red); background: none; border: none; }
+  .terms .chip[data-sterm] { cursor: pointer; padding: 4px 12px; user-select: none; }
+  .terms .chip[data-sterm].off { opacity: .38; text-decoration: line-through; }
+  .terms .chip[data-sterm]:not(.off) { border-color: rgba(88,166,255,.4); background: var(--accent-dim); }
+
+  /* ---- Jobs toolbar -------------------------------------------------------- */
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    padding-bottom: 14px; margin-bottom: 4px; border-bottom: 1px solid var(--border);
+  }
+  .searchbox { position: relative; flex: 1 1 220px; min-width: 180px; }
+  .searchbox svg.ic { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-3); width: 14px; height: 14px; }
+  .searchbox input { padding-left: 32px; }
+  .seg { display: inline-flex; border: 1px solid var(--border-2); border-radius: var(--r-md); overflow: hidden; }
+  .seg button {
+    border: none; border-radius: 0; background: transparent; color: var(--text-2);
+    padding: 5px 12px; font-size: 12.5px; font-weight: 600;
+  }
+  .seg button + button { border-left: 1px solid var(--border-2); }
+  .seg button:hover:not(.on) { color: var(--text); background: var(--surface-2); }
+  .seg button.on { background: var(--accent-dim); color: var(--accent-2); }
+  select.slim { width: auto; padding: 5px 9px; font-size: 12.5px; font-weight: 600; color: var(--text-2); background: var(--surface); }
+
+  details.menu { position: relative; }
+  details.menu summary { list-style: none; }
+  details.menu summary::-webkit-details-marker { display: none; }
+  details.menu .menu-panel {
+    position: absolute; right: 0; top: calc(100% + 6px); z-index: 30;
+    background: var(--surface-2); border: 1px solid var(--border-2);
+    border-radius: var(--r-md); box-shadow: var(--shadow-2);
+    padding: 6px; min-width: 220px; display: flex; flex-direction: column; gap: 2px;
+  }
+  details.menu .menu-panel a {
+    display: flex; align-items: center; gap: 9px; padding: 7px 10px;
+    border-radius: var(--r-sm); color: var(--text); font-size: 13px; text-decoration: none;
+  }
+  details.menu .menu-panel a:hover { background: var(--surface-3); }
+  details.menu .menu-panel a small { color: var(--text-3); margin-left: auto; padding-left: 12px; }
+
+  /* ---- Jobs table ----------------------------------------------------------- */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td {
-    text-align: left; padding: 8px 10px;
+    text-align: left; padding: 9px 10px;
     border-bottom: 1px solid var(--border);
     vertical-align: middle;
   }
   th {
     font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--muted); font-weight: 600;
+    letter-spacing: 0.05em; color: var(--text-3); font-weight: 650;
+    position: sticky; top: 0; background: var(--surface); z-index: 2;
   }
+  tbody tr { transition: background .1s var(--ease); }
+  tbody tr.job-row:hover { background: var(--surface-2); }
   tbody tr:last-child td { border-bottom: none; }
-  td.match { font-variant-numeric: tabular-nums; font-weight: 600; }
-  td.match.hi { color: var(--green); }
-  td.match.md { color: var(--yellow); }
-  td.match.lo { color: var(--muted); }
-  td.idx { color: var(--muted); width: 36px; }
-  td.title { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  td.company { color: var(--muted); max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  td.idx { color: var(--text-3); width: 40px; font-variant-numeric: tabular-nums; }
+  td.jobcell { max-width: 380px; }
+  .j-title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 380px; }
+  .j-company { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 380px; }
+  td.yoe { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.src { max-width: 130px; }
+  td.src .pill { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: inline-block; vertical-align: middle; }
   td.actions { white-space: nowrap; text-align: right; }
-  .pill {
-    display: inline-block; padding: 1px 8px; border-radius: 999px;
-    font-size: 11px; background: var(--panel-2); color: var(--muted);
-    border: 1px solid var(--border);
+  td.actions button, td.actions .btn { margin-left: 5px; }
+
+  /* Match meter — thin single-hue bar; the % label stays in ink (never
+     color-alone). Band color is status-like: strong / medium / weak. */
+  td.match { white-space: nowrap; width: 120px; }
+  .meter {
+    display: inline-block; vertical-align: middle;
+    width: 62px; height: 4px; border-radius: 4px; background: var(--surface-3);
+    margin-right: 9px; overflow: hidden;
   }
-  .empty { color: var(--muted); padding: 16px 4px; text-align: center; }
+  .meter i {
+    display: block; height: 100%; border-radius: 4px;
+    background: var(--gray); transition: width .3s var(--ease);
+  }
+  .meter i.hi { background: var(--green); }
+  .meter i.md { background: var(--yellow); }
+  .meter i.lo { background: var(--gray); }
+  .meter-num { font-variant-numeric: tabular-nums; font-weight: 650; }
+
+  tr.applied-row { opacity: .5; }
+  tr.applied-row .j-title { text-decoration: line-through; text-decoration-color: var(--text-3); }
+
+  tr.why-row td {
+    background: var(--surface-2); color: var(--text-2); font-size: 12px; padding: 10px 14px;
+    box-shadow: inset 0 1px 0 var(--border);
+  }
+  .kw { display: inline-block; background: var(--bg); border: 1px solid var(--border-2);
+        border-radius: 4px; padding: 1px 7px; margin: 2px; font-size: 11px; color: var(--text); }
+
+  .table-foot { padding: 10px 4px 0; color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .table-foot:empty { display: none; }
+
+  .empty { color: var(--text-2); padding: 44px 16px; text-align: center; }
+  .empty .e-icon { font-size: 30px; margin-bottom: 10px; opacity: .8; }
+  .empty .e-title { font-weight: 650; font-size: 15px; color: var(--text); margin-bottom: 5px; }
+  .empty .e-sub { font-size: 13px; max-width: 420px; margin: 0 auto 16px; }
+
+  /* Skeleton shimmer for the first batch load. */
+  .skel-row { display: flex; gap: 14px; align-items: center; padding: 12px 10px; border-bottom: 1px solid var(--border); }
+  .skel { background: var(--surface-3); border-radius: 4px; height: 12px; position: relative; overflow: hidden; }
+  .skel::after {
+    content: ""; position: absolute; inset: 0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.05), transparent);
+    animation: shimmer 1.4s infinite;
+  }
+  @keyframes shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
+
+  /* ---- Error + update banners ---------------------------------------------- */
   .err {
-    color: var(--red); background: rgba(248,81,73,.08);
-    border: 1px solid rgba(248,81,73,.3); border-radius: 6px;
+    color: var(--red); background: var(--red-dim);
+    border: 1px solid rgba(248,81,73,.35); border-radius: var(--r-md);
     padding: 10px 14px; margin-bottom: 16px;
+    display: flex; align-items: center; gap: 9px;
   }
-  footer {
-    color: var(--muted); font-size: 12px; padding: 16px 24px;
-    border-top: 1px solid var(--border); text-align: center;
-  }
-  footer code { background: var(--panel); padding: 1px 6px; border-radius: 4px; }
-
-  /* v2.1: controls — buttons, inputs, the Telegram setup flow, toasts. */
-  .card h2 .right { float: right; text-transform: none; letter-spacing: 0; }
-  button {
-    font: inherit; cursor: pointer; color: var(--text);
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 6px; padding: 7px 14px; font-weight: 600;
-  }
-  button:hover:not(:disabled) { border-color: var(--accent); }
-  button:disabled { opacity: .5; cursor: default; }
-  button.primary { background: var(--accent); border-color: var(--accent); color: #06121f; }
-  button.danger { background: transparent; border-color: rgba(248,81,73,.5); color: var(--red); }
-  button.sm { padding: 4px 10px; font-size: 12px; }
-  input[type=text] {
-    font: inherit; color: var(--text); background: var(--bg);
-    border: 1px solid var(--border); border-radius: 6px; padding: 7px 10px;
-    width: 100%; margin: 4px 0;
-  }
-  input[type=text]:focus { outline: none; border-color: var(--accent); }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .watch-label { font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: 4px; vertical-align: middle; }
-  .watch-label input { vertical-align: middle; }
-  .muted-sm { color: var(--muted); font-size: 12px; margin: 6px 0; }
-  .step { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
-  .hidden { display: none !important; }
-  .note { font-size: 12px; margin-top: 6px; }
-  .note.ok { color: var(--green); }
-  .note.bad { color: var(--red); }
-  #toast {
-    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 8px; padding: 10px 18px; box-shadow: 0 6px 24px rgba(0,0,0,.4);
-    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw;
-  }
-  #toast.show { opacity: 1; }
-  #toast.bad { border-color: rgba(248,81,73,.5); color: var(--red); }
-  #toast.good { border-color: rgba(63,185,80,.5); color: var(--green); }
-
-  /* v2.5: update banner — prominent, hard to miss, not dismissible. */
   .update-banner {
     display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    background: linear-gradient(90deg, rgba(88,166,255,.20), rgba(63,185,80,.14));
-    border: 1px solid var(--accent); border-radius: 10px;
-    padding: 14px 18px; margin-bottom: 20px; flex-wrap: wrap;
+    background: linear-gradient(90deg, rgba(88,166,255,.18), rgba(63,185,80,.12));
+    border: 1px solid var(--accent); border-radius: var(--r-lg);
+    padding: 13px 18px; margin-bottom: 18px; flex-wrap: wrap;
   }
   .update-banner .ub-main { font-weight: 600; }
   .update-banner .ub-badge {
@@ -167,122 +398,197 @@
     padding: 2px 9px; border-radius: 999px; margin-right: 10px;
   }
   .update-banner .ub-actions { display: flex; align-items: center; gap: 14px; }
-  .update-banner.updating { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.20), rgba(63,185,80,.10)); }
+  .update-banner.updating { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.2), rgba(63,185,80,.1)); }
 
-  /* v2.7: first-run setup overlay. Full-viewport panel that hides the normal
-     dashboard while config.json is missing. Fades out once setup finishes and
-     the wrapper's tray-poll picks up the freshly-written config. */
+  /* ---- Profiles -------------------------------------------------------------- */
+  .prof-item {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 8px; padding: 10px 12px; border: 1px solid var(--border-2);
+    border-radius: var(--r-md); margin-bottom: 8px; background: var(--surface-2);
+    transition: border-color .12s var(--ease);
+  }
+  .prof-item.active { border-color: rgba(88,166,255,.5); background: var(--accent-dim); }
+  .prof-name { font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
+  .prof-name small { color: var(--text-3); font-weight: 400; }
+  .prof-actions { display: flex; gap: 5px; flex: none; }
+
+  /* ---- Toast ------------------------------------------------------------------ */
+  #toast {
+    position: fixed; right: 22px; bottom: 22px; z-index: 200;
+    display: flex; align-items: flex-start; gap: 10px;
+    background: var(--surface-2); border: 1px solid var(--border-2); border-left-width: 3px;
+    border-radius: var(--r-md); padding: 11px 16px; box-shadow: var(--shadow-2);
+    opacity: 0; transform: translateY(8px);
+    transition: opacity .18s var(--ease), transform .18s var(--ease);
+    pointer-events: none; max-width: min(420px, calc(100vw - 44px)); font-size: 13px;
+  }
+  #toast.show { opacity: 1; transform: none; }
+  #toast.bad { border-left-color: var(--red); }
+  #toast.bad .t-ic { color: var(--red); }
+  #toast.good { border-left-color: var(--green); }
+  #toast.good .t-ic { color: var(--green); }
+  #toast .t-ic { flex: none; margin-top: 1px; }
+
+  /* ---- Modal ------------------------------------------------------------------- */
+  #modal-overlay {
+    position: fixed; inset: 0; z-index: 150;
+    background: rgba(4,7,12,.62); backdrop-filter: blur(2px);
+    display: flex; align-items: center; justify-content: center; padding: 20px;
+    animation: fadein .14s var(--ease);
+  }
+  @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  #modal {
+    background: var(--surface); border: 1px solid var(--border-2);
+    border-radius: var(--r-lg); box-shadow: var(--shadow-2);
+    width: 100%; max-width: 440px; padding: 22px;
+    animation: viewin .16s var(--ease);
+  }
+  #modal h3 { margin: 0 0 8px; font-size: 15px; font-weight: 650; }
+  #modal .m-body { color: var(--text-2); font-size: 13px; line-height: 1.6; white-space: pre-line; }
+  #modal input[type=text] { margin-top: 12px; }
+  #modal .m-actions { display: flex; justify-content: flex-end; gap: 9px; margin-top: 20px; }
+
+  /* ---- Footer -------------------------------------------------------------------- */
+  footer { color: var(--text-3); font-size: 12px; padding: 14px 24px 20px; text-align: center; }
+  footer code { background: var(--surface); padding: 1px 6px; border-radius: 4px; }
+
+  /* ==========================================================================
+     v2.7 first-run setup overlay — v3.0 restyle, same wiring & element IDs.
+     Full-viewport panel that hides the app shell while config.json is missing.
+     ========================================================================== */
   #setup-overlay {
     position: fixed; inset: 0; z-index: 100; overflow-y: auto;
-    background: var(--bg); padding: 40px 20px;
+    background:
+      radial-gradient(1000px 500px at 50% -10%, rgba(88,166,255,.09), transparent 60%),
+      var(--bg);
+    padding: 46px 20px;
   }
   #setup-overlay.hidden { display: none !important; }
   .setup-container { max-width: 720px; margin: 0 auto; }
-  .setup-header { text-align: center; margin-bottom: 32px; }
-  .setup-header h1 { margin: 0 0 6px; font-size: 26px; font-weight: 700; }
-  .setup-header .sub { color: var(--muted); font-size: 14px; }
-  .setup-progress {
-    display: flex; gap: 10px; justify-content: center; margin-top: 20px;
+  .setup-header { text-align: center; margin-bottom: 30px; }
+  .setup-header img { width: 52px; height: 52px; border-radius: 12px; margin-bottom: 14px; box-shadow: var(--shadow-2); }
+  .setup-header h1 { margin: 0 0 6px; font-size: 25px; font-weight: 700; letter-spacing: -.01em; }
+  .setup-header .sub { color: var(--text-2); font-size: 14px; }
+  .setup-progress { display: flex; justify-content: center; margin-top: 26px; }
+  .pstep { display: flex; flex-direction: column; align-items: center; gap: 7px; position: relative; width: 86px; }
+  .pstep:not(:first-child)::before {
+    content: ""; position: absolute; top: 11px; right: calc(50% + 15px); width: calc(100% - 30px);
+    height: 2px; background: var(--border-2); border-radius: 2px;
   }
+  .pstep:has(.pdot.done)::before, .pstep:has(.pdot.current)::before { background: var(--accent); }
   .setup-progress .pdot {
-    width: 10px; height: 10px; border-radius: 50%;
-    background: var(--panel-2); border: 1px solid var(--border);
+    width: 22px; height: 22px; border-radius: 50%; z-index: 1;
+    background: var(--surface-2); border: 2px solid var(--border-2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: var(--text-3);
+    transition: background .15s var(--ease), border-color .15s var(--ease);
   }
-  .setup-progress .pdot.done { background: var(--green); border-color: var(--green); }
-  .setup-progress .pdot.current { background: var(--accent); border-color: var(--accent);
-                                   box-shadow: 0 0 0 3px rgba(88,166,255,.20); }
+  .setup-progress .pdot::after { content: attr(data-pstep); }
+  .setup-progress .pdot.done { background: var(--green); border-color: var(--green); color: #06121f; }
+  .setup-progress .pdot.done::after { content: "✓"; }
+  .setup-progress .pdot.current {
+    background: var(--accent); border-color: var(--accent); color: #06121f;
+    box-shadow: 0 0 0 4px rgba(88,166,255,.2);
+  }
+  .plabel { font-size: 11px; font-weight: 600; color: var(--text-3); }
+  .pstep:has(.pdot.current) .plabel { color: var(--accent-2); }
+  .pstep:has(.pdot.done) .plabel { color: var(--text-2); }
+
   .setup-step { display: none; }
-  .setup-step.active { display: block; }
-  .setup-step .card { padding: 24px; }
+  .setup-step.active { display: block; animation: viewin .18s var(--ease); }
+  .setup-step .card { padding: 26px; }
   .setup-step h2 {
-    margin: 0 0 16px; font-size: 12px; font-weight: 600;
-    letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 16px; font-size: 12px; font-weight: 650;
+    letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2);
   }
-  .setup-step .lead { font-size: 16px; font-weight: 600; margin: 0 0 8px; }
-  .setup-step .desc { color: var(--muted); font-size: 13px; margin: 0 0 16px; }
-  .setup-basics-grid {
-    display: grid; grid-template-columns: 1fr 1fr; gap: 12px 20px;
-  }
+  .setup-step .lead { font-size: 16px; font-weight: 650; margin: 0 0 8px; }
+  .setup-step .desc { color: var(--text-2); font-size: 13px; margin: 0 0 16px; line-height: 1.6; }
+  .setup-basics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 20px; }
   .setup-basics-grid .full { grid-column: 1 / -1; }
-  .setup-basics-grid label {
-    display: block; color: var(--muted); font-size: 12px; margin-bottom: 4px;
-  }
-  .setup-basics-grid input, .setup-basics-grid select {
-    width: 100%;
-  }
-  #setup-city-note { font-size: 12px; margin-top: 4px; }
+  .setup-basics-grid label { display: block; color: var(--text-2); font-size: 12px; margin-bottom: 5px; font-weight: 600; }
+  .setup-basics-grid input, .setup-basics-grid select { width: 100%; }
+  #setup-city-note { font-size: 12px; margin-top: 5px; }
   #setup-city-note.ok { color: var(--green); }
   #setup-city-note.bad { color: var(--red); }
-  .setup-nav {
-    display: flex; justify-content: space-between; gap: 12px;
-    margin-top: 20px;
-  }
+  .setup-nav { display: flex; justify-content: space-between; gap: 12px; margin-top: 20px; }
   #setup-back:disabled { visibility: hidden; }
   .setup-hcafe-state {
-    padding: 16px; border-radius: 8px; background: var(--panel-2);
-    border: 1px solid var(--border); font-size: 14px; margin-top: 12px;
+    padding: 16px; border-radius: var(--r-md); background: var(--surface-2);
+    border: 1px solid var(--border-2); font-size: 14px; margin-top: 14px; line-height: 1.6;
   }
   .setup-hcafe-state.running { border-color: var(--yellow); }
   .setup-hcafe-state.done { border-color: var(--green); color: var(--green); }
   .setup-hcafe-state.err { border-color: var(--red); color: var(--red); }
   .setup-step .terms { margin-top: 12px; }
 
-  /* v2.6: profiles panel — a row per persona with inline actions. */
-  .prof-item {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 8px; padding: 8px 10px; border: 1px solid var(--border);
-    border-radius: 6px; margin-bottom: 6px; background: var(--panel-2);
+  /* ---- Responsive -------------------------------------------------------------- */
+  @media (max-width: 1060px) {
+    td.src { display: none; }
+    th.src { display: none; }
   }
-  .prof-item.active { border-color: var(--accent); }
-  .prof-name { font-weight: 600; }
-  .prof-name small { color: var(--muted); font-weight: 400; margin-left: 8px; }
-  .prof-actions { display: flex; gap: 4px; }
-
-  /* v2.1: settings + search terms + job-action UI */
-  .grid.two { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
-  .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; }
-  .set-row label { color: var(--muted); }
-  input.num, select {
-    font: inherit; color: var(--text); background: var(--bg);
-    border: 1px solid var(--border); border-radius: 6px; padding: 6px 9px; width: 120px;
+  @media (max-width: 900px) {
+    :root { --sidebar-w: 62px; }
+    .brand-name, .nav-item span:not(.badge), .side-foot { display: none; }
+    .nav-item { justify-content: center; padding: 10px; }
+    .nav-item .badge { display: none; }
+    .brand { justify-content: center; padding: 4px 0 14px; }
+    #topbar { padding: 0 14px; }
+    #content { padding: 16px 14px 40px; }
+    .watch-toggle span { display: none; }
   }
-  input.num:focus, select:focus { outline: none; border-color: var(--accent); }
-  .terms { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 12px; }
-  .chip {
-    display: inline-flex; align-items: center; gap: 6px;
-    background: var(--panel-2); border: 1px solid var(--border);
-    border-radius: 999px; padding: 3px 6px 3px 11px; font-size: 13px;
+  @media (max-width: 720px) {
+    td.yoe, th.yoe { display: none; }
+    #view-title { display: none; }
+    .setup-basics-grid { grid-template-columns: 1fr; }
+    .plabel { display: none; }
+    .pstep { width: 52px; }
   }
-  .chip button {
-    border: none; background: none; color: var(--muted); padding: 0 2px;
-    font-size: 15px; line-height: 1; cursor: pointer;
-  }
-  .chip button:hover { color: var(--red); }
-  /* v2.5: resume-suggestion chips toggle selected/deselected on click. */
-  .terms .chip[data-sterm] { cursor: pointer; padding: 3px 11px; user-select: none; }
-  .terms .chip[data-sterm].off { opacity: .4; text-decoration: line-through; }
-  td.actions button { margin-left: 4px; }
-  a.btnlink { text-decoration: none; }
-  tr.why-row td { background: var(--panel-2); color: var(--muted); font-size: 12px; padding: 8px 12px; }
-  .kw { display: inline-block; background: var(--bg); border: 1px solid var(--border);
-        border-radius: 4px; padding: 1px 6px; margin: 2px; font-size: 11px; }
 </style>
 </head>
 <body>
+
+<!-- Inline icon set (feather-style, stroke = currentColor). Self-contained:
+     no CDN, works fully offline. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-briefcase" viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></symbol>
+    <symbol id="i-users" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></symbol>
+    <symbol id="i-activity" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-zap" viewBox="0 0 24 24"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><polyline points="6 9 12 15 18 9"/></symbol>
+    <symbol id="i-external" viewBox="0 0 24 24"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></symbol>
+    <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+    <symbol id="i-edit" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></symbol>
+    <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/></symbol>
+  </defs>
+</svg>
 
 <!-- v2.7: first-run setup panel. Overlays everything while status.needsSetup
      is true; hidden once config.json is written and the client refreshes. -->
 <div id="setup-overlay" class="hidden">
   <div class="setup-container">
     <div class="setup-header">
+      <img src="/favicon.png" alt="" />
       <h1>Welcome to Automatic Munyun Machine</h1>
       <div class="sub">A five-step setup — takes about two minutes.</div>
       <div class="setup-progress">
-        <span class="pdot" data-pstep="1"></span>
-        <span class="pdot" data-pstep="2"></span>
-        <span class="pdot" data-pstep="3"></span>
-        <span class="pdot" data-pstep="4"></span>
-        <span class="pdot" data-pstep="5"></span>
+        <div class="pstep"><span class="pdot" data-pstep="1"></span><span class="plabel">Resume</span></div>
+        <div class="pstep"><span class="pdot" data-pstep="2"></span><span class="plabel">Basics</span></div>
+        <div class="pstep"><span class="pdot" data-pstep="3"></span><span class="plabel">Job feed</span></div>
+        <div class="pstep"><span class="pdot" data-pstep="4"></span><span class="plabel">Telegram</span></div>
+        <div class="pstep"><span class="pdot" data-pstep="5"></span><span class="plabel">Finish</span></div>
       </div>
     </div>
 
@@ -396,7 +702,7 @@
         <div class="desc">
           AMM's main UI is this dashboard. Telegram is a bonus — it pushes each morning's ranked
           list to your phone so you can skim over coffee. You can connect it now or from the
-          Telegram card after setup.
+          System page after setup.
         </div>
         <div class="row" style="margin-top:8px">
           <button class="sm primary" id="setup-tg-connect">Connect Telegram now</button>
@@ -407,7 +713,7 @@
           <div class="step">
             <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token:</div>
             <input type="text" id="setup-tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
-            <button class="sm primary" id="setup-tg-validate">Validate token</button>
+            <button class="sm primary" id="setup-tg-validate" style="margin-top:8px">Validate token</button>
             <div class="note" id="setup-tg-vnote"></div>
           </div>
           <div class="step hidden" id="setup-tg-chatstep">
@@ -435,7 +741,7 @@
         <div class="desc">
           Clicking Finish saves your settings and schedules the daily scrape. AMM starts running
           in your system tray; the dashboard will refresh into its normal view. Your first batch
-          is one click away — the <b>Scrape now</b> button on the main dashboard.
+          is one click away — the <b>Scrape now</b> button at the top of the dashboard.
         </div>
         <button class="primary" id="setup-finish-btn">✓ Finish setup</button>
         <div class="note" id="setup-finish-note"></div>
@@ -449,166 +755,251 @@
   </div>
 </div>
 
-<header>
-  <h1>Automatic Munyun Machine <small id="version"></small></h1>
-  <span class="banner"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
-</header>
-
-<main>
-  <div id="err" class="err" style="display:none"></div>
-
-  <!-- v2.5: forced-feel update banner. Appears only when a newer release
-       exists; auto-checked on load + every 30 min. One click does the
-       silent download-install-relaunch. -->
-  <div id="update-banner" class="update-banner hidden">
-    <div class="ub-main">
-      <span class="ub-badge">Update</span>
-      <span id="ub-text">A new version of Automatic Munyun Machine is available.</span>
+<!-- ==========================================================================
+     v3.0 app shell: sidebar navigation + topbar + hash-routed views.
+     ========================================================================== -->
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <img src="/favicon.png" alt="" />
+      <div class="brand-name">Munyun<span>Machine</span></div>
     </div>
-    <div class="ub-actions">
-      <a id="ub-notes" href="#" target="_blank" rel="noopener" class="hidden">What's new</a>
-      <button class="primary" id="ub-update">Update now</button>
+    <nav id="nav">
+      <a class="nav-item on" href="#jobs" data-view="jobs"><svg class="ic"><use href="#i-briefcase"/></svg><span>Jobs</span><em class="badge" id="nav-jobs-badge"></em></a>
+      <a class="nav-item" href="#searches" data-view="searches"><svg class="ic"><use href="#i-search"/></svg><span>Searches</span><em class="badge" id="nav-terms-badge"></em></a>
+      <a class="nav-item" href="#resume" data-view="resume"><svg class="ic"><use href="#i-file"/></svg><span>Resume</span></a>
+      <a class="nav-item" href="#profiles" data-view="profiles"><svg class="ic"><use href="#i-users"/></svg><span>Profiles</span></a>
+      <a class="nav-item" href="#system" data-view="system"><svg class="ic"><use href="#i-activity"/></svg><span>System</span></a>
+      <a class="nav-item" href="#settings" data-view="settings"><svg class="ic"><use href="#i-sliders"/></svg><span>Settings</span></a>
+    </nav>
+    <div class="side-foot">
+      <div class="side-version" id="version">—</div>
+      <div>Local · private</div>
     </div>
-  </div>
+  </aside>
 
-  <div class="grid">
-    <div class="card">
-      <h2>Bot</h2>
-      <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
-      <div class="stat-row"><span class="k">PID</span><span class="v" id="bot-pid">—</span></div>
-      <div class="stat-row"><span class="k">Uptime</span><span class="v" id="bot-uptime">—</span></div>
-      <div class="stat-row"><span class="k">Last heartbeat</span><span class="v" id="bot-hb">—</span></div>
-      <div class="stat-row"><span class="k">Bot version</span><span class="v" id="bot-version">—</span></div>
-    </div>
-
-    <div class="card">
-      <h2>Telegram <span class="pill right" id="tg-pill">optional</span></h2>
-      <div class="big" id="tg-big"><span class="dot" id="tg-dot"></span><span id="tg-state">—</span></div>
-
-      <!-- ENABLED view -->
-      <div id="tg-on" class="hidden">
-        <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
-        <div class="muted-sm">Batches are pushed to your phone. You apply here on the desktop either way.</div>
-        <button class="danger sm" id="tg-disable">Disable Telegram</button>
+  <div id="shell-main">
+    <header id="topbar">
+      <h1 id="view-title">Ranked jobs</h1>
+      <div class="top-actions">
+        <span class="profile-chip" id="top-profile" title="Active profile — manage on the Profiles page">
+          <svg class="ic"><use href="#i-users"/></svg><span id="profile-big">—</span>
+        </span>
+        <span class="status-chip"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
+        <label class="watch-toggle" title="Show the browser window so you can watch it search hiring.cafe">
+          <input type="checkbox" id="watch-scrape" /><svg class="ic"><use href="#i-eye"/></svg><span>Watch</span>
+        </label>
+        <button class="primary" id="scrape-btn"><svg class="ic"><use href="#i-zap"/></svg><span>Scrape now</span></button>
       </div>
+    </header>
+    <div id="scrapebar"></div>
 
-      <!-- DISABLED / setup view -->
-      <div id="tg-off">
-        <div class="muted-sm">Off — the dashboard is your control surface. Connect a bot only if you also want batches on your phone.</div>
-        <button class="sm" id="tg-setup-start">Set up Telegram…</button>
+    <main id="content">
+      <div id="err" class="err" style="display:none"></div>
 
-        <div id="tg-setup" class="hidden">
-          <div class="step">
-            <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token it gives you:</div>
-            <input type="text" id="tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
-            <button class="sm primary" id="tg-validate">Validate token</button>
-            <div class="note" id="tg-validate-note"></div>
-          </div>
-          <div class="step hidden" id="tg-step-chat">
-            <div class="muted-sm">2. Open your new bot in Telegram and send it any message, then:</div>
-            <div class="row">
-              <button class="sm primary" id="tg-detect">Detect my chat</button>
-              <span class="muted-sm">or paste your chat id</span>
-              <input type="text" id="tg-chat" placeholder="chat id" style="width:140px" autocomplete="off" />
-            </div>
-            <div class="note" id="tg-detect-note"></div>
-          </div>
-          <div class="step hidden" id="tg-step-save">
-            <button class="sm primary" id="tg-save">Save &amp; enable</button>
-            <button class="sm" id="tg-cancel">Cancel</button>
-            <div class="note" id="tg-save-note"></div>
-          </div>
+      <!-- v2.5: forced-feel update banner. Appears only when a newer release
+           exists; auto-checked on load + every 30 min. One click does the
+           silent download-install-relaunch. -->
+      <div id="update-banner" class="update-banner hidden">
+        <div class="ub-main">
+          <span class="ub-badge">Update</span>
+          <span id="ub-text">A new version of Automatic Munyun Machine is available.</span>
+        </div>
+        <div class="ub-actions">
+          <a id="ub-notes" href="#" target="_blank" rel="noopener" class="hidden">What's new</a>
+          <button class="primary" id="ub-update">Update now</button>
         </div>
       </div>
-    </div>
 
-    <div class="card">
-      <h2>Profiles <span class="pill right" id="prof-count">—</span></h2>
-      <div class="big" id="profile-big">—</div>
-      <div id="prof-list"></div>
-      <div class="row" style="margin-top:10px">
-        <input type="text" id="prof-new" placeholder='new profile name, e.g. "marketing"' autocomplete="off" spellcheck="false" />
-        <button class="sm primary" id="prof-add-btn">Add</button>
-      </div>
-      <div class="muted-sm">A new profile inherits your current settings + CV. Switch to it and upload a different resume from the Resume card.</div>
-      <div class="note" id="prof-note"></div>
-    </div>
+      <!-- =================== View: Jobs =================== -->
+      <section class="view on" data-view="jobs">
+        <div class="stats">
+          <div class="tile"><div class="t-label">Jobs in batch</div><div class="t-value" id="st-count">—</div><div class="t-sub" id="st-count-sub"></div></div>
+          <div class="tile"><div class="t-label">Average match</div><div class="t-value" id="st-avg">—</div><div class="t-sub" id="st-avg-sub"></div></div>
+          <div class="tile"><div class="t-label">Strong matches</div><div class="t-value" id="st-strong">—</div><div class="t-sub">70% match or better</div></div>
+          <div class="tile"><div class="t-label">Batch date</div><div class="t-value" id="st-date">—</div><div class="t-sub" id="st-date-sub"></div></div>
+        </div>
+
+        <div class="card">
+          <div class="toolbar">
+            <div class="searchbox">
+              <svg class="ic"><use href="#i-search"/></svg>
+              <input type="text" id="job-search" placeholder="Search title, company, source…  ( / )" autocomplete="off" spellcheck="false" />
+            </div>
+            <div class="seg" id="band-seg" role="group" aria-label="Filter by match strength">
+              <button data-band="all" class="on">All</button>
+              <button data-band="hi">≥ 70%</button>
+              <button data-band="md">50–69%</button>
+              <button data-band="lo">&lt; 50%</button>
+            </div>
+            <select class="slim" id="job-sort" aria-label="Sort jobs">
+              <option value="rank">Sort: Rank</option>
+              <option value="match">Sort: Match %</option>
+              <option value="title">Sort: Title</option>
+              <option value="company">Sort: Company</option>
+              <option value="yoe">Sort: YOE</option>
+            </select>
+            <details class="menu" id="export-menu">
+              <summary class="btn sm"><svg class="ic"><use href="#i-download"/></svg>Export<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
+              <div class="menu-panel">
+                <a href="/api/export?format=txt"><svg class="ic"><use href="#i-file"/></svg>Plain text <small>.txt</small></a>
+                <a href="/api/export?format=csv" title="Links are text — CSV can't carry hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Spreadsheet <small>.csv</small></a>
+                <a href="/api/export?format=xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
+              </div>
+            </details>
+            <button class="sm icon" id="refresh-btn" title="Refresh the list" aria-label="Refresh the list"><svg class="ic"><use href="#i-refresh"/></svg></button>
+          </div>
+          <div class="table-wrap"><div id="lb-body"></div></div>
+          <div class="table-foot" id="lb-foot"></div>
+        </div>
+      </section>
+
+      <!-- =================== View: Searches =================== -->
+      <section class="view" data-view="searches">
+        <div class="card">
+          <h2>What we search for <span class="pill" id="terms-count"></span></h2>
+          <div class="muted-sm">Every term below is searched on hiring.cafe during each scrape. Mix full titles ("IAM Engineer") and short keywords ("iam") freely.</div>
+          <div class="row" style="margin-top:10px">
+            <input type="text" id="term-input" placeholder='add a title or keyword, e.g. "iam"' autocomplete="off" style="flex:1;min-width:200px" />
+            <button class="sm primary" id="term-add"><svg class="ic"><use href="#i-plus"/></svg>Add</button>
+            <button class="sm danger" id="term-clear" title="Remove every search term"><svg class="ic"><use href="#i-trash"/></svg>Clear all</button>
+          </div>
+          <div id="terms-list" class="terms"></div>
+          <div class="hint">Tip: the Resume page can suggest terms straight from your CV — and switch between title-style and keyword-style suggestions.</div>
+        </div>
+      </section>
+
+      <!-- =================== View: Resume =================== -->
+      <section class="view" data-view="resume">
+        <div class="card">
+          <h2>Resume &amp; matching</h2>
+          <div class="muted-sm">Upload a new resume to re-scan your skills and get fresh search-term suggestions from it.</div>
+          <div class="row" style="margin-top:10px">
+            <input type="file" id="resume-file" accept=".pdf,.docx,.md,.txt,.markdown" />
+            <button class="sm primary" id="resume-upload-btn">Rescan resume</button>
+          </div>
+          <div class="note" id="resume-note"></div>
+
+          <!-- v2.8: search-style toggle lives next to the suggestions it shapes. -->
+          <div class="set-row" style="margin-top:14px"><label>Search style</label>
+            <select id="set-mode"><option value="titles">Job titles (precise)</option><option value="keywords">Keywords (broad)</option></select></div>
+          <div class="hint" id="mode-hint">Shapes the <b>suggestions</b> only. <b>Job titles</b> → full roles like “IAM Engineer”; <b>Keywords</b> → short terms like “iam”. Flipping this instantly re-suggests from your current resume below — apply the ones you want, then hit <b>Scrape now</b> to see results. It doesn’t change your live search on its own.</div>
+
+          <div id="resume-suggest" class="step hidden">
+            <div class="muted-sm" id="resume-suggest-label">Suggested search terms from your resume:</div>
+            <div id="resume-suggest-list" class="terms"></div>
+            <button class="sm primary" id="resume-apply-btn" style="margin-top:10px">Use these as my search terms</button>
+            <div class="muted-sm">Replaces your current list. Your CV is already updated for scoring either way.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- =================== View: Profiles =================== -->
+      <section class="view" data-view="profiles">
+        <div class="card">
+          <h2>Profiles <span class="pill" id="prof-count">—</span></h2>
+          <div class="muted-sm">Each profile has its own resume, search terms, filters, and job history — one persona per job hunt.</div>
+          <div id="prof-list" style="margin-top:12px"></div>
+          <div class="row" style="margin-top:10px">
+            <input type="text" id="prof-new" placeholder='new profile name, e.g. "marketing"' autocomplete="off" spellcheck="false" style="flex:1;min-width:200px" />
+            <button class="sm primary" id="prof-add-btn"><svg class="ic"><use href="#i-plus"/></svg>Add</button>
+          </div>
+          <div class="hint">A new profile inherits your current settings + CV. Switch to it and upload a different resume from the Resume page.</div>
+          <div class="note" id="prof-note"></div>
+        </div>
+      </section>
+
+      <!-- =================== View: System =================== -->
+      <section class="view" data-view="system">
+        <div class="grid">
+          <div class="card">
+            <h2>Bot</h2>
+            <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
+            <div class="stat-row"><span class="k">PID</span><span class="v" id="bot-pid">—</span></div>
+            <div class="stat-row"><span class="k">Uptime</span><span class="v" id="bot-uptime">—</span></div>
+            <div class="stat-row"><span class="k">Last heartbeat</span><span class="v" id="bot-hb">—</span></div>
+            <div class="stat-row"><span class="k">Bot version</span><span class="v" id="bot-version">—</span></div>
+          </div>
+
+          <div class="card">
+            <h2>Telegram <span class="pill" id="tg-pill">optional</span></h2>
+            <div class="big" id="tg-big"><span class="dot" id="tg-dot"></span><span id="tg-state">—</span></div>
+
+            <!-- ENABLED view -->
+            <div id="tg-on" class="hidden">
+              <div class="stat-row"><span class="k">Last poll</span><span class="v" id="tg-poll">—</span></div>
+              <div class="muted-sm">Batches are pushed to your phone. You apply here on the desktop either way.</div>
+              <button class="danger sm" id="tg-disable">Disable Telegram</button>
+            </div>
+
+            <!-- DISABLED / setup view -->
+            <div id="tg-off">
+              <div class="muted-sm">Off — the dashboard is your control surface. Connect a bot only if you also want batches on your phone.</div>
+              <button class="sm" id="tg-setup-start"><svg class="ic"><use href="#i-send"/></svg>Set up Telegram…</button>
+
+              <div id="tg-setup" class="hidden">
+                <div class="step">
+                  <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token it gives you:</div>
+                  <input type="text" id="tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
+                  <button class="sm primary" id="tg-validate" style="margin-top:8px">Validate token</button>
+                  <div class="note" id="tg-validate-note"></div>
+                </div>
+                <div class="step hidden" id="tg-step-chat">
+                  <div class="muted-sm">2. Open your new bot in Telegram and send it any message, then:</div>
+                  <div class="row">
+                    <button class="sm primary" id="tg-detect">Detect my chat</button>
+                    <span class="muted-sm">or paste your chat id</span>
+                    <input type="text" id="tg-chat" placeholder="chat id" style="width:140px" autocomplete="off" />
+                  </div>
+                  <div class="note" id="tg-detect-note"></div>
+                </div>
+                <div class="step hidden" id="tg-step-save">
+                  <button class="sm primary" id="tg-save">Save &amp; enable</button>
+                  <button class="sm" id="tg-cancel">Cancel</button>
+                  <div class="note" id="tg-save-note"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Application</h2>
+            <div class="stat-row"><span class="k">Version</span><span class="v" id="sys-version">—</span></div>
+            <div class="stat-row"><span class="k">Install folder</span><span class="v"><code id="install-dir">—</code></span></div>
+            <div class="stat-row"><span class="k">Data</span><span class="v">Local only — nothing leaves this computer</span></div>
+            <button class="sm" id="update-check-btn" style="margin-top:10px"><svg class="ic"><use href="#i-refresh"/></svg>Check for updates</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- =================== View: Settings =================== -->
+      <section class="view" data-view="settings">
+        <div class="card">
+          <h2>Matching &amp; schedule</h2>
+          <div class="set-row"><label>Max years of experience</label><input type="text" id="set-yoe" class="num" /></div>
+          <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
+          <div class="set-row"><label>Match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
+          <div class="set-row"><label>Daily scrape time</label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
+          <div class="set-row"><label>Drop gov-clearance jobs</label>
+            <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
+          <div class="set-row"><label>Application forms</label>
+            <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
+          <div class="set-row"><label>Job recency</label>
+            <select id="set-recency"><option value="any">Any time</option><option value="today">Posted today</option><option value="3days">Last 3 days</option><option value="week">This week</option><option value="month">This month</option></select></div>
+          <div class="note" id="set-note"></div>
+          <div class="hint">Changes save instantly. The search-style toggle lives on the Resume page, next to the suggestions it shapes.</div>
+        </div>
+      </section>
+
+      <footer>Local dashboard · auto-refresh every 5s · press <code>/</code> to search jobs</footer>
+    </main>
   </div>
+</div>
 
-  <div class="grid two">
-    <!-- Settings -->
-    <div class="card">
-      <h2>Settings</h2>
-      <div class="set-row"><label>Max years of experience</label><input type="text" id="set-yoe" class="num" /></div>
-      <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
-      <div class="set-row"><label>Match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
-      <div class="set-row"><label>Daily scrape time</label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
-      <div class="set-row"><label>Drop gov-clearance jobs</label>
-        <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
-      <div class="set-row"><label>Application forms</label>
-        <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
-      <div class="set-row"><label>Job recency</label>
-        <select id="set-recency"><option value="any">Any time</option><option value="today">Posted today</option><option value="3days">Last 3 days</option><option value="week">This week</option><option value="month">This month</option></select></div>
-      <div class="note" id="set-note"></div>
-    </div>
-
-    <!-- Resume rescan (v2.5) + search style (v2.8) -->
-    <div class="card">
-      <h2>Resume</h2>
-      <div class="muted-sm">Upload a new resume to re-scan your skills and get fresh search-term suggestions from it.</div>
-      <div class="row" style="margin-top:8px">
-        <input type="file" id="resume-file" accept=".pdf,.docx,.md,.txt,.markdown" />
-        <button class="sm primary" id="resume-upload-btn">Rescan resume</button>
-      </div>
-      <div class="note" id="resume-note"></div>
-
-      <!-- v2.8: search-style toggle lives next to the suggestions it shapes. -->
-      <div class="set-row" style="margin-top:10px"><label>Search style</label>
-        <select id="set-mode"><option value="titles">Job titles (precise)</option><option value="keywords">Keywords (broad)</option></select></div>
-      <div class="muted-sm" id="mode-hint">Shapes the <b>suggestions</b> only. <b>Job titles</b> → full roles like “IAM Engineer”; <b>Keywords</b> → short terms like “iam”. Flipping this instantly re-suggests from your current resume below — apply the ones you want, then hit <b>Scrape now</b> to see results. It doesn’t change your live search on its own.</div>
-
-      <div id="resume-suggest" class="step hidden">
-        <div class="muted-sm" id="resume-suggest-label">Suggested search terms from your resume:</div>
-        <div id="resume-suggest-list" class="terms"></div>
-        <button class="sm primary" id="resume-apply-btn">Use these as my search terms</button>
-        <div class="muted-sm">Replaces your current list. Your CV is already updated for scoring either way.</div>
-      </div>
-    </div>
-
-    <!-- Search terms -->
-    <div class="card">
-      <h2>What we search for <span class="pill right" id="terms-count"></span></h2>
-      <div class="row">
-        <input type="text" id="term-input" placeholder='add a title or keyword, e.g. "iam"' autocomplete="off" />
-        <button class="sm primary" id="term-add">Add</button>
-        <button class="sm danger" id="term-clear" title="Remove every search term">Clear all</button>
-      </div>
-      <div id="terms-list" class="terms"></div>
-    </div>
-  </div>
-
-  <div class="card">
-    <h2>Ranked jobs <span class="pill" id="lb-meta"></span>
-      <span class="right">
-        <a class="btnlink" href="/api/export?format=txt"><button class="sm" id="export-txt-btn" title="Numbered list: job title + apply link">⬇ Export .txt</button></a>
-        <a class="btnlink" href="/api/export?format=csv"><button class="sm" id="export-csv-btn" title="Plain-text sheet: #, Job Title, Apply Link (links are text — CSV can't carry hyperlinks)">⬇ Export .csv</button></a>
-        <a class="btnlink" href="/api/export?format=xlsx"><button class="sm" id="export-xlsx-btn" title="Excel workbook: Apply Link column is clickable hyperlinks">⬇ Export .xlsx</button></a>
-        <button class="sm" id="refresh-btn">↻ Refresh</button>
-        <label class="watch-label" title="Show the browser window so you can watch it search hiring.cafe"><input type="checkbox" id="watch-scrape" /> 👁 Watch</label>
-        <button class="primary sm" id="scrape-btn">⟳ Scrape now</button>
-      </span>
-    </h2>
-    <div id="lb-body"></div>
-  </div>
-</main>
-
-<div id="toast"></div>
-
-<footer>
-  Local dashboard · <code id="install-dir">—</code> · auto-refresh every 5s
-</footer>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
+"use strict";
 const $ = (id) => document.getElementById(id);
 
 function humanDuration(seconds) {
@@ -635,39 +1026,6 @@ function matchClass(pct) {
   return "lo";
 }
 
-// Full ranked batch with per-job actions. Rendered from /api/batch (not the
-// 5s status poll) so it doesn't flicker while you read it.
-function renderBatch(batch) {
-  const jobs = batch.jobs || [];
-  if (!jobs.length) {
-    $("lb-body").innerHTML = '<div class="empty">No batch yet. Click <b>Scrape now</b> above to pull your first 100 ranked jobs (takes 1–2 min).</div>';
-    return;
-  }
-  const rows = jobs.map(j => {
-    const url = j.directUrl || j.viewjobUrl || "#";
-    const pct = j.matchPct ?? 0;
-    return `<tr data-idx="${j.idx}">
-      <td class="idx">#${j.idx}</td>
-      <td class="title" title="${escapeHTML(j.title || '')}">${escapeHTML(j.title || '—')}</td>
-      <td class="company" title="${escapeHTML(j.company || '')}">${escapeHTML(j.company || '—')}</td>
-      <td class="match ${matchClass(pct)}">${pct}%</td>
-      <td class="actions">
-        <a class="btnlink" href="${escapeAttr(url)}" target="_blank" rel="noopener"><button class="sm primary">Apply ↗</button></a>
-        <button class="sm" data-act="why" data-idx="${j.idx}">Why</button>
-        <button class="sm" data-act="save" data-idx="${j.idx}">Save</button>
-        <button class="sm" data-act="applied" data-idx="${j.idx}">Applied ✓</button>
-      </td>
-    </tr>`;
-  }).join("");
-  $("lb-body").innerHTML = `<table>
-    <thead><tr><th></th><th>Title</th><th>Company</th><th>Match</th><th></th></tr></thead>
-    <tbody>${rows}</tbody>
-  </table>`;
-  // Stash matched keywords for the "Why" expander.
-  window.__batchMatched = {};
-  for (const j of jobs) window.__batchMatched[j.idx] = j.matched || [];
-}
-
 function escapeHTML(s) {
   return String(s).replace(/[&<>"']/g, c => ({
     "&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"
@@ -675,6 +1033,134 @@ function escapeHTML(s) {
 }
 function escapeAttr(s) { return escapeHTML(s); }
 
+// ---- v3.0 client state (jobs explorer + session-sticky applied marks) ----
+const state = {
+  jobs: [],            // full batch from /api/batch
+  batchMeta: {},       // { date, jobCount, generatedAt }
+  q: "",               // toolbar search
+  band: "all",         // all | hi | md | lo
+  sort: "rank",        // rank | match | title | company | yoe
+  applied: new Set(),  // idx marked applied this session (survives re-renders)
+  whyOpen: new Set(),  // idx with the Why row expanded (survives re-renders)
+  loadedOnce: false,
+};
+
+// ---- v3.0 view router — hash-based so refresh keeps your place ----
+const VIEW_TITLES = {
+  jobs: "Ranked jobs", searches: "Search terms", resume: "Resume & matching",
+  profiles: "Profiles", system: "System & Telegram", settings: "Settings",
+};
+function currentView() {
+  const h = (location.hash || "#jobs").slice(1);
+  return VIEW_TITLES[h] ? h : "jobs";
+}
+function setView(name) {
+  document.querySelectorAll("#content .view").forEach(el =>
+    el.classList.toggle("on", el.dataset.view === name));
+  document.querySelectorAll("#nav .nav-item").forEach(el =>
+    el.classList.toggle("on", el.dataset.view === name));
+  $("view-title").textContent = VIEW_TITLES[name];
+}
+window.addEventListener("hashchange", () => setView(currentView()));
+setView(currentView());
+
+// `/` focuses the job search from anywhere (except while typing).
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+  const t = e.target;
+  if (t && (t.tagName === "INPUT" || t.tagName === "SELECT" || t.tagName === "TEXTAREA")) return;
+  e.preventDefault();
+  if (currentView() !== "jobs") location.hash = "#jobs";
+  $("job-search").focus();
+});
+
+// Close the export menu when clicking anywhere else.
+document.addEventListener("click", (e) => {
+  const menu = $("export-menu");
+  if (menu && menu.open && !menu.contains(e.target)) menu.open = false;
+});
+
+// ---- Toast (single, bottom-right, aria-live) ----
+let toastTimer = null;
+function toast(msg, kind) {
+  const t = $("toast");
+  const icon = kind === "bad" ? "i-alert" : (kind === "good" ? "i-check" : "i-info");
+  t.innerHTML = `<svg class="ic t-ic"><use href="#${icon}"/></svg><span></span>`;
+  t.querySelector("span").textContent = msg;
+  t.className = "show" + (kind ? " " + kind : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ""; }, 3500);
+}
+
+function note(id, msg, ok) {
+  const el = $(id);
+  el.textContent = msg || "";
+  el.className = "note" + (msg ? (ok ? " ok" : " bad") : "");
+}
+
+// ---- v3.0 modal system — replaces native confirm()/prompt(), which block
+// the page and look nothing like the app. One overlay; promise-based. ----
+function openModal({ title, body, confirmText = "Confirm", cancelText = "Cancel", danger = false, input = null }) {
+  return new Promise((resolve) => {
+    const prev = document.activeElement;
+    const overlay = document.createElement("div");
+    overlay.id = "modal-overlay";
+    overlay.innerHTML = `<div id="modal" role="dialog" aria-modal="true" aria-label="${escapeAttr(title)}">
+      <h3></h3>
+      <div class="m-body"></div>
+      ${input !== null ? '<input type="text" id="modal-input" autocomplete="off" spellcheck="false" />' : ""}
+      <div class="m-actions">
+        <button class="sm" id="modal-cancel"></button>
+        <button class="sm ${danger ? "danger" : "primary"}" id="modal-ok"></button>
+      </div>
+    </div>`;
+    overlay.querySelector("h3").textContent = title;
+    overlay.querySelector(".m-body").textContent = body || "";
+    overlay.querySelector("#modal-cancel").textContent = cancelText;
+    overlay.querySelector("#modal-ok").textContent = confirmText;
+    const inputEl = overlay.querySelector("#modal-input");
+    if (inputEl && input) inputEl.value = input;
+    document.body.appendChild(overlay);
+
+    const done = (val) => {
+      overlay.remove();
+      document.removeEventListener("keydown", onKey);
+      if (prev && prev.focus) prev.focus();
+      resolve(val);
+    };
+    const ok = () => done(inputEl ? inputEl.value : true);
+    const onKey = (e) => {
+      if (e.key === "Escape") done(null);
+      if (e.key === "Enter" && (e.target === inputEl || !inputEl)) { e.preventDefault(); ok(); }
+    };
+    document.addEventListener("keydown", onKey);
+    overlay.addEventListener("mousedown", (e) => { if (e.target === overlay) done(null); });
+    overlay.querySelector("#modal-cancel").addEventListener("click", () => done(null));
+    overlay.querySelector("#modal-ok").addEventListener("click", ok);
+    if (inputEl) { inputEl.focus(); inputEl.select(); }
+    else overlay.querySelector("#modal-ok").focus();
+  });
+}
+const confirmModal = (opts) => openModal(opts).then(v => v !== null);
+const promptModal = (opts) => openModal({ ...opts, input: opts.input || "" });
+
+// ---- CSRF-guarded POST helper (v2.1) ----
+const AMM_TOKEN = document.querySelector('meta[name="amm-token"]')?.content || "";
+
+async function postJSON(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-AMM-Token": AMM_TOKEN },
+    body: JSON.stringify(body || {}),
+    cache: "no-store",
+  });
+  let data = {};
+  try { data = await res.json(); } catch {}
+  if (!res.ok && data.error == null) data = { ok: false, error: "HTTP " + res.status };
+  return data;
+}
+
+// ---- Status poll (every 5s) ----
 async function tick() {
   try {
     const res = await fetch("/api/status", { cache: "no-store" });
@@ -684,8 +1170,9 @@ async function tick() {
     render(s);
   } catch (e) {
     $("err").style.display = "";
-    $("err").textContent = "Could not reach the wrapper: " + e.message
-      + " — is AMM still running?";
+    $("err").innerHTML = '<svg class="ic"><use href="#i-alert"/></svg><span></span>';
+    $("err").querySelector("span").textContent =
+      "Could not reach the wrapper: " + e.message + " — is AMM still running?";
   }
 }
 
@@ -701,7 +1188,9 @@ function render(s) {
     setupWire();
   }
 
-  $("version").textContent = "v" + (s.wrapper?.version || "—");
+  const ver = "v" + (s.wrapper?.version || "—");
+  $("version").textContent = "AMM " + ver;
+  $("sys-version").textContent = ver;
   $("install-dir").textContent = s.wrapper?.installDir || "—";
 
   const botState = s.bot?.state || "unknown";
@@ -749,53 +1238,160 @@ function render(s) {
   }
 
   $("profile-big").textContent = s.profile?.active || "—";
-
-  const lb = s.lastBatch || {};
-  $("lb-meta").textContent = lb.available
-    ? `${lb.date || ""} · ${lb.jobCount || 0} jobs`
-    : "no batch yet";
 }
 
-// ---- v2.1: control surface (Scrape now + Telegram setup) ----
-const AMM_TOKEN = document.querySelector('meta[name="amm-token"]')?.content || "";
-
-async function postJSON(path, body) {
-  const res = await fetch(path, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-AMM-Token": AMM_TOKEN },
-    body: JSON.stringify(body || {}),
-    cache: "no-store",
-  });
-  let data = {};
-  try { data = await res.json(); } catch {}
-  if (!res.ok && data.error == null) data = { ok: false, error: "HTTP " + res.status };
-  return data;
-}
-
-let toastTimer = null;
-function toast(msg, kind) {
-  const t = $("toast");
-  t.textContent = msg;
-  t.className = "show" + (kind ? " " + kind : "");
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.className = ""; }, 3500);
-}
-
-function note(id, msg, ok) {
-  const el = $(id);
-  el.textContent = msg || "";
-  el.className = "note" + (msg ? (ok ? " ok" : " bad") : "");
-}
-
-// --- Ranked jobs (from /api/batch, refreshed on demand) ---
+// ---- Ranked jobs (from /api/batch, refreshed on demand) ----
 async function loadBatch() {
+  if (!state.loadedOnce) renderSkeleton();
   try {
     const res = await fetch("/api/batch", { cache: "no-store" });
-    renderBatch(await res.json());
+    const batch = await res.json();
+    state.jobs = batch.jobs || [];
+    state.batchMeta = { date: batch.date || "", jobCount: batch.jobCount || state.jobs.length, generatedAt: batch.generatedAt || "" };
+    state.loadedOnce = true;
+    renderStats();
+    renderJobs();
   } catch (e) {
-    $("lb-body").innerHTML = '<div class="empty">Could not load the batch.</div>';
+    state.loadedOnce = true;
+    $("lb-body").innerHTML = '<div class="empty"><div class="e-icon">⚠️</div><div class="e-title">Could not load the batch</div><div class="e-sub">The wrapper did not answer. Try Refresh, or check the System page.</div></div>';
+    $("lb-foot").textContent = "";
   }
 }
+
+function renderSkeleton() {
+  $("lb-body").innerHTML = Array.from({ length: 6 }, (_, i) => `
+    <div class="skel-row">
+      <span class="skel" style="width:26px"></span>
+      <span class="skel" style="flex:1;max-width:${300 - i * 18}px"></span>
+      <span class="skel" style="width:60px"></span>
+      <span class="skel" style="width:120px"></span>
+    </div>`).join("");
+}
+
+function renderStats() {
+  const jobs = state.jobs;
+  $("st-count").textContent = jobs.length || "—";
+  $("st-count-sub").textContent = state.batchMeta.date ? "profile: " + ($("profile-big").textContent || "") : "";
+  if (jobs.length) {
+    const avg = Math.round(jobs.reduce((a, j) => a + (j.matchPct || 0), 0) / jobs.length);
+    const strong = jobs.filter(j => (j.matchPct || 0) >= 70).length;
+    const top = jobs.reduce((m, j) => Math.max(m, j.matchPct || 0), 0);
+    $("st-avg").textContent = avg + "%";
+    $("st-avg-sub").textContent = "best: " + top + "%";
+    $("st-strong").textContent = strong;
+  } else {
+    $("st-avg").textContent = "—"; $("st-avg-sub").textContent = "";
+    $("st-strong").textContent = "—";
+  }
+  $("st-date").textContent = state.batchMeta.date || "—";
+  $("st-date-sub").textContent = state.batchMeta.generatedAt
+    ? "generated " + state.batchMeta.generatedAt.replace("T", " ").slice(0, 16) : "no batch yet";
+  $("nav-jobs-badge").textContent = jobs.length ? String(jobs.length) : "";
+}
+
+function visibleJobs() {
+  let out = state.jobs;
+  if (state.band !== "all") out = out.filter(j => matchClass(j.matchPct ?? 0) === state.band);
+  if (state.q) {
+    const q = state.q.toLowerCase();
+    out = out.filter(j =>
+      (j.title || "").toLowerCase().includes(q) ||
+      (j.company || "").toLowerCase().includes(q) ||
+      (j.q || "").toLowerCase().includes(q));
+  }
+  out = out.slice();
+  switch (state.sort) {
+    case "match":   out.sort((a, b) => (b.matchPct ?? 0) - (a.matchPct ?? 0) || a.idx - b.idx); break;
+    case "title":   out.sort((a, b) => (a.title || "").localeCompare(b.title || "") || a.idx - b.idx); break;
+    case "company": out.sort((a, b) => (a.company || "").localeCompare(b.company || "") || a.idx - b.idx); break;
+    case "yoe":     out.sort((a, b) => (a.yoe ?? 999) - (b.yoe ?? 999) || a.idx - b.idx); break;
+    default:        out.sort((a, b) => a.idx - b.idx);
+  }
+  return out;
+}
+
+function whyRowHTML(idx) {
+  const kws = (window.__batchMatched?.[idx] || []);
+  const html = kws.length
+    ? kws.map(k => `<span class="kw">${escapeHTML(k)}</span>`).join("")
+    : "<i>No CV keyword matched — ranked on search relevance only.</i>";
+  return `<td></td><td colspan="5"><b>Matched from your CV:</b> ${html}</td>`;
+}
+
+function renderJobs() {
+  const all = state.jobs;
+  if (!all.length) {
+    $("lb-body").innerHTML = `<div class="empty">
+      <div class="e-icon">💼</div>
+      <div class="e-title">No batch yet</div>
+      <div class="e-sub">Pull your first 100 ranked jobs from hiring.cafe — scored against your resume. Takes 1–2 minutes.</div>
+      <button class="primary" id="empty-scrape">⟳ Scrape now</button>
+    </div>`;
+    $("lb-foot").textContent = "";
+    const es = $("empty-scrape");
+    if (es) es.addEventListener("click", () => $("scrape-btn").click());
+    return;
+  }
+  const jobs = visibleJobs();
+  if (!jobs.length) {
+    $("lb-body").innerHTML = `<div class="empty">
+      <div class="e-icon">🔍</div>
+      <div class="e-title">No jobs match your filters</div>
+      <div class="e-sub">Try clearing the search box or switching the match filter back to All.</div>
+    </div>`;
+    $("lb-foot").textContent = "0 of " + all.length + " jobs";
+    return;
+  }
+  const rows = jobs.map(j => {
+    const url = j.directUrl || j.viewjobUrl || "#";
+    const pct = j.matchPct ?? 0;
+    const band = matchClass(pct);
+    const isApplied = state.applied.has(String(j.idx));
+    const main = `<tr data-idx="${j.idx}" class="job-row${isApplied ? " applied-row" : ""}">
+      <td class="idx">#${j.idx}</td>
+      <td class="jobcell">
+        <div class="j-title" title="${escapeAttr(j.title || "")}">${escapeHTML(j.title || "—")}</div>
+        <div class="j-company" title="${escapeAttr(j.company || "")}">${escapeHTML(j.company || "—")}</div>
+      </td>
+      <td class="match"><span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span></td>
+      <td class="yoe">${j.yoe == null ? "—" : escapeHTML(String(j.yoe)) + " yr"}</td>
+      <td class="src">${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
+      <td class="actions">
+        <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">Apply<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
+        <button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>
+        <button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>
+        <button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>
+      </td>
+    </tr>`;
+    const why = state.whyOpen.has(String(j.idx))
+      ? `<tr class="why-row" data-why="${j.idx}">${whyRowHTML(j.idx)}</tr>` : "";
+    return main + why;
+  }).join("");
+  $("lb-body").innerHTML = `<table>
+    <thead><tr><th></th><th>Job</th><th>Match</th><th class="yoe">YOE</th><th class="src">Source</th><th></th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>`;
+  $("lb-foot").textContent = jobs.length === all.length
+    ? all.length + " jobs" : jobs.length + " of " + all.length + " jobs";
+  // Stash matched keywords for the "Why" expander.
+  window.__batchMatched = {};
+  for (const j of all) window.__batchMatched[j.idx] = j.matched || [];
+}
+
+// Toolbar wiring.
+let searchDebounce = null;
+$("job-search").addEventListener("input", (e) => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(() => { state.q = e.target.value.trim(); renderJobs(); }, 120);
+});
+$("band-seg").addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-band]");
+  if (!b) return;
+  state.band = b.dataset.band;
+  document.querySelectorAll("#band-seg button").forEach(x => x.classList.toggle("on", x === b));
+  renderJobs();
+});
+$("job-sort").addEventListener("change", (e) => { state.sort = e.target.value; renderJobs(); });
 
 // Event delegation for the per-job action buttons.
 $("lb-body").addEventListener("click", async (ev) => {
@@ -805,15 +1401,19 @@ $("lb-body").addEventListener("click", async (ev) => {
   if (act === "why") {
     const tr = btn.closest("tr");
     const existing = tr.nextElementSibling;
-    if (existing && existing.classList.contains("why-row")) { existing.remove(); return; }
-    const kws = (window.__batchMatched?.[idx] || []);
-    const html = kws.length
-      ? kws.map(k => `<span class="kw">${escapeHTML(k)}</span>`).join("")
-      : "<i>No CV keyword matched — ranked on search relevance only.</i>";
+    if (existing && existing.classList.contains("why-row")) {
+      existing.remove();
+      state.whyOpen.delete(String(idx));
+      btn.setAttribute("aria-expanded", "false");
+      return;
+    }
     const row = document.createElement("tr");
     row.className = "why-row";
-    row.innerHTML = `<td></td><td colspan="4"><b>Matched from your CV:</b> ${html}</td>`;
+    row.dataset.why = idx;
+    row.innerHTML = whyRowHTML(idx);
     tr.after(row);
+    state.whyOpen.add(String(idx));
+    btn.setAttribute("aria-expanded", "true");
     return;
   }
   // save / applied
@@ -824,24 +1424,27 @@ $("lb-body").addEventListener("click", async (ev) => {
     const r = await postJSON("/api/job/action", { action: act, idx });
     if (r.ok) {
       toast(act === "applied" ? `Marked applied — job #${idx} won't show again.` : `Saved job #${idx} on hiring.cafe.`, "good");
-      if (act === "applied") btn.textContent = "Applied ✓";
-      else { btn.textContent = label; btn.disabled = false; }
+      if (act === "applied") {
+        state.applied.add(String(idx));
+        renderJobs(); // applied styling survives re-renders via state.applied
+      } else { btn.innerHTML = label; btn.disabled = false; }
     } else {
       toast(r.error || "Action failed", "bad");
-      btn.textContent = label; btn.disabled = false;
+      btn.innerHTML = label; btn.disabled = false;
     }
   } catch (e) {
     toast("Action failed: " + e.message, "bad");
-    btn.textContent = label; btn.disabled = false;
+    btn.innerHTML = label; btn.disabled = false;
   }
 });
 
-// --- Scrape now / Refresh ---
+// ---- Scrape now / Refresh ----
 $("scrape-btn").addEventListener("click", async () => {
   const btn = $("scrape-btn");
   btn.disabled = true;
-  const label = btn.textContent;
-  btn.textContent = "Scraping…";
+  const labelEl = btn.querySelector("span");
+  const label = labelEl.textContent;
+  labelEl.textContent = "Scraping…";
   try {
     const watch = $("watch-scrape").checked;
     const r = await postJSON("/api/scrape", { watch: String(watch) });
@@ -849,21 +1452,32 @@ $("scrape-btn").addEventListener("click", async () => {
       toast(watch
         ? "Scrape started — the browser window will appear so you can watch it search."
         : "Scrape started — refreshing the list as jobs come in (1–2 min).", "good");
-      // Poll the batch a few times so the new results show up without a manual refresh.
+      $("scrapebar").classList.add("active");
+      // Poll the batch so new results show up without a manual refresh; stop
+      // early once a fresh batch lands (generatedAt changes).
+      const before = state.batchMeta.generatedAt;
       let tries = 0;
-      const iv = setInterval(async () => { tries++; await loadBatch(); if (tries >= 12) clearInterval(iv); }, 12000);
+      const iv = setInterval(async () => {
+        tries++;
+        await loadBatch();
+        const fresh = state.batchMeta.generatedAt && state.batchMeta.generatedAt !== before;
+        if (fresh || tries >= 12) {
+          clearInterval(iv);
+          $("scrapebar").classList.remove("active");
+          if (fresh) toast(`Fresh batch loaded — ${state.jobs.length} jobs.`, "good");
+        }
+      }, 12000);
     } else {
       toast("Could not start: " + (r.error || "error"), "bad");
     }
   } catch (e) {
     toast("Could not start scrape: " + e.message, "bad");
   } finally {
-    setTimeout(() => { btn.disabled = false; btn.textContent = label; }, 5000);
+    setTimeout(() => { btn.disabled = false; labelEl.textContent = label; }, 5000);
   }
 });
 $("refresh-btn").addEventListener("click", loadBatch);
-
-// --- Settings ---
+// ---- Settings ----
 async function loadSettings() {
   try {
     const r = await (await fetch("/api/settings", { cache: "no-store" })).json();
@@ -916,11 +1530,12 @@ $("set-mode").addEventListener("change", async e => {
   toast(`${sugg.length} ${mode} suggestions ready — pick and apply.`, "good");
 });
 
-// --- Search terms ---
+// ---- Search terms ----
 function renderTerms(terms) {
   $("terms-count").textContent = terms.length + " terms";
+  $("nav-terms-badge").textContent = terms.length ? String(terms.length) : "";
   $("terms-list").innerHTML = terms.map(t =>
-    `<span class="chip">${escapeHTML(t)}<button data-term="${escapeAttr(t)}" title="remove">×</button></span>`
+    `<span class="chip">${escapeHTML(t)}<button data-term="${escapeAttr(t)}" title="remove" aria-label="remove ${escapeAttr(t)}">×</button></span>`
   ).join("");
 }
 $("terms-list").addEventListener("click", async (ev) => {
@@ -940,14 +1555,19 @@ $("term-input").addEventListener("keydown", e => { if (e.key === "Enter") addTer
 async function clearTerms() {
   const n = $("terms-list").querySelectorAll(".chip").length;
   if (!n) { toast("Nothing to clear — your search list is already empty.", "good"); return; }
-  if (!confirm(`Remove all ${n} search term${n === 1 ? "" : "s"}? You can rebuild the list by adding terms or applying resume suggestions.`)) return;
+  const ok = await confirmModal({
+    title: `Remove all ${n} search term${n === 1 ? "" : "s"}?`,
+    body: "You can rebuild the list by adding terms or applying resume suggestions.",
+    confirmText: "Clear all", danger: true,
+  });
+  if (!ok) return;
   const r = await postJSON("/api/jobs/clear", {});
   if (r.ok) { renderTerms(r.list || []); toast("Cleared all search terms.", "good"); }
   else toast(r.error || "Could not clear.", "bad");
 }
 $("term-clear").addEventListener("click", clearTerms);
 
-// --- Profiles (v2.6) ---
+// ---- Profiles (v2.6) ----
 // The backend (scripts/profile-store.mjs) owns config.json and data/profiles/*.
 // This UI just calls the API and re-renders. On switch, the whole page reloads
 // so settings/batch/terms/resume all pick up the new active profile.
@@ -963,7 +1583,7 @@ function renderProfiles(profiles) {
   $("prof-count").textContent = profiles.length + " profile" + (profiles.length === 1 ? "" : "s");
   const onlyOne = profiles.length <= 1;
   $("prof-list").innerHTML = profiles.map(p => {
-    const badge = p.active ? '<span class="pill">active</span>' : '';
+    const badge = p.active ? '<span class="pill accent">active</span>' : '';
     const cvHint = p.hasCV ? '' : '<small>no resume yet</small>';
     // Delete is disabled on the active profile (backend refuses too) and on
     // the only profile (there'd be nothing left to fall back to).
@@ -972,8 +1592,8 @@ function renderProfiles(profiles) {
       <span class="prof-name">${escapeHTML(p.slug)} ${badge}${cvHint}</span>
       <div class="prof-actions">
         ${p.active ? '' : `<button class="sm primary" data-pact="switch" data-slug="${escapeAttr(p.slug)}">Switch</button>`}
-        <button class="sm" data-pact="rename" data-slug="${escapeAttr(p.slug)}">Rename</button>
-        <button class="sm danger" data-pact="delete" data-slug="${escapeAttr(p.slug)}" ${canDelete ? '' : 'disabled title="Switch to another profile first, or add a second profile before deleting."'}>Delete</button>
+        <button class="sm" data-pact="rename" data-slug="${escapeAttr(p.slug)}"><svg class="ic" style="width:12px;height:12px"><use href="#i-edit"/></svg>Rename</button>
+        <button class="sm danger" data-pact="delete" data-slug="${escapeAttr(p.slug)}" ${canDelete ? '' : 'disabled title="Switch to another profile first, or add a second profile before deleting."'}><svg class="ic" style="width:12px;height:12px"><use href="#i-trash"/></svg>Delete</button>
       </div>
     </div>`;
   }).join("");
@@ -986,7 +1606,7 @@ async function addProfileFromInput() {
   const r = await postJSON("/api/profile/add", { slug });
   if (r.ok) {
     $("prof-new").value = "";
-    note("prof-note", `✓ Added "${slug}". Switch to it and upload a different resume from the Resume card.`, true);
+    note("prof-note", `✓ Added "${slug}". Switch to it and upload a different resume from the Resume page.`, true);
     setTimeout(() => note("prof-note", ""), 6000);
     loadProfiles();
   } else {
@@ -1018,7 +1638,11 @@ $("prof-list").addEventListener("click", async (ev) => {
   }
 
   if (act === "rename") {
-    const proposed = prompt(`Rename "${slug}" to:`, slug);
+    const proposed = await promptModal({
+      title: `Rename "${slug}"`,
+      body: "Profile names are short slugs — letters, numbers, dashes.",
+      confirmText: "Rename", input: slug,
+    });
     if (proposed == null) return;
     const newSlug = proposed.trim();
     if (!newSlug || newSlug === slug) return;
@@ -1029,7 +1653,12 @@ $("prof-list").addEventListener("click", async (ev) => {
   }
 
   if (act === "delete") {
-    if (!confirm(`Delete profile "${slug}"?\n\nThis wipes its saved jobs, applications history, and search-term list. Cannot be undone.`)) return;
+    const ok = await confirmModal({
+      title: `Delete profile "${slug}"?`,
+      body: "This wipes its saved jobs, applications history, and search-term list. Cannot be undone.",
+      confirmText: "Delete profile", danger: true,
+    });
+    if (!ok) return;
     const r = await postJSON("/api/profile/delete", { slug });
     if (r.ok) { toast(`Deleted "${slug}".`, "good"); loadProfiles(); tick(); }
     else toast(r.error || "Could not delete.", "bad");
@@ -1037,7 +1666,7 @@ $("prof-list").addEventListener("click", async (ev) => {
   }
 });
 
-// --- Telegram setup flow ---
+// ---- Telegram setup flow ----
 let tgToken = "", tgChat = "";
 
 $("tg-setup-start").addEventListener("click", () => {
@@ -1116,7 +1745,7 @@ $("tg-disable").addEventListener("click", async () => {
   if (r.ok) tick();
 });
 
-// --- Resume rescan (v2.5) ---
+// ---- Resume rescan (v2.5) ----
 $("resume-upload-btn").addEventListener("click", async () => {
   const input = $("resume-file");
   const file = input.files && input.files[0];
@@ -1173,24 +1802,30 @@ $("resume-apply-btn").addEventListener("click", async () => {
   }
 });
 
-// --- Auto-update (v2.5) ---
+// ---- Auto-update (v2.5) ----
 // Checks on load + every 30 min. Banner is unmissable when an update exists;
 // one click does the silent download-install-relaunch (Windows). On other
 // platforms the button links to the releases page instead.
 let __updateInfo = null;
-async function checkForUpdate() {
+async function checkForUpdate(manual) {
   try {
     const r = await (await fetch("/api/update/check", { cache: "no-store" })).json();
     __updateInfo = r;
     const banner = $("update-banner");
-    if (!r || !r.ok || !r.hasUpdate) { banner.classList.add("hidden"); return; }
+    if (!r || !r.ok || !r.hasUpdate) {
+      banner.classList.add("hidden");
+      if (manual) toast(r && r.ok ? `You're up to date (v${r.current}).` : "Could not check for updates.", r && r.ok ? "good" : "bad");
+      return;
+    }
     $("ub-text").innerHTML = `Version <b>v${escapeHTML(r.latest)}</b> is available — you're on v${escapeHTML(r.current)}.`;
     const notes = $("ub-notes");
     if (r.releaseUrl) { notes.href = r.releaseUrl; notes.classList.remove("hidden"); }
     $("ub-update").textContent = r.canAutoUpdate ? "Update now" : "Get the update ↗";
     banner.classList.remove("hidden");
-  } catch { /* offline — no banner */ }
+    if (manual) toast(`Update available: v${r.latest}.`, "good");
+  } catch { if (manual) toast("Could not check for updates — are you online?", "bad"); /* offline — no banner */ }
 }
+$("update-check-btn").addEventListener("click", () => checkForUpdate(true));
 $("ub-update").addEventListener("click", async () => {
   const r = __updateInfo || {};
   if (!r.canAutoUpdate) { if (r.releaseUrl) window.open(r.releaseUrl, "_blank", "noopener"); return; }
