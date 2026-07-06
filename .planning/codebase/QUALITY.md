@@ -1,5 +1,7 @@
 # QUALITY.md — AMM v1.0 quality audit
 
+> **⚠️ STALE — v1.0.0 metrics (banner added 2026-07-06).** Counts here (17 scripts / 4,637 LOC / 24 tests) are v1.0.0. Current: **31 `scripts/*.mjs`**, **18 test files** (~150+ assertions), plus a **16-file Go wrapper** with its own tests. Regenerate with `/gsd-map-codebase`. Current truth: `STATE.md` / `PROJECT.md`.
+
 **Analysis Date:** 2026-05-07
 **Repo:** `C:\Users\Jus7o\automatic-munyun-machine`
 **Branch:** `v1.0` · **Version shipped:** v1.0.0

@@ -1,5 +1,7 @@
 # Technology Stack
 
+> **⚠️ STALE — v1.0.0 inventory (banner added 2026-07-06).** Predates the **Go tray wrapper** (`fyne.io/systray`, `net/http` dashboard, `go-winres` icon embedding) added v1.2+, the `mammoth`/`pdf-parse` resume-parsing deps, `proper-lockfile`, and the switch to `playwright-core` + installed-browser resolution (v2.0.1). Regenerate with `/gsd-map-codebase`. Current deps: see `package.json` and `wrapper/go.mod`; current truth: `STATE.md` / `PROJECT.md`.
+
 **Analysis Date:** 2026-05-07
 **Repo:** `automatic-munyun-machine` v1.0.0
 **Purpose:** Inventory of every runtime, dependency, tool, and platform requirement — sized for the v1.1 cross-platform port (Mac/Linux) and code-signing work.

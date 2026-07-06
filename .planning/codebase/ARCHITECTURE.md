@@ -1,6 +1,8 @@
 <!-- refreshed: 2026-05-07 -->
 # Architecture
 
+> **⚠️ STALE — describes v1.0.0 (banner added 2026-07-06).** This map predates the Go tray wrapper (v1.2), the localhost dashboard (v1.3 / v2.1 control surface), the installed-browser resolver (v2.0.1), the desktop-first pivot (v2.1), and cross-platform support (v1.1). Current architecture is a **four-process** design (wrapper + bot + scraper + watchdog), desktop-first with optional Telegram — see `STATE.md` / `PROJECT.md` / `CLAUDE.md`. **Regenerate this file with `/gsd-map-codebase` before the next milestone.** Below is the v1.0.0 snapshot.
+
 **Analysis Date:** 2026-05-07
 
 ## 1. System Overview

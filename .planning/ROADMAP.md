@@ -1,6 +1,8 @@
 # AMM v1.1 — Roadmap
 
-**Milestone:** v1.1 — Cross-platform + Hardened
+> **✅ SHIPPED & SUPERSEDED (banner added 2026-07-06).** All six phases below shipped in **v1.1.0** (2026-05-08). This file is retained as a historical planning artifact. AMM is now at **v2.9.0** with no active milestone roadmap. For current state see `STATE.md` and `PROJECT.md`; for the shipped detail of each phase see `CHANGELOG.md#[1.1.0]`. Do **not** treat any phase here as outstanding work.
+
+**Milestone:** v1.1 — Cross-platform + Hardened *(shipped)*
 **Branch:** `v1.1` (single branch; phases ship as atomic commits, not separate branches)
 **Phases:** 6
 **Estimated effort:** 30-50 maintainer-hours across phases (excluding wall-clock for cert acquisition + Mac/Linux test boxes)
