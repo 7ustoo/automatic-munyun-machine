@@ -48,3 +48,7 @@ wrapper/wrapper.exe
 
 # Local Claude Code state
 .claude/
+
+# dashboard harness runtime junk (browser profile + screenshots)
+dev/dashboard-harness/app-window-test-profile/
+dev/dashboard-harness/shots/

@@ -255,3 +255,53 @@ func TestBuildStatus_NowFieldIsRFC3339UTC(t *testing.T) {
 		t.Errorf("Now = %q is not valid RFC3339: %v", s.Now, err)
 	}
 }
+
+// --- v4.0: scrape status + running detection ---
+
+func TestBuildStatus_LastScrapeFailed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, filepath.Join("data", "scrape-status.json"),
+		`{"ok":false,"at":"2026-07-06T07:00:00Z","error":"hiring.cafe blocked the scrape","kind":"auth","profile":"default"}`)
+	out := buildStatus(dir)
+	if out.LastScrape == nil {
+		t.Fatalf("LastScrape nil")
+	}
+	if out.LastScrape.OK || out.LastScrape.Kind != "auth" || out.LastScrape.Error == "" {
+		t.Errorf("unexpected LastScrape: %+v", out.LastScrape)
+	}
+}
+
+func TestBuildStatus_LastScrapeMalformed(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, filepath.Join("data", "scrape-status.json"), `{not json`)
+	if out := buildStatus(dir); out.LastScrape != nil {
+		t.Errorf("malformed status must leave LastScrape nil")
+	}
+}
+
+func TestBuildStatus_ScrapeRunningFreshLock(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "data", "scrape.lock.lock")
+	if err := os.MkdirAll(lock, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := buildStatus(dir)
+	if !out.ScrapeRunning {
+		t.Errorf("fresh lock dir must report ScrapeRunning")
+	}
+}
+
+func TestBuildStatus_ScrapeNotRunningStaleLock(t *testing.T) {
+	dir := t.TempDir()
+	lock := filepath.Join(dir, "data", "scrape.lock.lock")
+	if err := os.MkdirAll(lock, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-10 * time.Minute)
+	if err := os.Chtimes(lock, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if out := buildStatus(dir); out.ScrapeRunning {
+		t.Errorf("stale lock must not report ScrapeRunning")
+	}
+}

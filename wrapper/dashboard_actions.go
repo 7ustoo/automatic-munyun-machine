@@ -273,6 +273,22 @@ func (d *dashboardServer) handleResumeApply(w http.ResponseWriter, r *http.Reque
 	d.relayDashboardAPI(w, 15*time.Second, "resume-apply", b["terms"])
 }
 
+// --- v4.0: term muting + config backups ---
+
+func (d *dashboardServer) handleScoreMute(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 10*time.Second, "score-mute", b["term"])
+}
+
+func (d *dashboardServer) handleConfigBackups(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "config-backups")
+}
+
+func (d *dashboardServer) handleConfigRestore(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "config-restore", b["name"])
+}
+
 // --- v2.5: self-update ---
 
 func (d *dashboardServer) execSelfUpdate(timeout time.Duration, args ...string) ([]byte, error) {
