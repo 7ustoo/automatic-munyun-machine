@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { currentVersion, semverGt } from './update-checker.mjs';
@@ -102,6 +103,34 @@ async function apply() {
     process.stderr.write(`downloaded ${bytes} bytes → ${dest}\n`);
   } catch (e) {
     return out({ ok: false, error: 'Download failed: ' + String(e.message || e) });
+  }
+
+  // v4.0: verify the download against the release's SHA256SUMS.txt before
+  // executing it. CI publishes the sums with every release; a mismatch means
+  // a corrupted or tampered download — never run it. Missing sums asset
+  // (very old releases) proceeds with a logged warning.
+  try {
+    const sums = (rel.assets || []).find(x => /^SHA256SUMS\.txt$/i.test(x.name));
+    if (sums) {
+      const r = await fetch(sums.browser_download_url, { signal: AbortSignal.timeout(30000), redirect: 'follow' });
+      if (!r.ok) throw new Error('SHA256SUMS download HTTP ' + r.status);
+      const line = (await r.text()).split('\n').find(l => l.toLowerCase().includes(asset.name.toLowerCase()));
+      const expected = line?.trim().split(/\s+/)[0]?.toLowerCase();
+      if (!expected || !/^[0-9a-f]{64}$/.test(expected)) throw new Error('installer not listed in SHA256SUMS.txt');
+      const actual = crypto.createHash('sha256').update(fs.readFileSync(dest)).digest('hex');
+      if (actual !== expected) {
+        try { fs.unlinkSync(dest); } catch {}
+        return out({ ok: false, error: 'Installer checksum mismatch — download discarded. Try again, or install from the releases page.' });
+      }
+      process.stderr.write('sha256 verified\n');
+    } else {
+      process.stderr.write('warning: release has no SHA256SUMS.txt — skipping verification\n');
+    }
+  } catch (e) {
+    // Verification infrastructure failed (network blip on the sums file, or
+    // the asset isn't listed). Err on the side of NOT running the binary.
+    try { fs.unlinkSync(dest); } catch {}
+    return out({ ok: false, error: 'Could not verify the download (' + String(e.message || e) + '). Nothing was installed.' });
   }
 
   // Detached updater: a cmd script that OUTLIVES this process AND the AMM

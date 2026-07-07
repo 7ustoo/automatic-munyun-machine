@@ -90,6 +90,9 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
+	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))       // v4.0
+	mux.HandleFunc("/api/config/backups", d.handleConfigBackups)            // v4.0 (read-only)
+	mux.HandleFunc("/api/config/restore", d.guardPost(d.handleConfigRestore)) // v4.0
 	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
 	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
 	mux.HandleFunc("/api/jobs/clear", d.guardPost(d.handleJobsClear)) // v2.8: clear all terms
@@ -276,7 +279,40 @@ type statusResponse struct {
 	Profile    profileInfo   `json:"profile"`
 	LastBatch  lastBatchInfo `json:"lastBatch"`
 	NeedsSetup bool          `json:"needsSetup"` // v2.7: gates the dashboard's setup panel
-	Now        string        `json:"now"`
+	// v4.0: outcome of the most recent scrape (data/scrape-status.json,
+	// written by daily-batch on every exit path) + whether one is running
+	// right now (data/scrape.lock freshness). Powers the red failure banner
+	// and the progress bar for runs started outside this page.
+	LastScrape    *scrapeStatusInfo `json:"lastScrape"`
+	ScrapeRunning bool              `json:"scrapeRunning"`
+	Now           string            `json:"now"`
+}
+
+type scrapeStatusInfo struct {
+	OK      bool   `json:"ok"`
+	At      string `json:"at"`
+	Error   string `json:"error,omitempty"`
+	Kind    string `json:"kind,omitempty"`
+	Profile string `json:"profile,omitempty"`
+	JobCount int   `json:"jobCount,omitempty"`
+}
+
+// readScrapeStatusInto loads data/scrape-status.json (missing/malformed →
+// LastScrape stays nil) and probes data/scrape.lock: proper-lockfile
+// refreshes the lock dir's mtime while a scrape holds it, so a lock touched
+// within the last 90s means a scrape is running right now.
+func readScrapeStatusInto(installDir string, now time.Time, out *statusResponse) {
+	if data, err := os.ReadFile(filepath.Join(installDir, "data", "scrape-status.json")); err == nil {
+		var st scrapeStatusInfo
+		if json.Unmarshal(data, &st) == nil && st.At != "" {
+			out.LastScrape = &st
+		}
+	}
+	if fi, err := os.Stat(filepath.Join(installDir, "data", "scrape.lock.lock")); err == nil {
+		if now.Sub(fi.ModTime()) < 90*time.Second {
+			out.ScrapeRunning = true
+		}
+	}
 }
 
 type wrapperInfo struct {
@@ -361,6 +397,7 @@ func buildStatusAt(installDir string, now time.Time) statusResponse {
 	readHeartbeatInto(installDir, now, &out)
 	readConfigInto(installDir, &out)
 	readLastBatchInto(installDir, out.Profile.Active, &out)
+	readScrapeStatusInto(installDir, now, &out)
 
 	// v2.1: Telegram is optional; the page shows enabled/disabled + a setup
 	// panel. "Connected" still requires an alive, polling bot.

@@ -404,6 +404,24 @@
   .batch-banner { border-color: var(--green); background: linear-gradient(90deg, rgba(63,185,80,.18), rgba(88,166,255,.10)); animation: viewin .2s var(--ease); }
   .batch-banner .ub-badge { background: var(--green); }
 
+  /* v4.0: scrape-FAILED banner — red variant. Desktop-only users must see a
+     failed 7am run without opening a log file. */
+  .fail-banner { border-color: var(--red); background: linear-gradient(90deg, rgba(248,81,73,.16), rgba(248,81,73,.06)); animation: viewin .2s var(--ease); }
+  .fail-banner .ub-badge { background: var(--red); color: #fff; }
+
+  /* v4.0: Why panel — score journey + misses. */
+  .why-journey { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 2px 0 10px; font-size: 12px; color: var(--text-2); }
+  .why-journey .jpill { background: var(--surface); border: 1px solid var(--border-2); border-radius: 999px; padding: 2px 10px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .why-journey .jpill b { font-weight: 650; }
+  .why-journey .jpill.final { border-color: rgba(63,185,80,.5); }
+  .why-journey .jarrow { color: var(--text-3); }
+  .why-ai { display: block; margin: 8px 0 2px; padding: 8px 12px; border: 1px solid rgba(88,166,255,.35); border-radius: var(--r-sm); background: var(--surface); color: var(--text-2); font-size: 12px; max-width: 68ch; }
+  .why-ai b { color: var(--accent-2); }
+  .kw.miss { border-color: rgba(217,166,46,.5); }
+  .kw .kwbtn { border: none; background: none; padding: 0 0 0 6px; margin: 0; cursor: pointer; font-size: 10.5px; font-weight: 650; color: var(--text-3); }
+  .kw .kwbtn.add { color: var(--accent-2); }
+  .kw .kwbtn:hover { color: var(--text); background: none; border: none; }
+
   /* ---- Profiles -------------------------------------------------------------- */
   .prof-item {
     display: flex; align-items: center; justify-content: space-between;
@@ -851,6 +869,20 @@
         </div>
       </div>
 
+      <!-- v4.0: scrape-FAILED banner. Driven by lastScrape on the status
+           poll (data/scrape-status.json) — a failed scheduled/Telegram/tray
+           run is no longer silent on the desktop. -->
+      <div id="fail-banner" class="update-banner fail-banner hidden" role="alert">
+        <div class="ub-main">
+          <span class="ub-badge">Failed</span>
+          <span id="fb-text">The last scrape failed.</span>
+        </div>
+        <div class="ub-actions">
+          <button class="primary" id="fb-retry">Try again</button>
+          <button class="ghost icon" id="fb-dismiss" aria-label="Dismiss"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
         <div class="stats">
@@ -919,6 +951,8 @@
             <button class="sm primary" id="resume-upload-btn">Rescan resume</button>
           </div>
           <div class="note" id="resume-note"></div>
+          <!-- v4.0: thin-CV warning — matching quality depends on extracted terms. -->
+          <div class="note bad hidden" id="cv-warn"></div>
 
           <!-- v2.8: search-style toggle lives next to the suggestions it shapes. -->
           <div class="set-row" style="margin-top:14px"><label>Search style</label>
@@ -946,6 +980,18 @@
           </div>
           <div class="hint">A new profile inherits your current settings + CV. Switch to it and upload a different resume from the Resume page.</div>
           <div class="note" id="prof-note"></div>
+        </div>
+
+        <!-- v4.0: config backups — automatic snapshots before setup/profile
+             changes; one-click restore if anything ever wipes your settings. -->
+        <div class="card">
+          <h2>Settings backups</h2>
+          <div class="muted-sm">AMM snapshots your settings (all profiles) before anything rewrites them. Restore one if a profile or setting ever goes missing.</div>
+          <div class="row" style="margin-top:10px">
+            <select id="bk-select" style="flex:1;min-width:220px;width:auto"></select>
+            <button class="sm danger" id="bk-restore">Restore</button>
+          </div>
+          <div class="note" id="bk-note"></div>
         </div>
       </section>
 
@@ -1028,6 +1074,19 @@
             <select id="set-recency"><option value="any">Any time</option><option value="today">Posted today</option><option value="3days">Last 3 days</option><option value="week">This week</option><option value="month">This month</option></select></div>
           <div class="note" id="set-note"></div>
           <div class="hint">Changes save instantly. The search-style toggle lives on the Resume page, next to the suggestions it shapes.</div>
+        </div>
+
+        <!-- v4.0: Smart match (AI) — optional rerank of the top jobs. -->
+        <div class="card">
+          <h2>Smart match (AI) <span class="pill" id="ai-pill">off</span></h2>
+          <div class="muted-sm">Optional: after keyword scoring, the top ~40 jobs get a second opinion from Claude — a true fit score and a one-line reason in each job's <b>Why</b> panel. Uses your own Anthropic API key; one small call per scrape; everything else keeps working without it.</div>
+          <div class="set-row" style="margin-top:8px"><label>Enable Smart match</label>
+            <select id="set-ai-enabled"><option value="false">Off</option><option value="true">On</option></select></div>
+          <div class="set-row"><label>Anthropic API key</label>
+            <input type="text" id="set-ai-key" class="num" style="width:230px" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" /></div>
+          <div class="set-row"><label>Model</label>
+            <input type="text" id="set-ai-model" class="num" style="width:230px" autocomplete="off" spellcheck="false" /></div>
+          <div class="hint">The key is stored only in your local <code>config.json</code> and is never displayed again after saving. Muted terms: <span id="muted-count">0</span>.</div>
         </div>
       </section>
 
@@ -1348,11 +1407,39 @@ function render(s) {
     state.lastGen = gen;
     onFreshBatch(s.lastBatch);
   }
+
+  // v4.0: scrape-in-progress bar for runs started ANYWHERE (scheduler,
+  // Telegram, tray) — data/scrape.lock freshness rides the status poll.
+  $("scrapebar").classList.toggle("active", !!s.scrapeRunning || localScrapePending);
+
+  // v4.0: red failure banner. Shown while the most recent scrape outcome is
+  // a failure (and nothing is currently running); auto-clears on the next
+  // success, dismissible per-failure.
+  const ls = s.lastScrape;
+  window.__failKey = ls && !ls.ok ? ls.at : "";
+  if (ls && !ls.ok && !s.scrapeRunning && window.__failDismissed !== window.__failKey) {
+    $("fb-text").textContent =
+      `Last scrape failed${ls.at ? " · " + ls.at.slice(0, 16).replace("T", " ") : ""} — ${ls.error || "unknown error"}`;
+    $("fail-banner").classList.remove("hidden");
+  } else {
+    $("fail-banner").classList.add("hidden");
+  }
 }
+$("fb-dismiss").addEventListener("click", () => {
+  window.__failDismissed = window.__failKey;
+  $("fail-banner").classList.add("hidden");
+});
+$("fb-retry").addEventListener("click", () => {
+  window.__failDismissed = window.__failKey;
+  $("fail-banner").classList.add("hidden");
+  $("scrape-btn").click();
+});
 
 // v3.0.1: a new batch just landed — refresh everything and announce it.
 let scrapeSafetyTimer = null;
+let localScrapePending = false; // v4.0: bar shows until batch-land / timeout
 function onFreshBatch(lb) {
+  localScrapePending = false;
   $("scrapebar").classList.remove("active");
   clearTimeout(scrapeSafetyTimer);
   loadBatch();
@@ -1376,6 +1463,11 @@ async function loadBatch() {
     const batch = await res.json();
     state.jobs = batch.jobs || [];
     state.batchMeta = { date: batch.date || "", jobCount: batch.jobCount || state.jobs.length, generatedAt: batch.generatedAt || "" };
+    // v4.0: applied-marks persist across reloads, keyed per batch.
+    try {
+      state.__appliedKey = "amm-applied-" + (state.batchMeta.generatedAt || state.batchMeta.date || "x");
+      state.applied = new Set((JSON.parse(localStorage.getItem(state.__appliedKey) || "[]")).map(String));
+    } catch {}
     state.loadedOnce = true;
     renderStats();
     renderJobs();
@@ -1438,12 +1530,27 @@ function visibleJobs() {
   return out;
 }
 
+// v4.0: the Why panel — score journey (card → description → AI → final),
+// matched terms, the job's asks your resume lacks (+search / mute), and the
+// Smart match reason when AI rerank ran.
 function whyRowHTML(idx) {
-  const kws = (window.__batchMatched?.[idx] || []);
-  const html = kws.length
+  const j = (window.__batchById || {})[idx] || {};
+  const kws = j.matched || [];
+  const parts = [];
+  const jr = [`<span class="jpill">Card scan <b>${j.cardPct ?? j.matchPct ?? 0}%</b></span>`];
+  if (j.jdPct != null) jr.push('<span class="jarrow">→</span>', `<span class="jpill">Full description <b>${j.jdPct}%</b></span>`);
+  if (j.aiPct != null) jr.push('<span class="jarrow">→</span>', `<span class="jpill">AI check <b>${j.aiPct}%</b></span>`);
+  jr.push('<span class="jarrow">→</span>', `<span class="jpill final">Final <b>${j.matchPct ?? 0}%</b></span>`);
+  parts.push(`<div class="why-journey">${jr.join("")}</div>`);
+  parts.push(`<div><b>Matched from your resume:</b> ${kws.length
     ? kws.map(k => `<span class="kw">${escapeHTML(k)}</span>`).join("")
-    : "<i>No CV keyword matched — ranked on search relevance only.</i>";
-  return `<td></td><td colspan="5"><b>Matched from your CV:</b> ${html}</td>`;
+    : "<i>No CV keyword matched — ranked on search relevance only.</i>"}</div>`);
+  if ((j.missing || []).length) {
+    parts.push(`<div style="margin-top:6px"><b>The job asks for — not on your resume:</b> ${j.missing.map(t =>
+      `<span class="kw miss">${escapeHTML(t)}<button class="kwbtn add" data-kwadd="${escapeAttr(t)}" title="Add as a search term">+ search</button><button class="kwbtn" data-kwmute="${escapeAttr(t)}" title="Never count this term in scoring again">mute</button></span>`).join("")}</div>`);
+  }
+  if (j.aiReason) parts.push(`<span class="why-ai"><b>Smart match${j.aiPct != null ? " — " + j.aiPct + "/100" : ""}:</b> ${escapeHTML(j.aiReason)}</span>`);
+  return `<td></td><td colspan="5">${parts.join("")}</td>`;
 }
 
 function renderJobs() {
@@ -1501,9 +1608,9 @@ function renderJobs() {
   </table>`;
   $("lb-foot").textContent = jobs.length === all.length
     ? all.length + " jobs" : jobs.length + " of " + all.length + " jobs";
-  // Stash matched keywords for the "Why" expander.
-  window.__batchMatched = {};
-  for (const j of all) window.__batchMatched[j.idx] = j.matched || [];
+  // Stash full job objects for the "Why" expander (v4.0: journey + misses + AI).
+  window.__batchById = {};
+  for (const j of all) window.__batchById[j.idx] = j;
 }
 
 // Toolbar wiring.
@@ -1523,6 +1630,27 @@ $("job-sort").addEventListener("change", (e) => { state.sort = e.target.value; r
 
 // Event delegation for the per-job action buttons.
 $("lb-body").addEventListener("click", async (ev) => {
+  // v4.0: Why-panel miss-chip actions.
+  const kwAdd = ev.target.closest("button[data-kwadd]");
+  if (kwAdd) {
+    const r = await postJSON("/api/jobs/add", { term: kwAdd.dataset.kwadd });
+    toast(r.ok ? `Added "${kwAdd.dataset.kwadd}" to your searches.` : (r.error || "Could not add."), r.ok ? "good" : "bad");
+    if (r.ok) renderTerms(r.list || []);
+    return;
+  }
+  const kwMute = ev.target.closest("button[data-kwmute]");
+  if (kwMute) {
+    const term = kwMute.dataset.kwmute;
+    const ok = await confirmModal({
+      title: `Mute "${term}"?`,
+      body: "AMM will never count this term in match scores again (takes effect on the next scrape).",
+      confirmText: "Mute",
+    });
+    if (!ok) return;
+    const r = await postJSON("/api/score/mute", { term });
+    toast(r.ok ? `Muted "${term}".` : (r.error || "Could not mute."), r.ok ? "good" : "bad");
+    return;
+  }
   const btn = ev.target.closest("button[data-act]");
   if (!btn) return;
   const act = btn.dataset.act, idx = btn.dataset.idx;
@@ -1554,7 +1682,8 @@ $("lb-body").addEventListener("click", async (ev) => {
       toast(act === "applied" ? `Marked applied — job #${idx} won't show again.` : `Saved job #${idx} on hiring.cafe.`, "good");
       if (act === "applied") {
         state.applied.add(String(idx));
-        renderJobs(); // applied styling survives re-renders via state.applied
+        try { localStorage.setItem(state.__appliedKey || "amm-applied", JSON.stringify([...state.applied])); } catch {}
+        renderJobs(); // applied styling survives re-renders + reloads (localStorage)
       } else { btn.innerHTML = label; btn.disabled = false; }
     } else {
       toast(r.error || "Action failed", "bad");
@@ -1584,9 +1713,10 @@ $("scrape-btn").addEventListener("click", async () => {
       // auto-refreshes and raises the banner when generatedAt changes. The
       // safety timer just stops the bar if the scrape dies without a batch
       // (45 min matches the scheduled run's time budget).
+      localScrapePending = true;
       $("scrapebar").classList.add("active");
       clearTimeout(scrapeSafetyTimer);
-      scrapeSafetyTimer = setTimeout(() => $("scrapebar").classList.remove("active"), 45 * 60 * 1000);
+      scrapeSafetyTimer = setTimeout(() => { localScrapePending = false; $("scrapebar").classList.remove("active"); }, 45 * 60 * 1000);
     } else {
       toast("Could not start: " + (r.error || "error"), "bad");
     }
@@ -1612,8 +1742,59 @@ async function loadSettings() {
     $("set-recency").value = s.maxJobAge || "any";
     $("set-mode").value = s.searchMode;
     renderTerms(s.queries || []);
+    // v4.0: Smart match config (key is write-only — server returns aiHasKey).
+    $("set-ai-enabled").value = String(!!s.aiEnabled);
+    $("ai-pill").textContent = s.aiEnabled ? "on" : "off";
+    $("set-ai-key").value = "";
+    $("set-ai-key").placeholder = s.aiHasKey ? "•••••••• saved — paste to replace" : "sk-ant-…";
+    $("set-ai-model").value = s.aiModel || "claude-opus-4-8";
+    $("muted-count").textContent = (s.mutedTerms || []).length;
+    // v4.0: thin-CV honesty — weak extraction means weak matching.
+    const warn = $("cv-warn");
+    if (s.cvTermCount != null && s.cvTermCount < 8) {
+      warn.textContent = `⚠ Only ${s.cvTermCount} term${s.cvTermCount === 1 ? "" : "s"} could be extracted from your resume — match scores will be weak. Add more named skills/tools/certs to the resume and rescan.`;
+      warn.classList.remove("hidden");
+    } else warn.classList.add("hidden");
   } catch {}
 }
+
+// v4.0: Smart match listeners.
+$("set-ai-enabled").addEventListener("change", async e => {
+  await saveSetting("scoring.ai.enabled", e.target.value);
+  $("ai-pill").textContent = e.target.value === "true" ? "on" : "off";
+});
+$("set-ai-key").addEventListener("change", async e => {
+  const v = e.target.value.trim();
+  if (!v) return;
+  await saveSetting("scoring.ai.apiKey", v);
+  e.target.value = "";
+  e.target.placeholder = "•••••••• saved — paste to replace";
+});
+$("set-ai-model").addEventListener("change", e => saveSetting("scoring.ai.model", e.target.value));
+
+// v4.0: settings backups (list + restore).
+async function loadBackups() {
+  try {
+    const r = await (await fetch("/api/config/backups", { cache: "no-store" })).json();
+    if (!r.ok) return;
+    $("bk-select").innerHTML = (r.backups || []).map(b =>
+      `<option value="${escapeAttr(b)}">${escapeHTML(b.replace(/^config-/, "").replace(/\.json$/, ""))}</option>`
+    ).join("") || '<option value="">no backups yet</option>';
+  } catch {}
+}
+$("bk-restore").addEventListener("click", async () => {
+  const name = $("bk-select").value;
+  if (!name) { note("bk-note", "No backup selected.", false); return; }
+  const ok = await confirmModal({
+    title: "Restore this settings backup?",
+    body: "Your current settings are snapshotted first, then replaced by the backup (all profiles). The page reloads after.",
+    confirmText: "Restore", danger: true,
+  });
+  if (!ok) return;
+  const r = await postJSON("/api/config/restore", { name });
+  if (r.ok) { toast("Settings restored — reloading.", "good"); setTimeout(() => location.reload(), 700); }
+  else note("bk-note", "✗ " + (r.error || "restore failed"), false);
+});
 
 async function saveSetting(path, value) {
   const r = await postJSON("/api/settings/set", { path, value: String(value) });
@@ -1986,6 +2167,7 @@ $("ub-update").addEventListener("click", async () => {
     loadBatch();
     loadSettings();
     loadProfiles();
+    loadBackups();
     checkForUpdate();
     setInterval(checkForUpdate, 30 * 60 * 1000);
   }

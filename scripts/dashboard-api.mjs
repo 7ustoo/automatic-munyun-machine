@@ -65,7 +65,19 @@ function settingsGet() {
       scheduleTime: cfg.schedule?.time || '07:00',
       searchMode: cfg.search?.mode === 'keywords' ? 'keywords' : 'titles',
       maxJobAge: cfg.filters?.maxJobAge || 'any',
-      queries: (cfg.queries || []).map(q => q.term)
+      queries: (cfg.queries || []).map(q => q.term),
+      // v4.0: Smart match (AI) — the key itself is NEVER returned, only
+      // whether one is stored. Plus muted terms + a thin-CV signal.
+      aiEnabled: !!cfg.scoring?.ai?.enabled,
+      aiHasKey: !!(cfg.scoring?.ai?.apiKey),
+      aiModel: cfg.scoring?.ai?.model || 'claude-opus-4-8',
+      mutedTerms: cfg.scoring?.mutedTerms || [],
+      cvTermCount: (() => {
+        try {
+          const cv = JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8'));
+          return (cv.titles?.length || 0) + (cv.certs?.length || 0) + (cv.skills?.length || 0) + (cv.compliance?.length || 0);
+        } catch { return null; }
+      })()
     }
   });
 }
@@ -77,9 +89,19 @@ function settingsSet(dotPath, jsonValue) {
   const allowed = new Set([
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.applicationFormEase', 'filters.maxJobAge',
-    'scoring.matchFloorPercent', 'schedule.time', 'search.mode'
+    'scoring.matchFloorPercent', 'schedule.time', 'search.mode',
+    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore'
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
+  if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'scoring.ai.apiKey') {
+    value = String(value || '').trim();
+    if (value && !/^[\x21-\x7e]{20,200}$/.test(value)) return out({ ok: false, error: 'that does not look like an API key' });
+  }
+  if (dotPath === 'scoring.ai.model') {
+    value = String(value || '').trim();
+    if (!/^[a-z0-9.-]{5,60}$/i.test(value)) value = 'claude-opus-4-8';
+  }
   // Light validation for the numeric / enum ones.
   if (dotPath === 'user.maxYoeAcceptable') value = Math.max(0, Math.min(30, parseInt(value) || 0));
   if (dotPath === 'user.salaryFloorUsd') value = Math.max(0, Math.min(900000, parseInt(value) || 0));
@@ -483,6 +505,20 @@ if (isMain) (async () => {
   switch (cmd) {
     case 'settings-get': return settingsGet();
     case 'settings-set': return settingsSet(a, b);
+    // v4.0: mute a term from the Why panel; list/restore config backups.
+    case 'score-mute': {
+      const term = (a || '').trim().toLowerCase();
+      if (!term) return out({ ok: false, error: 'empty term' });
+      const cfg = cfgRW.read();
+      const muted = [...new Set([...(cfg.scoring?.mutedTerms || []).map(t => String(t).toLowerCase()), term])];
+      cfgRW.set('scoring.mutedTerms', muted);
+      return out({ ok: true, muted });
+    }
+    case 'config-backups': return out({ ok: true, backups: cfgRW.listConfigSnapshots() });
+    case 'config-restore': {
+      try { cfgRW.restoreConfigSnapshot(a); return out({ ok: true }); }
+      catch (e) { return out({ ok: false, error: String(e.message || e) }); }
+    }
     case 'jobs-add':     return jobsAdd(a);
     case 'jobs-remove':  return jobsRemove(a);
     case 'jobs-clear':   return jobsClear();
@@ -496,14 +532,14 @@ if (isMain) (async () => {
     // v2.6: profile CRUD from the dashboard.
     case 'profile-list':   return profileList();
     case 'profile-add':    return profileAdd(a);
-    case 'profile-rename': return profileRename(a, b);
-    case 'profile-delete': return profileDelete(a);
+    case 'profile-rename': cfgRW.snapshotConfig('pre-rename'); return profileRename(a, b);
+    case 'profile-delete': cfgRW.snapshotConfig('pre-delete'); return profileDelete(a);
     case 'profile-switch': return profileSwitch(a);
     // v2.7: first-run setup subcommands.
     case 'setup-geocode':            return setupGeocode(a);
     case 'setup-hcafe-login-start':  return setupHcafeLoginStart();
     case 'setup-hcafe-login-status': return setupHcafeLoginStatus();
-    case 'setup-init':               return setupInit(a);
+    case 'setup-init':               cfgRW.snapshotConfig('pre-setup'); return setupInit(a);
     case 'setup-finalize':           return setupFinalize();
     default:
       out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|setup-init|setup-finalize> [args]' });

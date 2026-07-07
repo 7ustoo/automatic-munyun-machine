@@ -28,6 +28,7 @@ import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson } from './io-helpers.mjs';
+import { aiRerank } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 
@@ -530,6 +531,27 @@ const SALARY_FLOOR_K= Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
 const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 25;
 const TF_CAP        = 3; // count term occurrences up to this many times
 
+// v4.0: optional AI rerank (off by default; configured from the dashboard
+// Settings page). Key lives in config.json (gitignored, local-only) or the
+// AMM_AI_KEY env var. NEVER log the key.
+const AI_CFG = {
+  enabled: !!SCORING.ai?.enabled,
+  apiKey: SCORING.ai?.apiKey || process.env.AMM_AI_KEY || '',
+  model: SCORING.ai?.model || 'claude-opus-4-8',
+};
+
+// v4.0: scrape outcome record — the dashboard's red "scrape failed" banner
+// reads this via /api/status. Written on EVERY exit path so a failed 7am run
+// is never silent for desktop-only users.
+function writeScrapeStatus(ok, extra = {}) {
+  try {
+    atomicWriteJson(path.join(ROOT, 'data', 'scrape-status.json'), {
+      ok, at: new Date().toISOString(),
+      profile: PP.dir.split(/[/\\]/).pop(), ...extra
+    });
+  } catch {}
+}
+
 // Parse salary numbers from text. Handles ranges, dashes (-, –, —), commas,
 // optional "K"/"k", and "USD"/"$" prefixes. Returns array of numbers in $K.
 //   "$120k–$160K"        → [120, 160]
@@ -568,6 +590,40 @@ function tokensAllPresent(jdText, phrase) {
   return tokens.every(t => termRegex(t).test(jdText));
 }
 
+// v4.0: user-muted terms — never score these (set from the dashboard's Why
+// panel via /api/score/mute; persisted at scoring.mutedTerms).
+const MUTED = new Set((SCORING.mutedTerms || []).map(t => String(t).toLowerCase()));
+
+// v4.0: context guards for ambiguous CV terms — the "Palo Alto" fix. A term
+// listed here only scores when its disambiguating context appears in the SAME
+// text; "Palo Alto, CA" in a location line no longer credits the firewall
+// vendor skill. Only consulted for terms the CV actually contains.
+export const AMBIGUOUS_TERM_CONTEXT = {
+  'palo alto': /palo\s*alto\s*networks|pan-?os\b|panorama|prisma|ngfw|cortex|firewall/i,
+  'chef':      /chef\s+(server|infra|cookbooks?|recipes?|automate)|opscode|configuration management/i,
+  'puppet':    /puppet\s+(enterprise|server|modules?|manifests?|bolt)|configuration management/i,
+  'salt':      /saltstack|salt\s+(stack|master|minion|states?)/i,
+};
+export function termAllowedInText(term, text) {
+  const rx = AMBIGUOUS_TERM_CONTEXT[String(term).toLowerCase()];
+  return !rx || rx.test(text);
+}
+
+// v4.0: role-family soft gate. A job whose TITLE is clearly a non-technical
+// family (marketing, sales, HR, …) can't climb the ranks on keyword crumbs —
+// its score is multiplied down unless the title itself carries one of the
+// CV's own cluster terms ("Marketing Security Manager" escapes). Only active
+// when the CV has detected primary clusters; fail-open otherwise.
+export const OFF_FAMILY_RX = /\b(marketing|sales(?:\s+(?:rep|representative|associate))?|account (?:executive|manager)|business development|recruiter|talent acquisition|human resources|customer (?:success|service|support)|paralegal|attorney|accountant|bookkeeper|nurse|physician|dental|driver|warehouse|forklift|barista|cashier|retail associate|property manager|real estate agent)\b/i;
+export const FAMILY_PENALTY = 0.35;
+function familyPenalty(title) {
+  if (!CV_PRIMARY_CLUSTERS.length || !title || !OFF_FAMILY_RX.test(title)) return 1;
+  for (const t of CLUSTER_TERMS) {
+    if (t.length > 2 && termRegex(t).test(title)) return 1;
+  }
+  return FAMILY_PENALTY;
+}
+
 export function scoreJob(job) {
   const text = ((job.title || '') + '\n' + (job.cardText || ''));
   let score = 0;
@@ -575,11 +631,13 @@ export function scoreJob(job) {
   const seen = new Set();
   const tryMatch = (term, baseWeight) => {
     if (seen.has(term.toLowerCase())) return;
+    if (MUTED.has(term.toLowerCase())) return;              // v4.0
     const weight = baseWeight * clusterMultiplier(term);
     // Exact phrase / word-boundary match. Term-frequency cap: count up to TF_CAP.
     const re = termRegex(term, 'gi');
     const matches = text.match(re);
     if (matches && matches.length > 0) {
+      if (!termAllowedInText(term, text)) return;           // v4.0: ambiguous-term guard
       const tf = Math.min(matches.length, TF_CAP);
       score += weight * tf;
       matched.push(tf > 1 ? `${term} ×${tf}` : term);
@@ -588,6 +646,7 @@ export function scoreJob(job) {
     }
     // Multi-token phrase that didn't match exactly — try tokens-anywhere fallback
     if (term.includes(' ') && tokensAllPresent(text, term)) {
+      if (!termAllowedInText(term, text)) return;           // v4.0
       score += weight * 0.5;
       matched.push(`${term} (partial)`);
       seen.add(term.toLowerCase());
@@ -597,13 +656,13 @@ export function scoreJob(job) {
   for (const c of CV_CERTS)      tryMatch(c, W_CERT);
   for (const s of CV_SKILLS)     tryMatch(s, W_SKILL);
   for (const c of CV_COMPLIANCE) tryMatch(c, W_COMPLIANCE);
-  // Salary check — if visible and any number ≥ floor (in $K), bonus; else penalty
+  // v4.0: salary no longer adds/removes score points (it lifted irrelevant
+  // jobs past the floor). It's now a TIE-BREAKER in compareJobs — parsed
+  // here so the caller can stash salaryK on the row.
   const salaryNums = parseSalaryK(text);
-  if (salaryNums.length) {
-    if (Math.max(...salaryNums) >= SALARY_FLOOR_K) score += SALARY_BONUS;
-    else score += SALARY_PENALTY;
-  }
-  return { score, matched };
+  const salaryK = salaryNums.length ? Math.max(...salaryNums) : 0;
+  score *= familyPenalty(job.title);                         // v4.0
+  return { score, matched, salaryK };
 }
 
 // Calibrated raw-score → percentage. score 30+ → 90-100%, etc.
@@ -613,6 +672,59 @@ function scoreToPercent(s) {
   if (s >= 10) return Math.round(50 + (s - 10) * 2.5);
   if (s >= 5)  return Math.round(30 + (s - 5) * 4);
   return Math.max(0, Math.round(s * 7));
+}
+
+// v4.0: percentage bands for the FULL-DESCRIPTION rescore. JD text is ~4-5×
+// longer than a card, so raw scores run higher; these bands are scaled up
+// (~1.6×) and continuous at each boundary (48→90, 32→75, 16→50, 8→30).
+export function jdScoreToPercent(s) {
+  if (s >= 48) return Math.min(100, Math.round(90 + (s - 48) * 0.3));
+  if (s >= 32) return Math.round(75 + (s - 32) * 0.9375);
+  if (s >= 16) return Math.round(50 + (s - 16) * 1.5625);
+  if (s >= 8)  return Math.round(30 + (s - 8) * 2.5);
+  return Math.max(0, Math.round(s * 3.75));
+}
+
+// v4.0: final ordering — match % first, salary breaks ties. Known salary at
+// or above the user's floor ranks by amount; unknown salary is neutral;
+// below-floor salary sorts last among equals.
+export function salaryRank(r) {
+  const k = r.salaryK || 0;
+  if (!k) return 0;
+  return k >= SALARY_FLOOR_K ? k : -1000 + k;
+}
+export function compareJobs(a, b) {
+  if ((b.matchPct ?? 0) !== (a.matchPct ?? 0)) return (b.matchPct ?? 0) - (a.matchPct ?? 0);
+  return salaryRank(b) - salaryRank(a);
+}
+
+// v4.0: "the job asks for, your resume doesn't mention." Scans the JD against
+// the FULL cv-keywords dictionary (all domains) for known terms that the CV
+// lacks — powering the Why panel's misses row. Weighted: titles > certs >
+// skills/compliance, then term frequency.
+const DICT_ALL = (() => {
+  try {
+    const d = JSON.parse(fs.readFileSync(path.join(__dirname, 'cv-keywords.json'), 'utf8'));
+    return [
+      ...(d.titles || []).map(t => ({ t, w: 3 })),
+      ...(d.certs || []).map(t => ({ t, w: 2 })),
+      ...(d.skills || []).map(t => ({ t, w: 1 })),
+      ...(d.compliance || []).map(t => ({ t, w: 1 })),
+    ];
+  } catch { return []; }
+})();
+const CV_ALL_TERMS = new Set(
+  [...CV_TITLES, ...CV_CERTS, ...CV_SKILLS, ...CV_COMPLIANCE].map(t => t.toLowerCase()));
+export function missingTerms(text, max = 6) {
+  const out = [];
+  for (const { t, w } of DICT_ALL) {
+    const lt = t.toLowerCase();
+    if (CV_ALL_TERMS.has(lt) || MUTED.has(lt)) continue;
+    const m = text.match(termRegex(t, 'gi'));
+    if (m && termAllowedInText(t, text)) out.push({ t, rank: w * Math.min(m.length, 3) });
+  }
+  out.sort((a, b) => b.rank - a.rank);
+  return out.slice(0, max).map(x => x.t);
 }
 
 // Anything mentioning a US-government clearance gets dropped. Hits both the
@@ -773,17 +885,23 @@ async function resolveOnePage(page, viewjobUrl) {
     // Settle so JSON payload renders into HTML
     await page.waitForTimeout(1500);
     const html = await page.content();
+    // v4.0: we're already standing on the job page for the apply-URL — now we
+    // finally READ it. The rendered body text (title + full description +
+    // hiring.cafe's requirements summary) feeds the second-pass rescore.
+    let jdText = '';
+    try { jdText = await page.evaluate(() => document.body.innerText || ''); } catch {}
+    jdText = String(jdText).replace(/\s+/g, ' ').slice(0, 7000);
     const m = html.match(/"apply_url":"([^"]+)"/);
-    if (!m) return null;
+    if (!m) return { directUrl: null, jdText };
     const u = m[1];
     // Sanity check — `apply_url` is attacker-controllable (whatever the job
     // poster typed into hiring.cafe). Reject anything that isn't a plain
     // http(s) URL with no embedded HTML/quote characters before we let it
     // through to a Telegram <a href="…"> interpolation. Defense layered with
     // escHtmlAttr() at the message-build site (see buildMessage / F-H1).
-    if (!/^https?:\/\/[^\s<>"']+$/i.test(u)) return null;
-    return u;
-  } catch { return null; }
+    if (!/^https?:\/\/[^\s<>"']+$/i.test(u)) return { directUrl: null, jdText };
+    return { directUrl: u, jdText };
+  } catch { return { directUrl: null, jdText: '' }; }
 }
 
 async function resolveAll(rows) {
@@ -804,7 +922,7 @@ async function resolveAll(rows) {
         const idx = i++;
         if (idx >= rows.length) break;
         out[idx] = await resolveOnePage(p, rows[idx].href);
-        if (out[idx]) resolved++;
+        if (out[idx]?.directUrl) resolved++;
       }
     }));
     return out;
@@ -961,6 +1079,13 @@ function writeBatchTsv(top, directUrls, funnel) {
       score: r.score ?? 0,
       matchPct: r.matchPct ?? 0,
       matched: r.matched || [],
+      // v4.0: score-journey + coaching fields for the dashboard's Why panel.
+      cardPct: r.cardPct ?? r.matchPct ?? 0,
+      jdPct: r.jdPct ?? null,
+      aiPct: r.aiPct ?? null,
+      aiReason: r.aiReason || '',
+      missing: r.missing || [],
+      salaryK: r.salaryK || 0,
       directUrl: directUrls[i] || '',
       viewjobUrl: r.href
     }))
@@ -1000,6 +1125,7 @@ if (IS_CLI) (async () => {
     if (!CV.titles?.length && !CV.skills?.length && !CV.certs?.length && !CV.compliance?.length) {
       const msg = '⚠️ <b>This profile has no parsed CV.</b>\n\nEvery job will score 0% until you upload one. Run <code>/resume</code> in the bot, then <code>/scrape</code>.';
       log('Empty CV detected — aborting batch with user nudge.');
+      writeScrapeStatus(false, { error: 'This profile has no parsed resume — upload one on the Resume page, then scrape again.', kind: 'no-cv' });
       try { await tg(msg); } catch {}
       return;
     }
@@ -1010,6 +1136,7 @@ if (IS_CLI) (async () => {
     } catch (e) {
       if (e.unauth) {
         recordAuthFail();
+        writeScrapeStatus(false, { error: 'hiring.cafe blocked the scrape — your job feed needs a re-warm (or the site changed its layout).', kind: 'auth' });
         log('AUTH FAIL: ' + SCRUB(e.message));
         // Cross-platform-aware help string. The bot stamps the right helper
         // path per OS in v1.1; for the scraper's failure path we point at
@@ -1030,23 +1157,82 @@ if (IS_CLI) (async () => {
     const skippedSeen    = kept.filter(r => !applied.has(r.href) && blockedSeen.has(r.href)).length;
     log(`afterDedup=${fresh.length} (skipped ${kept.length - fresh.length}: ${skippedApplied} applied + ${skippedSeen} previously seen, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
-    // Score every fresh job against your CV, sort by match quality.
+    // Pass 1 — score every fresh job on its CARD text (cheap shortlist).
     for (const r of fresh) {
       const s = scoreJob(r);
       r.score = s.score;
       r.matched = s.matched;
+      r.salaryK = s.salaryK;
       r.matchPct = scoreToPercent(s.score);
+      r.cardPct = r.matchPct;
     }
     fresh.sort((a, b) => b.score - a.score);
-    // v1.0 E3: match floor — drop jobs below threshold BEFORE slicing top 100,
+    // v1.0 E3: match floor — drop jobs below threshold BEFORE slicing,
     // so the bot never ships 0% filler to fill out the batch.
     const aboveFloor = fresh.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
     const droppedBelowFloor = fresh.length - aboveFloor.length;
-    const top = aboveFloor.slice(0, 100);
-    log(`scored: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%  (floor=${MATCH_FLOOR_PCT}%, dropped ${droppedBelowFloor} below)`);
-    log(`Resolving ${top.length} direct ATS URLs in parallel…`);
-    const directUrls = await resolveAll(top);
-    log(`resolved=${directUrls.filter(Boolean).length}/${top.length}`);
+    // v4.0: shortlist WIDER than the final batch — the full-description
+    // rescore below re-ranks, so borderline card-scores get a second chance.
+    const JD_RESCORE = SCORING.jdRescore !== false; // default on
+    const shortlist = aboveFloor.slice(0, JD_RESCORE ? 130 : 100);
+    log(`card-scored: top=${shortlist[0]?.matchPct ?? 0}% (floor=${MATCH_FLOOR_PCT}%, dropped ${droppedBelowFloor} below) — resolving ${shortlist.length} job pages…`);
+    const resolved = await resolveAll(shortlist);
+    log(`resolved=${resolved.filter(r => r?.directUrl).length}/${shortlist.length} apply URLs`);
+
+    // Pass 2 — v4.0: rescore each shortlisted job on the REAL posting text
+    // captured during URL resolution (title + description + requirements
+    // summary). Short page text (< 400 chars) = load failure → keep the card
+    // score. Final % blends card 40% / description 60%.
+    let jdScored = 0;
+    for (let i = 0; i < shortlist.length; i++) {
+      const r = shortlist[i];
+      r.__direct = resolved[i]?.directUrl || '';
+      const jd = resolved[i]?.jdText || '';
+      if (!JD_RESCORE || jd.length < 400) continue;
+      const s2 = scoreJob({ title: r.title, cardText: jd });
+      r.jdPct = jdScoreToPercent(s2.score);
+      if (s2.matched.length) r.matched = s2.matched;
+      if (s2.salaryK) r.salaryK = s2.salaryK;
+      r.matchPct = Math.round(0.4 * r.cardPct + 0.6 * r.jdPct);
+      r.missing = missingTerms((r.title || '') + '\n' + jd);
+      jdScored++;
+    }
+    if (JD_RESCORE) log(`description-rescored ${jdScored}/${shortlist.length}`);
+
+    // Pass 3 — v4.0: optional AI rerank of the top candidates (opt-in via
+    // scoring.ai in Settings). Fail-open: any error leaves keyword scores.
+    if (AI_CFG.enabled && AI_CFG.apiKey) {
+      try {
+        shortlist.sort(compareJobs);
+        const candidates = shortlist.slice(0, 40).map((r, i) => ({
+          n: i, title: r.title, company: r.company,
+          text: ((resolved[shortlist.indexOf(r)]?.jdText) || r.cardText || '').slice(0, 900)
+        }));
+        const cvSummary = {
+          titles: CV_TITLES.slice(0, 8), certs: CV_CERTS.slice(0, 8),
+          skills: CV_SKILLS.slice(0, 25), compliance: CV_COMPLIANCE.slice(0, 8)
+        };
+        const ratings = await aiRerank({ apiKey: AI_CFG.apiKey, model: AI_CFG.model, cvSummary, candidates });
+        let applied2 = 0;
+        for (const rt of ratings || []) {
+          const r = shortlist[rt.n];
+          if (!r || typeof rt.fit !== 'number') continue;
+          r.aiPct = Math.max(0, Math.min(100, Math.round(rt.fit)));
+          r.aiReason = String(rt.reason || '').slice(0, 180);
+          r.kwPct = r.matchPct;
+          r.matchPct = Math.round(0.45 * r.kwPct + 0.55 * r.aiPct);
+          applied2++;
+        }
+        log(`AI rerank applied to ${applied2} jobs (model=${AI_CFG.model})`);
+      } catch (e) {
+        log(`AI rerank skipped (non-fatal): ${SCRUB(e.message || e)}`);
+      }
+    }
+
+    shortlist.sort(compareJobs);
+    const top = shortlist.slice(0, 100);
+    const directUrls = top.map(r => r.__direct || null);
+    log(`final: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%`);
     const funnel = {
       raw: all.length,
       keptAfterFilter: kept.length,
@@ -1129,9 +1315,11 @@ if (IS_CLI) (async () => {
       log(`CTA / callback table write failed (non-fatal): ${e.message}`);
     }
 
+    writeScrapeStatus(true, { jobCount: top.length });
     log('=== done ===');
   } catch (e) {
     const msg = '❌ daily-batch failed: ' + SCRUB(e.message || e);
+    writeScrapeStatus(false, { error: SCRUB(String(e.message || e)).slice(0, 300), kind: 'crash' });
     log(msg);
     try { await tg(msg); } catch (tgErr) { log(`(also: tg failed: ${SCRUB(tgErr.message || tgErr)})`); }
     // Release before the hard exit — finally doesn't run after process.exit.

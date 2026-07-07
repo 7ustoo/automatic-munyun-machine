@@ -31,6 +31,39 @@ const ROOT = path.join(__dirname, '..');
 const CFG_PATH = path.join(ROOT, 'config.json');
 const CFG_EXAMPLE = path.join(ROOT, 'config.example.json');
 
+// v4.0: rolling config snapshots — cheap insurance before any whole-config
+// rewrite (setup-init, profile delete/rename, restore). Keeps the last 10
+// under data/backups/. The M365 incident proved one config.json is a SPOF.
+export function snapshotConfig(reason = 'manual') {
+  try {
+    if (!fs.existsSync(CFG_PATH)) return null;
+    const dir = path.join(ROOT, 'data', 'backups');
+    fs.mkdirSync(dir, { recursive: true });
+    const name = `config-${new Date().toISOString().replace(/[:.]/g, '-')}-${String(reason).replace(/[^a-z0-9-]/gi, '')}.json`;
+    fs.copyFileSync(CFG_PATH, path.join(dir, name));
+    const all = fs.readdirSync(dir).filter(f => /^config-.*\.json$/.test(f)).sort();
+    for (const f of all.slice(0, Math.max(0, all.length - 10))) {
+      try { fs.unlinkSync(path.join(dir, f)); } catch {}
+    }
+    return name;
+  } catch { return null; }
+}
+export function listConfigSnapshots() {
+  try {
+    const dir = path.join(ROOT, 'data', 'backups');
+    return fs.readdirSync(dir).filter(f => /^config-.*\.json$/.test(f)).sort().reverse();
+  } catch { return []; }
+}
+export function restoreConfigSnapshot(name) {
+  if (!/^config-[a-zA-Z0-9-]+\.json$/.test(String(name))) throw new Error('bad backup name');
+  const src = path.join(ROOT, 'data', 'backups', name);
+  if (!fs.existsSync(src)) throw new Error('backup not found');
+  const parsed = JSON.parse(fs.readFileSync(src, 'utf8')); // validate before touching config
+  snapshotConfig('pre-restore');
+  lockedUpdateJsonSync(CFG_PATH, () => parsed);
+  return true;
+}
+
 // Profile-aware: ensure migration ran, then return a flattened view of the
 // active profile's contents at the top level. Backward compat — consumers
 // keep doing `cfg.user.salaryFloorUsd`.

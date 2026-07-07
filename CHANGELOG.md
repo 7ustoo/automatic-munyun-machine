@@ -10,6 +10,38 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [4.0.0] — 2026-07-06
+
+> **The matching gets smart.** v3 made the dashboard a real application; v4.0 makes the ranking deserve it. The scorer finally reads the actual job posting — not just the search-result card — kills the "Palo Alto, CA" class of false positives, optionally gets a second opinion from Claude, and coaches you on what your resume is missing. Plus the reliability round: failed scrapes are announced on the dashboard, settings are snapshotted before anything rewrites them, and updates are checksum-verified.
+
+### Added — Matching accuracy
+
+- **Two-pass scoring: the full job description is finally read.** Pass 1 shortlists ~130 candidates on card text (as before). Pass 2 re-scores each on the REAL posting text (title + description + requirements summary), captured during the apply-URL resolution pass the scraper already runs — near-zero extra cost. Final % = 40% card + 60% description (`scoring.jdRescore`, default on; new `jdScoreToPercent` bands calibrated for the longer text).
+- **The "Palo Alto" fix.** Ambiguous CV terms (palo alto, chef, puppet, salt) only score when their disambiguating context appears in the text — "Palo Alto **Networks** / PAN-OS / firewall" counts, "Palo Alto, **CA**" in a location line doesn't (`AMBIGUOUS_TERM_CONTEXT` + `termAllowedInText`).
+- **Role-family gate.** A job whose title is clearly non-technical (marketing, sales, HR, …) is multiplied down ×0.35 instead of climbing on keyword crumbs — unless the title itself carries one of your CV's cluster terms, or your CV has no detected clusters (fail-open).
+- **Salary is a tie-breaker, not score points.** `salaryBonus`/`salaryPenalty` no longer inflate irrelevant jobs past your floor; among equal match %, known salary ≥ your floor ranks by amount, unknown is neutral, below-floor sorts last (`compareJobs`/`salaryRank`).
+- **Smart match (AI rerank) — opt-in, off by default.** New Settings card: paste your own Anthropic API key and the top ~40 jobs get one batched Claude call (`claude-opus-4-8` default, structured JSON output) returning true fit 0-100 + a one-line reason. Final % blends keyword 45% / AI 55%. Fail-open: any error leaves keyword ranks; the key lives only in local config.json, is never returned by the API layer (`aiHasKey` boolean only), and is never logged. New `scripts/ai-rerank.mjs`, zero new dependencies (raw fetch).
+- **The Why panel tells the whole story.** Score journey (`Card scan 71% → Full description 84% → AI check 87% → Final`), matched terms, **"The job asks for — not on your resume"** miss-chips with one-click **+ search** (adds as search term) and **mute** (never score this term again — `scoring.mutedTerms`, `/api/score/mute`), and the Smart match reason when AI ran. `last-batch.json` jobs carry `cardPct/jdPct/aiPct/aiReason/missing/salaryK`.
+- **Thin-CV warning.** If fewer than 8 terms were extracted from your resume, the Resume card says so instead of letting every match read 12%.
+
+### Added — Reliability
+
+- **Failed scrapes are no longer silent on the desktop.** `daily-batch` writes `data/scrape-status.json` on every exit path (success, empty-CV, hiring.cafe block, crash — with a canary-style plain-language reason); the dashboard shows a red **FAILED** banner with the reason and a **Try again** button. A scrape started anywhere (7am scheduler, Telegram, tray) also lights the progress bar via `data/scrape.lock` freshness (`lastScrape` + `scrapeRunning` on `/api/status`).
+- **Settings backups + restore.** Config is snapshotted to `data/backups/` (keep 10) before first-run setup, profile rename/delete, and restores; the Profiles page gains a **Settings backups** card with one-click restore (`snapshotConfig`/`listConfigSnapshots`/`restoreConfigSnapshot`, `/api/config/{backups,restore}`).
+- **Checksum-verified updates.** `self-update` now downloads the release's `SHA256SUMS.txt` and verifies the installer's sha256 before running it; mismatch or unverifiable → download discarded, nothing installed.
+- **Applied-marks survive reloads.** Per-batch localStorage persistence (v3 was session-only).
+
+### Changed
+
+- Dashboard behavioral test harness committed to `dev/dashboard-harness/` (`npm run test:ui`, local — needs Chrome/Edge); the static integrity contract (ids/CSRF placeholder/symbols/offline) is now a CI test (`dashboard-static.test.mjs`).
+- Suite: 162 node tests + 4 new Go tests (scrape-status parsing, running-lock detection).
+
+### Deferred (noted honestly)
+
+- Telegram-setup UI dedupe (it exists twice in dashboard.html) and centralizing hiring.cafe selectors into one module — invisible refactors, punted to keep v4.0 reviewable.
+
+---
+
 ## [3.0.2] — 2026-07-06
 
 ### Fixed
