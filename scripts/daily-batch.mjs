@@ -971,6 +971,16 @@ function buildSupplyBanner({ funnel, byQuery }) {
   }
   return warnings.length ? warnings.join('\n\n') : null;
 }
+// v4.1: one-line funnel so "3,000 raw but only 100 jobs — where'd they go?" is
+// answerable at a glance. Every number comes straight off the funnel object
+// that's already written to last-batch.json — no new bookkeeping. Plain text
+// (arrows + numbers only, no markup) so it's safe in both HTML and the .txt.
+function funnelLine(f) {
+  if (!f) return '';
+  const seen = Math.max(0, (f.keptAfterFilter ?? 0) - (f.afterDedup ?? 0));
+  const aboveFloor = Math.max(0, (f.afterDedup ?? 0) - (f.droppedBelowFloor ?? 0));
+  return `${f.raw ?? 0} raw → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% floor → ${f.sent ?? 0} delivered`;
+}
 function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const filterBits = [];
@@ -983,7 +993,9 @@ function buildMessage(weather, top, directUrls, stats) {
     .replace('{NAME}', userName)
     .replace('{DATE}', today);
   const authIndicator = CFG.telegram?.showAuthIndicator !== false ? '\n✓ logged in · sorted by CV match — best fits first.' : '\nSorted by CV match — best fits first.';
-  const head = `<b>${headerTpl}</b>\n\n${weather}\n\n📊 <b>${top.length} fresh jobs</b> · ${stats.raw} raw${tail}${authIndicator}`;
+  const funnelStr = funnelLine(stats.funnel);
+  const funnelBit = funnelStr ? `\n<i>${funnelStr}</i>` : '';
+  const head = `<b>${headerTpl}</b>\n\n${weather}\n\n📊 <b>${top.length} fresh jobs</b> · ${stats.raw} raw${tail}${funnelBit}${authIndicator}`;
   const lines = [head, ''];
   top.forEach((r, i) => {
     const url = directUrls[i] || r.href;
@@ -1019,6 +1031,8 @@ function buildBatchTxt(top, directUrls, weather, stats) {
   if (stats.skippedSeen)      filterBits.push(`${stats.skippedSeen} previously seen`);
   const tail = filterBits.length ? ` · filtered: ${filterBits.join(', ')}` : '';
   lines.push(`${top.length} jobs · ${stats.raw} raw${tail} · sorted by CV match`);
+  const funnelStr = funnelLine(stats.funnel);
+  if (funnelStr) lines.push(funnelStr);
   lines.push('');
   lines.push('================================================================');
   lines.push('');
@@ -1254,7 +1268,8 @@ if (IS_CLI) (async () => {
       kept: kept.length,
       droppedClearance,
       skippedApplied,
-      skippedSeen
+      skippedSeen,
+      funnel
     });
     if (banner) message = banner + '\n\n' + message;
     if (TELEGRAM_ON) {
@@ -1266,7 +1281,7 @@ if (IS_CLI) (async () => {
 
     // Always write the downloadable .txt (it's the disk record + /export
     // source); only attach it to Telegram when enabled.
-    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen };
+    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, funnel };
     try {
       const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
       if (TELEGRAM_ON) {

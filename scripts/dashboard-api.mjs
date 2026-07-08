@@ -350,7 +350,47 @@ async function setupHcafeLoginStatus() {
 
   // Child exited — verify hiring.cafe auth. Reuses the wizard's step 3 check.
   const r = await spawnJobAction('auth', '');
-  out({ ok: true, running: false, authed: r.code === 0, output: (r.output || '').slice(0, 300) });
+  const authed = r.code === 0;
+  writeHcafeAuthCache(authed); // keep the dashboard's status pill fresh post-login
+  out({ ok: true, running: false, authed, output: (r.output || '').slice(0, 300) });
+}
+
+// ---- hiring.cafe auth status (v4.1) ----
+// The dashboard shows a permanent "signed into hiring.cafe?" pill. The live
+// probe (job-action.mjs auth) spins up Playwright (~5-10s), far too heavy for
+// the frequent /api/status poll — so the result is cached to
+// data/hcafe-auth.json and read back instantly. Auth is a single shared
+// browser profile (data/browser-profile), NOT per-persona, so the cache lives
+// at the repo-level data/ dir, not inside a profile.
+const HCAFE_AUTH_CACHE = path.join(ROOT, 'data', 'hcafe-auth.json');
+
+function writeHcafeAuthCache(authed) {
+  try {
+    fs.mkdirSync(path.dirname(HCAFE_AUTH_CACHE), { recursive: true });
+    atomicWriteJson(HCAFE_AUTH_CACHE, { authed: !!authed, checkedAt: new Date().toISOString() });
+  } catch { /* cache write is best-effort — never fail the caller over it */ }
+}
+
+// hcafe-auth-get: read the cached status instantly (no browser spawn). Missing
+// or unreadable cache → authed:null so the UI can show "unknown" and offer a
+// re-check rather than a misleading "signed out".
+function hcafeAuthGet() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(HCAFE_AUTH_CACHE, 'utf8'));
+    out({ ok: true, authed: !!raw.authed, checkedAt: raw.checkedAt || null, cached: true });
+  } catch {
+    out({ ok: true, authed: null, checkedAt: null, cached: false });
+  }
+}
+
+// hcafe-auth-check: run the live probe, persist it, and return the fresh
+// result. Fired by the dashboard's "Re-check" button and after a login
+// completes. Same ~90s worst-case budget as setup-hcafe-login-status.
+async function hcafeAuthCheck() {
+  const r = await spawnJobAction('auth', '');
+  const authed = r.code === 0;
+  writeHcafeAuthCache(authed);
+  out({ ok: true, authed, checkedAt: new Date().toISOString(), cached: false, output: (r.output || '').slice(0, 300) });
 }
 
 // buildInitConfig: pure merge of user-collected setup input over config
@@ -539,10 +579,13 @@ if (isMain) (async () => {
     case 'setup-geocode':            return setupGeocode(a);
     case 'setup-hcafe-login-start':  return setupHcafeLoginStart();
     case 'setup-hcafe-login-status': return setupHcafeLoginStatus();
+    // v4.1: persistent hiring.cafe sign-in status for the main dashboard.
+    case 'hcafe-auth-get':           return hcafeAuthGet();
+    case 'hcafe-auth-check':         return hcafeAuthCheck();
     case 'setup-init':               cfgRW.snapshotConfig('pre-setup'); return setupInit(a);
     case 'setup-finalize':           return setupFinalize();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|setup-init|setup-finalize> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });

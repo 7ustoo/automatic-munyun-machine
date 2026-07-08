@@ -99,6 +99,7 @@ iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main
 | `data/seen-jobs.json` | Persistent dedupe — every viewjob URL ever pushed to Telegram. |
 | `data/last-batch.json` | Per-job match details for the most recent scrape (used by `/why N`). |
 | `data/auth-state.json` | `{ lastAuthOK, lastAuthFail }` timestamps. |
+| `data/hcafe-auth.json` | `{ authed, checkedAt }` — cached hiring.cafe sign-in status for the dashboard's Hiring.cafe card (v4.1). Written by on-demand/post-login auth checks; shared (not per-profile). |
 | `data/bot-offset.json` | Telegram poll cursor. |
 | `data/browser-profile/` | Playwright Chromium persistent profile with hiring.cafe session cookies. |
 | `data/today-batch-{date}.tsv` | Each day's batch as TSV. |

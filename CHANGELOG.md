@@ -10,6 +10,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [4.1.0] — 2026-07-07
+
+> **You can see what's happening now.** Sign in to hiring.cafe straight from the dashboard — a permanent status pill tells you whether you're connected — and every batch shows exactly where the raw scrape went before it became your 100 jobs.
+
+### Added
+
+- **Hiring.cafe sign-in status on the dashboard.** The System page gains a permanent **Hiring.cafe** card showing whether you're signed in (✓ Signed in / ✗ Not signed in / Unknown) with a **Sign in to hiring.cafe** button and a **Re-check** link. Signing in reuses the first-run login flow (visible Chromium via `login-once.mjs`). Status is cached to `data/hcafe-auth.json` and read instantly on load — the live probe (`job-action.mjs auth`, ~5-10s Playwright) runs only on demand, never on the frequent status poll. New endpoints `GET /api/hcafe/auth` (cached) + `POST /api/hcafe/auth/refresh` (live), backed by `dashboard-api.mjs` subcommands `hcafe-auth-get` / `hcafe-auth-check`.
+- **Funnel transparency — "3,000 raw but only 100 jobs, where'd they go?"** Every batch now shows the full breakdown on Telegram, the `jobs(DATE).txt` header, and the dashboard: `raw → after filters → fresh (−already seen) → above floor → delivered`. All numbers come from the funnel object already written to `last-batch.json`; passed through `/api/batch` and rendered by `funnelLine`/`funnelLineJS`.
+
+---
+
 ## [4.0.0] — 2026-07-06
 
 > **The matching gets smart.** v3 made the dashboard a real application; v4.0 makes the ranking deserve it. The scorer finally reads the actual job posting — not just the search-result card — kills the "Palo Alto, CA" class of false positives, optionally gets a second opinion from Claude, and coaches you on what your resume is missing. Plus the reliability round: failed scrapes are announced on the dashboard, settings are snapshotted before anything rewrites them, and updates are checksum-verified.
