@@ -891,6 +891,7 @@
           <div class="tile"><div class="t-label">Strong matches</div><div class="t-value" id="st-strong">—</div><div class="t-sub">70% match or better</div></div>
           <div class="tile"><div class="t-label">Batch date</div><div class="t-value" id="st-date">—</div><div class="t-sub" id="st-date-sub"></div></div>
         </div>
+        <div class="muted-sm" id="st-funnel" style="margin:-4px 0 14px"></div>
 
         <div class="card">
           <div class="toolbar">
@@ -1046,6 +1047,18 @@
                 </div>
               </div>
             </div>
+          </div>
+
+          <div class="card">
+            <h2>Hiring.cafe <span class="pill" id="hc-pill">—</span></h2>
+            <div class="big" id="hc-big"><span class="dot" id="hc-dot"></span><span id="hc-state">Checking…</span></div>
+            <div class="stat-row"><span class="k">Last checked</span><span class="v" id="hc-checked">—</span></div>
+            <div class="muted-sm">Signing in lets AMM save &amp; mark-applied on hiring.cafe. Optional — scraping works signed out either way.</div>
+            <div class="row" style="margin-top:8px">
+              <button class="sm primary" id="hc-signin">Sign in to hiring.cafe</button>
+              <button class="sm" id="hc-recheck"><svg class="ic"><use href="#i-refresh"/></svg>Re-check</button>
+            </div>
+            <div class="setup-hcafe-state hidden" id="hc-state-msg"></div>
           </div>
 
           <div class="card">
@@ -1462,7 +1475,7 @@ async function loadBatch() {
     const res = await fetch("/api/batch", { cache: "no-store" });
     const batch = await res.json();
     state.jobs = batch.jobs || [];
-    state.batchMeta = { date: batch.date || "", jobCount: batch.jobCount || state.jobs.length, generatedAt: batch.generatedAt || "" };
+    state.batchMeta = { date: batch.date || "", jobCount: batch.jobCount || state.jobs.length, generatedAt: batch.generatedAt || "", funnel: batch.funnel || null };
     // v4.0: applied-marks persist across reloads, keyed per batch.
     try {
       state.__appliedKey = "amm-applied-" + (state.batchMeta.generatedAt || state.batchMeta.date || "x");
@@ -1506,7 +1519,18 @@ function renderStats() {
   $("st-date").textContent = state.batchMeta.date || "—";
   $("st-date-sub").textContent = state.batchMeta.generatedAt
     ? "generated " + state.batchMeta.generatedAt.replace("T", " ").slice(0, 16) : "no batch yet";
+  // v4.1: funnel breakdown — where the raw scrape went before the final list.
+  const f = state.batchMeta.funnel;
+  $("st-funnel").textContent = f ? funnelLineJS(f) : "";
   $("nav-jobs-badge").textContent = jobs.length ? String(jobs.length) : "";
+}
+
+// v4.1: mirror of daily-batch.mjs#funnelLine — every value comes from the
+// funnel object carried in last-batch.json (passed through /api/batch).
+function funnelLineJS(f) {
+  const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
+  const aboveFloor = Math.max(0, (f.afterDedup || 0) - (f.droppedBelowFloor || 0));
+  return `${f.raw || 0} raw → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${aboveFloor} above ${f.matchFloorPercent || 0}% floor → ${f.sent || 0} delivered`;
 }
 
 function visibleJobs() {
@@ -2046,6 +2070,103 @@ $("tg-disable").addEventListener("click", async () => {
   if (r.ok) tick();
 });
 
+// ---- Hiring.cafe sign-in status (v4.1) ----
+// Auth status is NOT part of the 5s /api/status poll: the live probe spins up
+// Playwright (~5-10s), so it's cached server-side (data/hcafe-auth.json) and
+// read on demand. The pill reflects the cache on load; Sign in / Re-check
+// refresh it. Sign in reuses the first-run setup's login-once flow + poll.
+let hcafePollTimer = null;
+
+function renderHcafeAuth(d) {
+  const authed = d ? d.authed : null; // true | false | null(unknown)
+  const dot = authed === true ? "alive" : authed === false ? "dead" : "unknown";
+  const big = $("hc-big");
+  big.classList.remove("alive", "stale", "dead", "unknown");
+  big.classList.add(dot);
+  setDot($("hc-dot"), dot);
+  $("hc-state").textContent = authed === true ? "Signed in" : authed === false ? "Not signed in" : "Unknown";
+  $("hc-pill").textContent = authed === true ? "on" : authed === false ? "off" : "—";
+  if (d && d.checkedAt) {
+    const ageSec = Math.max(0, (Date.now() - new Date(d.checkedAt).getTime()) / 1000);
+    $("hc-checked").textContent = humanDuration(ageSec) + " ago";
+  } else {
+    $("hc-checked").textContent = "never";
+  }
+}
+
+async function loadHcafeAuthCached() {
+  try {
+    const r = await (await fetch("/api/hcafe/auth", { cache: "no-store" })).json();
+    if (r.ok) renderHcafeAuth(r);
+  } catch { /* transient — leave as-is */ }
+}
+
+$("hc-recheck").addEventListener("click", async () => {
+  const btn = $("hc-recheck");
+  btn.disabled = true;
+  $("hc-state").textContent = "Checking…";
+  $("hc-pill").textContent = "…";
+  try {
+    const r = await postJSON("/api/hcafe/auth/refresh");
+    if (r.ok) {
+      renderHcafeAuth(r);
+      toast(r.authed ? "Signed in to hiring.cafe." : "Not signed in to hiring.cafe.", r.authed ? "good" : "bad");
+    } else {
+      toast("Could not check: " + (r.error || "error"), "bad");
+      loadHcafeAuthCached();
+    }
+  } finally { btn.disabled = false; }
+});
+
+$("hc-signin").addEventListener("click", async () => {
+  const btn = $("hc-signin");
+  const msg = $("hc-state-msg");
+  btn.disabled = true;
+  msg.classList.remove("hidden", "done", "err");
+  msg.classList.add("running");
+  msg.textContent = "Launching Chrome… a browser window should appear. It may take up to 30 seconds to clear hiring.cafe's bot check. Sign in, then close the window.";
+  try {
+    const r = await postJSON("/api/setup/hcafe-login/start");
+    if (!r.ok) {
+      msg.textContent = "✗ Could not launch: " + (r.error || "unknown");
+      msg.classList.remove("running"); msg.classList.add("err");
+      btn.disabled = false; return;
+    }
+    pollHcafeSignin();
+  } catch (e) {
+    msg.textContent = "✗ " + e.message;
+    msg.classList.remove("running"); msg.classList.add("err");
+    btn.disabled = false;
+  }
+});
+
+function pollHcafeSignin() {
+  const msg = $("hc-state-msg");
+  const btn = $("hc-signin");
+  const poll = async () => {
+    try {
+      const r = await (await fetch("/api/setup/hcafe-login/status", { cache: "no-store" })).json();
+      if (r.running) {
+        msg.textContent = "Browser open — sign in to hiring.cafe, then close the window.";
+        return;
+      }
+      // Child exited — the status helper already wrote the auth cache.
+      clearInterval(hcafePollTimer); hcafePollTimer = null;
+      btn.disabled = false;
+      renderHcafeAuth({ authed: !!r.authed, checkedAt: new Date().toISOString() });
+      if (r.authed) {
+        msg.classList.remove("running", "err"); msg.classList.add("done");
+        msg.textContent = "✓ Signed in to hiring.cafe.";
+      } else {
+        msg.classList.remove("running"); msg.classList.add("err");
+        msg.textContent = "✗ Couldn't confirm sign-in. Try again — make sure you signed in before closing the window.";
+      }
+    } catch { /* transient — keep polling */ }
+  };
+  hcafePollTimer = setInterval(poll, 2500);
+  poll();
+}
+
 // ---- Resume rescan (v2.5) ----
 $("resume-upload-btn").addEventListener("click", async () => {
   const input = $("resume-file");
@@ -2168,6 +2289,7 @@ $("ub-update").addEventListener("click", async () => {
     loadSettings();
     loadProfiles();
     loadBackups();
+    loadHcafeAuthCached();
     checkForUpdate();
     setInterval(checkForUpdate, 30 * 60 * 1000);
   }

@@ -119,6 +119,11 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/setup/geocode", d.handleSetupGeocode)
 	mux.HandleFunc("/api/setup/hcafe-login/status", d.handleSetupHcafeLoginStatus)
 	mux.HandleFunc("/api/setup/hcafe-login/start", d.guardPost(d.handleSetupHcafeLoginStart))
+	// v4.1: persistent hiring.cafe sign-in status on the main dashboard.
+	// GET reads the cached status (instant, no browser); POST runs the live
+	// Playwright probe and refreshes the cache.
+	mux.HandleFunc("/api/hcafe/auth", d.handleHcafeAuth)
+	mux.HandleFunc("/api/hcafe/auth/refresh", d.guardPost(d.handleHcafeAuthRefresh))
 	mux.HandleFunc("/api/setup/init", d.guardPost(d.handleSetupInit))
 	mux.HandleFunc("/api/setup/finalize", d.guardPost(d.handleSetupFinalize))
 
@@ -346,12 +351,13 @@ type profileInfo struct {
 }
 
 type lastBatchInfo struct {
-	Available   bool       `json:"available"`
-	Date        string     `json:"date"`
-	Profile     string     `json:"profile"`
-	GeneratedAt string     `json:"generatedAt"`
-	JobCount    int        `json:"jobCount"`
-	Jobs        []batchJob `json:"jobs"`
+	Available   bool            `json:"available"`
+	Date        string          `json:"date"`
+	Profile     string          `json:"profile"`
+	GeneratedAt string          `json:"generatedAt"`
+	JobCount    int             `json:"jobCount"`
+	Jobs        []batchJob      `json:"jobs"`
+	Funnel      json.RawMessage `json:"funnel,omitempty"` // v4.1: raw funnel object for the dashboard breakdown
 }
 
 type batchJob struct {
@@ -571,6 +577,7 @@ func readFullBatch(installDir string) lastBatchInfo {
 		Profile     string            `json:"profile"`
 		GeneratedAt string            `json:"generatedAt"`
 		Jobs        []json.RawMessage `json:"jobs"`
+		Funnel      json.RawMessage   `json:"funnel"`
 	}
 	if json.Unmarshal(data, &lb) != nil {
 		return info
@@ -581,6 +588,7 @@ func readFullBatch(installDir string) lastBatchInfo {
 	info.GeneratedAt = lb.GeneratedAt
 	info.JobCount = len(lb.Jobs)
 	info.Jobs = parseBatchJobs(lb.Jobs, 0)
+	info.Funnel = lb.Funnel
 	return info
 }
 

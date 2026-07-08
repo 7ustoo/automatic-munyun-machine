@@ -417,6 +417,21 @@ func (d *dashboardServer) handleSetupHcafeLoginStatus(w http.ResponseWriter, r *
 	d.relayDashboardAPI(w, 100*time.Second, "setup-hcafe-login-status")
 }
 
+// handleHcafeAuth (GET): cached hiring.cafe sign-in status for the main
+// dashboard's status pill. Read-only — the helper just reads
+// data/hcafe-auth.json, so no browser spawn and a short exec budget.
+func (d *dashboardServer) handleHcafeAuth(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "hcafe-auth-get")
+}
+
+// handleHcafeAuthRefresh (POST): runs the live job-action.mjs auth probe
+// (Playwright startup + navigation, up to ~90s) and refreshes the cache.
+// Guarded because it spawns a subprocess. Fired by the dashboard's "Re-check"
+// button and after a sign-in completes.
+func (d *dashboardServer) handleHcafeAuthRefresh(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 100*time.Second, "hcafe-auth-check")
+}
+
 // handleSetupInit (POST): body is the initial-config JSON blob. Read the raw
 // body and pass it as a single argv element rather than JSON-encoding a nested
 // object into readBody's map[string]string.
