@@ -12,7 +12,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(path.join(__dirname, '..', '..', 'wrapper', 'dashboard.html'), 'utf8');
 
 // ids created only at runtime by the modal system / empty state.
-const DYNAMIC = new Set(['modal-overlay', 'modal', 'modal-input', 'modal-cancel', 'modal-ok', 'empty-scrape']);
+const DYNAMIC = new Set(['modal-overlay', 'modal', 'modal-input', 'modal-cancel', 'modal-ok', 'empty-scrape', 'empty-setup', 'empty-tour']);
 
 test('every JS-referenced element id exists in the markup', () => {
   const defined = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map(m => m[1]));

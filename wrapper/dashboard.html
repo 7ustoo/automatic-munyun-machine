@@ -1096,6 +1096,15 @@
       <section class="view" data-view="system">
         <div class="grid">
           <div class="card">
+            <h2>Getting started</h2>
+            <div class="muted-sm">New here, or want a refresher? Re-run the guided setup or take a quick tour of the dashboard anytime.</div>
+            <div class="row" style="margin-top:10px">
+              <button class="sm primary" id="sys-setup-btn"><svg class="ic"><use href="#i-zap"/></svg>Run setup walkthrough</button>
+              <button class="sm" id="sys-tour-btn"><svg class="ic"><use href="#i-eye"/></svg>Take a tour</button>
+            </div>
+          </div>
+
+          <div class="card">
             <h2>Bot</h2>
             <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
             <div class="stat-row"><span class="k">PID</span><span class="v" id="bot-pid">—</span></div>
@@ -1447,6 +1456,8 @@ function render(s) {
   // config.json as a side effect partway through setup, which would flip
   // needsSetup and yank the panel out from under the user. Completion is
   // explicit: setupFinish() reloads the page into the normal dashboard.
+  window.__needsSetup = !!s.needsSetup;   // fresh install (no config.json yet)
+  window.__hasBatch = !!(s.lastBatch && s.lastBatch.generatedAt);   // ever scraped?
   if (s.needsSetup && !window.__setupStarted) {
     window.__setupStarted = true;
     $("setup-overlay").classList.remove("hidden");
@@ -1679,12 +1690,20 @@ function renderJobs() {
     $("lb-body").innerHTML = `<div class="empty">
       <div class="e-icon">💼</div>
       <div class="e-title">No batch yet</div>
-      <div class="e-sub">Pull your first 100 ranked jobs from hiring.cafe — scored against your resume. Takes 1–2 minutes.</div>
-      <button class="primary" id="empty-scrape">⟳ Scrape now</button>
+      <div class="e-sub">Pull your first 100 ranked jobs from hiring.cafe — scored against your resume. Takes 1–2 minutes. New here? Walk through setup or take a quick tour first.</div>
+      <div class="row" style="justify-content:center; margin-top:6px">
+        <button class="primary" id="empty-scrape">⟳ Scrape now</button>
+        <button class="sm" id="empty-setup">Set up AMM</button>
+        <button class="sm" id="empty-tour">Take a tour</button>
+      </div>
     </div>`;
     $("lb-foot").textContent = "";
     const es = $("empty-scrape");
     if (es) es.addEventListener("click", () => $("scrape-btn").click());
+    const eSet = $("empty-setup");
+    if (eSet) eSet.addEventListener("click", reopenSetup);
+    const eTour = $("empty-tour");
+    if (eTour) eTour.addEventListener("click", startTour);
     return;
   }
   const jobs = visibleJobs();
@@ -2400,12 +2419,26 @@ function setupNudges() {
   $("sb-dismiss").addEventListener("click", () => $("setup-banner").classList.add("hidden"));
   $("tour-next").addEventListener("click", tourNext);
   $("tour-skip").addEventListener("click", tourEnd);
+  // Always-available entry points on the System page.
+  $("sys-setup-btn").addEventListener("click", reopenSetup);
+  $("sys-tour-btn").addEventListener("click", startTour);
+
   if (localStorage.getItem("ammSetupIncomplete") === "1") {
     $("setup-banner").classList.remove("hidden");
   }
   if (localStorage.getItem("ammTourPending") === "1") {
     localStorage.removeItem("ammTourPending");
     setTimeout(startTour, 650);   // let the first render settle
+    return;
+  }
+  // v4.2.1: greet first-time visitors even when a config.json already exists
+  // (e.g. a partial/earlier setup left one behind, so needsSetup is false and
+  // the wizard never auto-opened). Gated on "never scraped" so we never pop
+  // over an already-working install. Shown once; Skip here just closes.
+  if (localStorage.getItem("ammOnboarded") !== "1"
+      && localStorage.getItem("ammSetupIncomplete") !== "1"
+      && !window.__hasBatch) {
+    setTimeout(reopenSetup, 400);
   }
 }
 
@@ -2709,6 +2742,13 @@ function setupSyncModeToggle(mode) {
 // finalizing (no scheduler → no failing 7am scrape). buildInitConfig backfills
 // everything from config.example.json. The finish-setup banner nudges them back.
 async function setupSkip() {
+  // Reopened manually on an already-configured machine? Just close — never
+  // overwrite an existing config.json with defaults.
+  if (!window.__needsSetup) {
+    localStorage.setItem("ammOnboarded", "1");
+    $("setup-overlay").classList.add("hidden");
+    return;
+  }
   if (window.__setupSkipping) return;
   window.__setupSkipping = true;
   const link = $("setup-skip-link");
@@ -2873,6 +2913,7 @@ async function setupFinish() {
     }
     // v4.1.1: arm the post-finish coach-mark tour and clear any skip nudge.
     localStorage.setItem("ammTourPending", "1");
+    localStorage.setItem("ammOnboarded", "1");
     localStorage.removeItem("ammSetupIncomplete");
     // Reload so the client picks up the new config.json shape + the tray's
     // supervisor starts. Small delay so the user sees the ✓.
