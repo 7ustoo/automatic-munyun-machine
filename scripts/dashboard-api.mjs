@@ -225,7 +225,7 @@ async function jobAction(action, idxRaw) {
 // Re-parse an uploaded resume into the active profile's cv-parsed.json, then
 // suggest fresh search terms from it (titles or keywords per search.mode).
 // The Go wrapper saves the upload to a temp file and passes its path here.
-async function resumeParse(filePath) {
+async function resumeParse(filePath, modeArg) {
   if (!filePath || !fs.existsSync(filePath)) return out({ ok: false, error: 'resume file not found' });
   let parsed;
   try {
@@ -244,9 +244,13 @@ async function resumeParse(filePath) {
   // config.json creation at the final step.
   const freshInstall = !fs.existsSync(path.join(ROOT, 'config.json'));
   writeParsedCV(parsed, freshInstall ? 'default' : undefined);
-  const mode = freshInstall
-    ? 'titles'
-    : (cfgRW.read().search?.mode === 'keywords' ? 'keywords' : 'titles');
+  // v4.1.1: the setup preview lets the user flip titles↔keywords at scan time.
+  // An explicit modeArg (from the step-1 toggle) wins; otherwise fall back to
+  // the config's mode (rescans) or 'titles' (fresh install, no config yet).
+  const wanted = (modeArg === 'keywords' || modeArg === 'titles') ? modeArg : null;
+  const mode = wanted
+    ? wanted
+    : (freshInstall ? 'titles' : (cfgRW.read().search?.mode === 'keywords' ? 'keywords' : 'titles'));
   const suggestions = (mode === 'keywords' ? suggestKeywords(parsed, { max: 12 }) : suggestRoles(parsed, { max: 12 }))
     .map(s => s.title);
   out({
@@ -565,7 +569,7 @@ if (isMain) (async () => {
     case 'jobs-mode':    return jobsMode(a);
     case 'suggest-current': return suggestCurrent(a);
     case 'job-action':   return jobAction(a, b);
-    case 'resume-parse': return resumeParse(a);
+    case 'resume-parse': return resumeParse(a, b);
     case 'resume-apply': return resumeApply(a);
     // v2.4: minimal export (number · title · apply link) as txt or csv.
     case 'export':       return out(loadExport(a));

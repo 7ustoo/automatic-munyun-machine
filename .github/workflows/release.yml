@@ -42,6 +42,33 @@ jobs:
           dotnet tool install --global azuresigntool
           pwsh scripts/build/sign-windows.ps1 wrapper/dist/AMM.exe
 
+      # v4.1.1: stage a portable Node runtime under runtime/ so the .exe
+      # installer can bundle it (Inno's Source: "..\*" picks it up). Fixes
+      # "Could not run the helper. Is Node installed?" on machines with no
+      # system Node — the .exe path never provisioned it.
+      - name: Bundle portable Node runtime
+        shell: powershell
+        env:
+          NODE_VERSION: "20.18.1"   # bundled runtime; bump alongside setup-node above
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ver  = $env:NODE_VERSION
+          $base = "https://nodejs.org/dist/v$ver"
+          $zip  = "node-v$ver-win-x64.zip"
+          Write-Host "Downloading $base/$zip"
+          Invoke-WebRequest -Uri "$base/$zip" -OutFile $zip
+          # Verify against Node's official checksums before trusting the binary.
+          Invoke-WebRequest -Uri "$base/SHASUMS256.txt" -OutFile SHASUMS256.txt
+          $expected = ((Select-String -Path SHASUMS256.txt -Pattern ([regex]::Escape($zip))).Line -split '\s+')[0].ToLower()
+          $actual   = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLower()
+          if ($actual -ne $expected) { Write-Error "Node checksum mismatch: $actual != $expected"; exit 1 }
+          Write-Host "Checksum OK: $actual"
+          Expand-Archive -Path $zip -DestinationPath node-extract -Force
+          New-Item -ItemType Directory -Force -Path runtime | Out-Null
+          Copy-Item (Join-Path "node-extract\node-v$ver-win-x64" "node.exe") "runtime\node.exe"
+          Remove-Item $zip, SHASUMS256.txt, node-extract -Recurse -Force
+          Write-Host "Bundled runtime: $(& 'runtime\node.exe' --version)"
+
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 

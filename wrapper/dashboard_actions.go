@@ -262,8 +262,15 @@ func (d *dashboardServer) handleResumeUpload(w http.ResponseWriter, r *http.Requ
 	}
 	dst.Close()
 
+	// v4.1.1: optional mode hint from the setup step-1 preview toggle
+	// (titles|keywords). Empty = let dashboard-api pick the default.
+	mode := strings.ToLower(strings.TrimSpace(r.FormValue("mode")))
+	if mode != "titles" && mode != "keywords" {
+		mode = ""
+	}
+
 	// Parsing a PDF/DOCX + suggesting terms is quick but give it headroom.
-	d.relayDashboardAPI(w, 45*time.Second, "resume-parse", dest)
+	d.relayDashboardAPI(w, 45*time.Second, "resume-parse", dest, mode)
 }
 
 // handleResumeApply replaces the search-term list with the terms the user

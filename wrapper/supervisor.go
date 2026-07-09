@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -226,7 +227,14 @@ func (s *supervisor) ChildPID() int {
 // at exec.Start() time we'll log the error and the supervisor's restart loop
 // will give up cleanly after 3 attempts.
 func findNode() string {
-	// Try Windows-typical install location first (winget puts it here).
+	// Prefer the Node runtime bundled inside the install (v4.1.1). The .exe
+	// installer never provisioned system Node, so on a fresh Windows machine
+	// every helper exec failed with "Could not run the helper. Is Node
+	// installed?" — this bundled copy is the fix.
+	if p := bundledNode(); p != "" {
+		return p
+	}
+	// Try Windows-typical install location next (winget puts it here).
 	for _, candidate := range nodeCandidates() {
 		if _, err := os.Stat(candidate); err == nil {
 			return candidate
@@ -237,6 +245,28 @@ func findNode() string {
 		return p
 	}
 	return "node" // hope for the best; exec.Start will surface ENOENT
+}
+
+// bundledNode returns the path to the Node runtime shipped inside the install
+// (installer/amm.iss stages it at <installDir>/runtime/), or "" if absent —
+// e.g. dev builds and the mac/linux packages, which provision Node elsewhere.
+// AMM.exe lives at <installDir>/wrapper/dist/AMM.exe, so the runtime dir is two
+// levels up from the executable. Resolving off the executable (not the CWD)
+// keeps it correct no matter which scheduler or shortcut spawned the wrapper.
+func bundledNode() string {
+	exe, err := os.Executable()
+	if err != nil {
+		return ""
+	}
+	name := "node"
+	if runtime.GOOS == "windows" {
+		name = "node.exe"
+	}
+	p := filepath.Join(filepath.Dir(exe), "..", "..", "runtime", name)
+	if _, err := os.Stat(p); err == nil {
+		return p
+	}
+	return ""
 }
 
 // nodeCandidates returns platform-specific likely paths to the node binary.
