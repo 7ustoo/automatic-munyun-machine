@@ -563,6 +563,43 @@
   .setup-hcafe-state.err { border-color: var(--red); color: var(--red); }
   .setup-step .terms { margin-top: 12px; }
 
+  /* v4.1.1 — welcome splash, skip, search-mode toggle, finish nudge, tour ------- */
+  .setup-skip { margin-top: 16px; }
+  .setup-skip a { color: var(--text-3); font-size: 12.5px; cursor: pointer; text-decoration: underline; }
+  .setup-skip a:hover { color: var(--text-2); }
+
+  .setup-welcome .card { padding: 34px 30px; text-align: center; }
+  .setup-welcome .hero { font-size: 22px; font-weight: 750; letter-spacing: -.01em; margin: 2px 0 12px; }
+  .setup-welcome .hero span { color: var(--accent-2); }
+  .setup-welcome .blurb { color: var(--text-2); font-size: 14px; line-height: 1.65; max-width: 470px; margin: 0 auto 22px; }
+  .welcome-points { list-style: none; padding: 0; margin: 0 auto 26px; max-width: 420px; text-align: left; display: grid; gap: 11px; }
+  .welcome-points li { display: flex; gap: 11px; align-items: flex-start; font-size: 13.5px; }
+  .welcome-points .wp-num { flex: none; width: 22px; height: 22px; border-radius: 50%; background: var(--accent-dim); border: 1px solid var(--accent); color: var(--accent-2); font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+  .welcome-actions { display: flex; flex-direction: column; align-items: center; gap: 13px; }
+  .welcome-actions .big { font-size: 15px; padding: 11px 26px; }
+  .welcome-actions .skip-btn { background: none; border: none; color: var(--text-3); font-size: 12.5px; cursor: pointer; text-decoration: underline; padding: 2px; }
+  .welcome-actions .skip-btn:hover { color: var(--text-2); }
+
+  .mode-choice { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; }
+  .mode-toggle { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border-2); border-radius: 999px; padding: 2px; }
+  .mode-toggle button { border: none; background: none; color: var(--text-2); font-size: 12.5px; font-weight: 600; padding: 5px 14px; border-radius: 999px; cursor: pointer; }
+  .mode-toggle button.on { background: var(--accent); color: #06121f; }
+
+  /* Finish-setup nudge banner — yellow variant of .update-banner (skip lands here). */
+  .setup-banner { border-color: var(--yellow); background: linear-gradient(90deg, rgba(210,153,34,.16), rgba(88,166,255,.08)); animation: viewin .2s var(--ease); }
+  .setup-banner .ub-badge { background: var(--yellow); color: #06121f; }
+
+  /* Coach-mark tour, shown once after Finish. */
+  #tour-layer { position: fixed; inset: 0; z-index: 200; }
+  #tour-layer.hidden { display: none !important; }
+  #tour-hl { position: fixed; border-radius: 10px; box-shadow: 0 0 0 9999px rgba(1,4,9,.62), 0 0 0 2px var(--accent); transition: all .22s var(--ease); pointer-events: none; }
+  #tour-pop { position: fixed; max-width: 300px; background: var(--surface); border: 1px solid var(--border-2); border-radius: var(--r-md); box-shadow: var(--shadow-2); padding: 15px 16px; }
+  #tour-pop h4 { margin: 0 0 6px; font-size: 14px; font-weight: 700; }
+  #tour-pop p { margin: 0 0 14px; font-size: 13px; color: var(--text-2); line-height: 1.55; }
+  .tour-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .tour-foot .tour-count { font-size: 11.5px; color: var(--text-3); }
+  .tour-foot .tour-btns { display: flex; gap: 8px; }
+
   /* ---- Responsive -------------------------------------------------------------- */
   @media (max-width: 1060px) {
     td.src { display: none; }
@@ -624,13 +661,34 @@
     <div class="setup-header">
       <img src="/favicon.png" alt="" />
       <h1>Welcome to Automatic Munyun Machine</h1>
-      <div class="sub">A five-step setup — takes about two minutes.</div>
-      <div class="setup-progress">
+      <div class="sub">~100 job matches every morning, ranked against your resume.</div>
+      <div class="setup-progress" id="setup-progress">
         <div class="pstep"><span class="pdot" data-pstep="1"></span><span class="plabel">Resume</span></div>
         <div class="pstep"><span class="pdot" data-pstep="2"></span><span class="plabel">Basics</span></div>
         <div class="pstep"><span class="pdot" data-pstep="3"></span><span class="plabel">Job feed</span></div>
         <div class="pstep"><span class="pdot" data-pstep="4"></span><span class="plabel">Telegram</span></div>
         <div class="pstep"><span class="pdot" data-pstep="5"></span><span class="plabel">Finish</span></div>
+      </div>
+      <div class="setup-skip" id="setup-skip-wrap"><a id="setup-skip-link">Skip setup for now</a></div>
+    </div>
+
+    <!-- Step 0: Welcome splash (v4.1.1). Frames what AMM does before asking for
+         anything, and offers an explicit skip. "Let's set it up" advances to
+         step 1; the progress dots + Back/Next nav are hidden on this step. -->
+    <div class="setup-step setup-welcome" data-step="0">
+      <div class="card">
+        <div class="hero">Your <span>automatic</span> job machine</div>
+        <div class="blurb">Every morning, AMM scrapes hiring.cafe, ranks ~100 fresh jobs against your resume, and lays them out here — strongest matches first. It can text them to you on Telegram too.</div>
+        <ul class="welcome-points">
+          <li><span class="wp-num">1</span><span>Scan your resume so we know what you're great at.</span></li>
+          <li><span class="wp-num">2</span><span>Pick what to search for — job titles or keywords.</span></li>
+          <li><span class="wp-num">3</span><span>Sign in to hiring.cafe once so we can pull jobs.</span></li>
+          <li><span class="wp-num">4</span><span>Telegram is optional — connect it now or later.</span></li>
+        </ul>
+        <div class="welcome-actions">
+          <button class="primary big" id="setup-welcome-start">Let's set it up →</button>
+          <button class="skip-btn" id="setup-welcome-skip">Skip for now — I'll explore first</button>
+        </div>
       </div>
     </div>
 
@@ -646,9 +704,16 @@
         </div>
         <div class="note" id="setup-resume-note"></div>
         <div id="setup-resume-suggest" class="step hidden">
-          <div class="muted-sm" id="setup-resume-label">Suggested search terms — click to toggle:</div>
+          <div class="mode-choice">
+            <span class="muted-sm">Search by:</span>
+            <div class="mode-toggle" id="setup-mode-toggle">
+              <button type="button" data-mode="titles" class="on">Job titles</button>
+              <button type="button" data-mode="keywords">Keywords</button>
+            </div>
+          </div>
+          <div class="muted-sm" id="setup-resume-label">Here's what we'll hunt for each morning — tap to add or remove:</div>
           <div id="setup-resume-terms" class="terms"></div>
-          <div class="muted-sm">These become your daily job searches. You can change them later.</div>
+          <div class="muted-sm">These are the searches AMM runs on hiring.cafe every day. You can change them anytime.</div>
         </div>
       </div>
     </div>
@@ -790,9 +855,26 @@
       </div>
     </div>
 
-    <div class="setup-nav">
+    <div class="setup-nav" id="setup-nav">
       <button class="sm" id="setup-back">← Back</button>
       <button class="sm primary" id="setup-next">Next →</button>
+    </div>
+  </div>
+</div>
+
+<!-- v4.1.1: coach-mark tour, shown once right after Finish (localStorage
+     ammTourPending). Dims the page and rings one element at a time. -->
+<div id="tour-layer" class="hidden">
+  <div id="tour-hl"></div>
+  <div id="tour-pop">
+    <h4 id="tour-title"></h4>
+    <p id="tour-body"></p>
+    <div class="tour-foot">
+      <span class="tour-count" id="tour-count"></span>
+      <div class="tour-btns">
+        <button class="sm" id="tour-skip">Skip tour</button>
+        <button class="sm primary" id="tour-next">Next</button>
+      </div>
     </div>
   </div>
 </div>
@@ -880,6 +962,20 @@
         <div class="ub-actions">
           <button class="primary" id="fb-retry">Try again</button>
           <button class="ghost icon" id="fb-dismiss" aria-label="Dismiss"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
+      <!-- v4.1.1: finish-setup nudge. Shown when the user chose "Skip setup"
+           on first run (localStorage ammSetupIncomplete). Persistent — it's the
+           path back into the wizard so a skipped install can still be completed. -->
+      <div id="setup-banner" class="update-banner setup-banner hidden" role="status">
+        <div class="ub-main">
+          <span class="ub-badge">Setup</span>
+          <span id="sb-text">Setup isn't finished — add your resume and sign in to hiring.cafe to start getting jobs.</span>
+        </div>
+        <div class="ub-actions">
+          <button class="primary" id="sb-finish">Finish setup</button>
+          <button class="ghost icon" id="sb-dismiss" aria-label="Dismiss for now"><svg class="ic"><use href="#i-x"/></svg></button>
         </div>
       </div>
 
@@ -2292,9 +2388,87 @@ $("ub-update").addEventListener("click", async () => {
     loadHcafeAuthCached();
     checkForUpdate();
     setInterval(checkForUpdate, 30 * 60 * 1000);
+    setupNudges();   // v4.1.1: finish-setup banner (after a Skip) + post-finish tour
   }
   setInterval(tick, 5000);
 })();
+
+// v4.1.1: on the normal dashboard, surface the finish-setup banner (if the user
+// skipped first-run) and run the coach-mark tour once (right after Finish).
+function setupNudges() {
+  $("sb-finish").addEventListener("click", reopenSetup);
+  $("sb-dismiss").addEventListener("click", () => $("setup-banner").classList.add("hidden"));
+  $("tour-next").addEventListener("click", tourNext);
+  $("tour-skip").addEventListener("click", tourEnd);
+  if (localStorage.getItem("ammSetupIncomplete") === "1") {
+    $("setup-banner").classList.remove("hidden");
+  }
+  if (localStorage.getItem("ammTourPending") === "1") {
+    localStorage.removeItem("ammTourPending");
+    setTimeout(startTour, 650);   // let the first render settle
+  }
+}
+
+// ---- Coach-mark tour ----------------------------------------------------------
+let tourState = null;
+const TOUR_STEPS = [
+  { sel: "#nav",                title: "Your control center",       body: "Jump between ranked Jobs, your Searches, Resume, Profiles, and System from this sidebar." },
+  { sel: "#scrape-btn",         title: "Get jobs on demand",        body: "Scrape now pulls today's ~100 jobs immediately. It also runs on its own every weekday morning." },
+  { sel: ".stats",              title: "Your matches at a glance",  body: "How many jobs came in, your average match, and how many are strong (70%+) — each scored against your resume." },
+  { sel: "[data-view='system']", title: "Health & hiring.cafe",     body: "Check the bot's status and sign in to hiring.cafe on the System page. That's the tour — you're all set!" },
+];
+
+function startTour() {
+  const steps = TOUR_STEPS.filter(s => document.querySelector(s.sel));
+  if (!steps.length) return;
+  tourState = { i: 0, steps };
+  $("tour-layer").classList.remove("hidden");
+  window.addEventListener("resize", tourReposition);
+  tourShow();
+}
+function tourShow() {
+  const st = tourState.steps[tourState.i];
+  const el = document.querySelector(st.sel);
+  if (!el) { tourNext(); return; }
+  el.scrollIntoView({ block: "center", behavior: "smooth" });
+  $("tour-title").textContent = st.title;
+  $("tour-body").textContent  = st.body;
+  $("tour-count").textContent = `${tourState.i + 1} of ${tourState.steps.length}`;
+  $("tour-next").textContent  = (tourState.i === tourState.steps.length - 1) ? "Done" : "Next";
+  setTimeout(() => tourPlace(el), 260);   // position after the scroll settles
+}
+function tourPlace(el) {
+  const r = el.getBoundingClientRect();
+  const pad = 6;
+  const hl = $("tour-hl");
+  hl.style.left   = (r.left - pad) + "px";
+  hl.style.top    = (r.top - pad) + "px";
+  hl.style.width  = (r.width + pad * 2) + "px";
+  hl.style.height = (r.height + pad * 2) + "px";
+  const pop = $("tour-pop");
+  const popW = 300, popH = pop.offsetHeight || 150;
+  let top = r.bottom + 12;
+  if (top + popH > window.innerHeight - 10) top = Math.max(10, r.top - popH - 12);
+  const left = Math.min(Math.max(10, r.left), window.innerWidth - popW - 10);
+  pop.style.top  = top + "px";
+  pop.style.left = left + "px";
+}
+function tourReposition() {
+  if (!tourState) return;
+  const el = document.querySelector(tourState.steps[tourState.i].sel);
+  if (el) tourPlace(el);
+}
+function tourNext() {
+  if (!tourState) return;
+  if (tourState.i >= tourState.steps.length - 1) { tourEnd(); return; }
+  tourState.i++;
+  tourShow();
+}
+function tourEnd() {
+  $("tour-layer").classList.add("hidden");
+  window.removeEventListener("resize", tourReposition);
+  tourState = null;
+}
 
 // ============================================================================
 // v2.7: dashboard-native first-run setup. State machine spanning 5 steps.
@@ -2306,6 +2480,7 @@ const setupState = {
   resumeUploaded: false,
   suggestions: [],
   selected: new Set(),
+  modePref: null,     // v4.1.1: titles|keywords chosen at scan time (null = let the parser pick)
   cityGeo: null,      // { lat, lon, city, admin, country, timezone }
   hcafeAuthed: false,
   hcafeChildStarted: false,
@@ -2321,12 +2496,18 @@ function setupShowStep(n) {
   document.querySelectorAll("#setup-overlay .setup-step").forEach(el => {
     el.classList.toggle("active", parseInt(el.dataset.step, 10) === n);
   });
+  // Step 0 is the welcome splash — no progress dots, no Back/Next nav, no
+  // header skip link (it carries its own buttons).
+  const welcome = (n === 0);
+  $("setup-progress").classList.toggle("hidden", welcome);
+  $("setup-nav").classList.toggle("hidden", welcome);
+  $("setup-skip-wrap").classList.toggle("hidden", welcome);
   document.querySelectorAll("#setup-overlay .pdot").forEach(el => {
     const s = parseInt(el.dataset.pstep, 10);
     el.classList.toggle("done", s < n);
     el.classList.toggle("current", s === n);
   });
-  $("setup-back").disabled = (n === 1);
+  $("setup-back").disabled = (n <= 1);
   // Step 5's transition is the Finish button, not Next — hide Next there.
   $("setup-next").classList.toggle("hidden", n === 5);
   $("setup-next").textContent = "Next →";
@@ -2335,6 +2516,7 @@ function setupShowStep(n) {
 }
 
 function setupCanProceed(step) {
+  if (step === 0) return true; // welcome splash — advance via its own button
   // Zero suggestions (unusual CV) still passes — setup-init backfills the
   // example's default queries so the first scrape isn't a no-op.
   if (step === 1) return setupState.resumeUploaded &&
@@ -2351,46 +2533,27 @@ function setupCanProceed(step) {
 }
 
 function setupWire() {
+  // Re-entrant: reopenSetup() calls this again to bring the wizard back after a
+  // Skip. Bind listeners once; later calls just re-show the welcome step.
+  if (window.__setupWired) { setupShowStep(0); return; }
+  window.__setupWired = true;
+
+  // ---- Step 0: welcome + skip ----
+  $("setup-welcome-start").addEventListener("click", () => setupShowStep(1));
+  $("setup-welcome-skip").addEventListener("click", setupSkip);
+  $("setup-skip-link").addEventListener("click", setupSkip);
+
   // ---- Step 1: resume ----
-  $("setup-resume-btn").addEventListener("click", async () => {
-    const input = $("setup-resume-file");
-    const file = input.files && input.files[0];
-    if (!file) { note("setup-resume-note", "Pick a resume file first.", false); return; }
-    const btn = $("setup-resume-btn");
-    btn.disabled = true;
-    const label = btn.textContent;
-    btn.textContent = "Scanning…";
-    note("setup-resume-note", "Parsing your resume…", true);
-    try {
-      const fd = new FormData();
-      fd.append("resume", file);
-      const res = await fetch("/api/resume/upload", {
-        method: "POST",
-        headers: { "X-AMM-Token": AMM_TOKEN },
-        body: fd, cache: "no-store"
-      });
-      const r = await res.json();
-      if (!r.ok) { note("setup-resume-note", "✗ " + (r.error || "could not parse"), false); return; }
-      const p = r.parsed || {};
-      note("setup-resume-note",
-        `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance.`,
-        true);
-      const sugg = r.suggestions || [];
-      setupState.resumeUploaded = true;
-      setupState.suggestions = sugg;
-      setupState.selected = new Set(sugg);
-      $("setup-resume-suggest").classList.remove("hidden");
-      $("setup-resume-label").textContent =
-        `Suggested search terms (${r.mode}) — click to toggle:`;
-      setupRenderSuggestChips();
-      $("setup-next").disabled = !setupCanProceed(1);
-      // The mode the parser picked also seeds step-2's mode dropdown.
-      $("setup-mode").value = r.mode === "keywords" ? "keywords" : "titles";
-    } catch (e) {
-      note("setup-resume-note", "✗ Upload failed: " + e.message, false);
-    } finally {
-      btn.disabled = false; btn.textContent = label;
-    }
+  $("setup-resume-btn").addEventListener("click", () => setupScanResume(setupState.modePref));
+  $("setup-mode-toggle").addEventListener("click", (ev) => {
+    const b = ev.target.closest("button[data-mode]");
+    if (!b || b.classList.contains("on")) return;
+    const m = b.dataset.mode;
+    setupState.modePref = m;
+    setupSyncModeToggle(m);
+    $("setup-mode").value = m;
+    // Suggested searches are mode-specific — re-scan if a resume is loaded.
+    if (setupState.resumeUploaded) setupScanResume(m);
   });
 
   $("setup-resume-terms").addEventListener("click", (ev) => {
@@ -2486,7 +2649,96 @@ function setupWire() {
     }
   });
 
-  setupShowStep(1);
+  setupShowStep(0);
+}
+
+// v4.1.1: scan (or re-scan) the picked resume. modeOverride (titles|keywords)
+// forces the suggestion flavor; null lets the parser auto-pick and syncs the
+// toggle to its choice. Shared by the Scan button and the search-mode toggle.
+async function setupScanResume(modeOverride) {
+  const input = $("setup-resume-file");
+  const file = input.files && input.files[0];
+  if (!file) { note("setup-resume-note", "Pick a resume file first.", false); return; }
+  const btn = $("setup-resume-btn");
+  btn.disabled = true;
+  const label = btn.textContent;
+  btn.textContent = "Scanning…";
+  note("setup-resume-note", "Reading your resume…", true);
+  try {
+    const fd = new FormData();
+    fd.append("resume", file);
+    if (modeOverride === "titles" || modeOverride === "keywords") fd.append("mode", modeOverride);
+    const res = await fetch("/api/resume/upload", {
+      method: "POST",
+      headers: { "X-AMM-Token": AMM_TOKEN },
+      body: fd, cache: "no-store"
+    });
+    const r = await res.json();
+    if (!r.ok) { note("setup-resume-note", "✗ " + (r.error || "could not read that file"), false); return; }
+    const p = r.parsed || {};
+    note("setup-resume-note",
+      `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance.`,
+      true);
+    const sugg = r.suggestions || [];
+    setupState.resumeUploaded = true;
+    setupState.suggestions = sugg;
+    setupState.selected = new Set(sugg);
+    $("setup-resume-suggest").classList.remove("hidden");
+    const mode = r.mode === "keywords" ? "keywords" : "titles";
+    setupState.modePref = mode;
+    $("setup-mode").value = mode;      // keep step-2's dropdown in sync
+    setupSyncModeToggle(mode);
+    $("setup-resume-label").textContent = (mode === "keywords"
+      ? "Here's what we'll hunt for each morning (keywords) — tap to add or remove:"
+      : "Here's what we'll hunt for each morning (job titles) — tap to add or remove:");
+    setupRenderSuggestChips();
+    $("setup-next").disabled = !setupCanProceed(1);
+  } catch (e) {
+    note("setup-resume-note", "✗ Upload failed: " + e.message, false);
+  } finally {
+    btn.disabled = false; btn.textContent = label;
+  }
+}
+
+function setupSyncModeToggle(mode) {
+  document.querySelectorAll("#setup-mode-toggle button").forEach(b =>
+    b.classList.toggle("on", b.dataset.mode === mode));
+}
+
+// Skip: write a safe default config so the dashboard is usable, WITHOUT
+// finalizing (no scheduler → no failing 7am scrape). buildInitConfig backfills
+// everything from config.example.json. The finish-setup banner nudges them back.
+async function setupSkip() {
+  if (window.__setupSkipping) return;
+  window.__setupSkipping = true;
+  const link = $("setup-skip-link");
+  $("setup-welcome-skip").disabled = true;
+  if (link) link.textContent = "Setting things up…";
+  try {
+    const r = await postJSON("/api/setup/init", {});
+    if (!r.ok) {
+      window.__setupSkipping = false;
+      $("setup-welcome-skip").disabled = false;
+      if (link) link.textContent = "Couldn't skip — click to retry";
+      note("setup-resume-note", "✗ Could not skip setup: " + (r.error || "unknown"), false);
+      return;
+    }
+    localStorage.setItem("ammSetupIncomplete", "1");
+    location.reload();
+  } catch (e) {
+    window.__setupSkipping = false;
+    $("setup-welcome-skip").disabled = false;
+    if (link) link.textContent = "Couldn't skip — click to retry";
+  }
+}
+
+// Bring the wizard back (from the finish-setup banner). setupWire is guarded,
+// so this is safe whether or not the wizard was already wired this session.
+function reopenSetup() {
+  $("setup-banner").classList.add("hidden");
+  if (tourState) tourEnd();
+  $("setup-overlay").classList.remove("hidden");
+  setupWire();
 }
 
 function setupRenderSuggestChips() {
@@ -2619,6 +2871,9 @@ async function setupFinish() {
     } else {
       note("setup-finish-note", "✓ Done — reloading the dashboard…", true);
     }
+    // v4.1.1: arm the post-finish coach-mark tour and clear any skip nudge.
+    localStorage.setItem("ammTourPending", "1");
+    localStorage.removeItem("ammSetupIncomplete");
     // Reload so the client picks up the new config.json shape + the tray's
     // supervisor starts. Small delay so the user sees the ✓.
     setTimeout(() => location.reload(), 1200);

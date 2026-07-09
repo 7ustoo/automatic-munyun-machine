@@ -147,8 +147,11 @@ end;
 ; installer payload (see [Files]). Chromium download only runs when no
 ; system Chrome/Edge exists, and runs VISIBLE so its progress bar shows
 ; instead of a static "this may take a few minutes" message.
-Filename: "cmd.exe"; \
-  Parameters: "/C ""npx playwright install chromium"""; \
+; v4.1.1: drive the BUNDLED node against the installed playwright-core CLI —
+; a fresh machine has no system Node/npx, so the old `npx playwright …` line
+; could not run (and only `playwright-core` ships in node_modules anyway).
+Filename: "{app}\runtime\node.exe"; \
+  Parameters: """{app}\node_modules\playwright-core\cli.js"" install chromium"; \
   WorkingDir: "{app}"; \
   StatusMsg: "No Chrome/Edge found — downloading Chromium (~150 MB)…"; \
   Check: NeedsChromium; \
@@ -169,12 +172,16 @@ Filename: "{app}\wrapper\dist\AMM.exe"; \
 ; v1.0 E6 — call uninstall.mjs in wipe mode so Add/Remove Programs gives
 ; the user a real cleanup, not just an "uninstall" that leaves the bot
 ; running and the secrets on disk.
-Filename: "node.exe"; \
+; v4.1.1: use the bundled runtime (still present — [UninstallDelete] runs
+; after this) instead of a bare "node.exe" off PATH, which is absent on
+; machines that never had system Node.
+Filename: "{app}\runtime\node.exe"; \
   Parameters: """{app}\scripts\uninstall.mjs"" --mode=wipe"; \
   WorkingDir: "{app}"; \
   Flags: runhidden
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\node_modules"
+Type: filesandordirs; Name: "{app}\runtime"
 Type: filesandordirs; Name: "{app}\data"
 Type: filesandordirs; Name: "{app}"

@@ -10,6 +10,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [4.2.0] — 2026-07-09
+
+> **A real first-run walkthrough — and a fresh PC just works.** New installs open with a "Welcome to Automatic Munyun Machine" screen, a guided setup you can skip anytime, and a short tour of the app afterward. Plus: the `.exe` installer bundles its own Node runtime, so scraping and hiring.cafe sign-in work immediately with no separate Node install.
+
+### Added
+
+- **First-run welcome + guided walkthrough.** The dashboard's setup overlay opens on a friendly welcome splash ("Your automatic job machine" — what AMM does, in four points) before asking for anything. Two clear choices: **Let's set it up →** or **Skip for now**.
+- **Skip setup.** A persistent "Skip setup for now" link (and a Skip button on the welcome screen) writes safe defaults and drops you onto the dashboard to explore. A persistent **Finish setup** banner nudges you back into the wizard whenever you're ready. Skipping does *not* schedule the daily scrape, so a half-finished install never fires a failing 7am run.
+- **"Here's what we'll hunt for" preview.** After scanning your resume, the suggested searches are framed as exactly what AMM will search each morning — with a **Job titles ↔ Keywords** toggle right there so you choose the search style at the moment it matters (re-runs suggestions live; backed by a new optional `mode` hint on `/api/resume/upload` → `resume-parse`).
+- **Post-setup tour.** Finishing setup kicks off a short coach-mark tour that rings the sidebar, **Scrape now**, your match stats, and the **System** page (sign-in/health), so first-time users know their way around. Dismissible; "Skip tour" ends it.
+
+### Fixed
+
+- **The `.exe` installer never provisioned Node.** `AMM.exe` shells out to Node helpers for every Scrape / Sign-in / update action, but the Inno installer only bundled `node_modules` — never the Node *runtime* itself. On a machine without Node already installed, every action failed with *"Could not run the helper. Is Node installed?"* (the `iwr | iex` one-liner was unaffected — it winget-installs Node.) The installer now ships a portable Node runtime at `{app}\runtime\node.exe` (fetched + checksum-verified against Node's official `SHASUMS256.txt` during the release build) and everything that spawns Node prefers it: the wrapper's `findNode()` (`wrapper/supervisor.go`), the `start-bot.cmd` / `run-daily-batch.cmd` scheduled-task launchers, and the installer's own Chromium post-install + uninstall steps. System Node, if present, still works as a fallback.
+
+---
+
 ## [4.1.0] — 2026-07-07
 
 > **You can see what's happening now.** Sign in to hiring.cafe straight from the dashboard — a permanent status pill tells you whether you're connected — and every batch shows exactly where the raw scrape went before it became your 100 jobs.

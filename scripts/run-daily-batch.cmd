@@ -7,8 +7,10 @@ set ROOT=%~dp0..
 cd /d "%ROOT%"
 
 REM Resolve node.exe WITHOUT relying on PATH (v2.0) — same chain as start-bot.cmd.
+REM Bundled runtime first (v4.1.1), then the standard install, then PATH.
 set "NODE="
-if exist "%ProgramFiles%\nodejs\node.exe" set "NODE=%ProgramFiles%\nodejs\node.exe"
+if exist "%ROOT%\runtime\node.exe" set "NODE=%ROOT%\runtime\node.exe"
+if not defined NODE if exist "%ProgramFiles%\nodejs\node.exe" set "NODE=%ProgramFiles%\nodejs\node.exe"
 if not defined NODE set "NODE=node"
 
 "%NODE%" "%~dp0daily-batch.mjs"
