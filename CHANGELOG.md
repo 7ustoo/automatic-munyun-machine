@@ -10,6 +10,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [4.2.1] — 2026-07-09
+
+> **The walkthrough now actually shows up.** v4.2.0's onboarding only appeared on a truly blank install (no `config.json`). If an earlier setup attempt left a config behind — which is exactly what happened after the Node bug — the wizard silently never opened and there was no way to launch it. Fixed.
+
+### Fixed
+
+- **First-run walkthrough was unreachable when a `config.json` already existed.** The welcome/setup overlay was gated purely on `needsSetup` (config missing), so a machine with a leftover/partial config never saw it and had no manual way in. Now: (1) the walkthrough **auto-opens once** on any install that has never produced a job batch, even if a config exists (`__hasBatch` gate — it never pops over an already-working install); (2) the **Jobs empty state** ("No batch yet") gained **Set up AMM** and **Take a tour** buttons; (3) the **System page** has a permanent **Getting started** card with **Run setup walkthrough** and **Take a tour**. Re-opening the wizard on an already-configured machine and hitting "Skip" now just closes it — it never overwrites your existing `config.json`.
+
+---
+
 ## [4.2.0] — 2026-07-09
 
 > **A real first-run walkthrough — and a fresh PC just works.** New installs open with a "Welcome to Automatic Munyun Machine" screen, a guided setup you can skip anytime, and a short tour of the app afterward. Plus: the `.exe` installer bundles its own Node runtime, so scraping and hiring.cafe sign-in work immediately with no separate Node install.
