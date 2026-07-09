@@ -1,0 +1,54 @@
+// v4.3: single source of truth for "is this machine signed in to hiring.cafe?"
+//
+// Extracted from job-action.mjs (the sign-in probe) and dashboard-api.mjs (the
+// data/hcafe-auth.json cache) so the scraper, the job actioner, and the
+// dashboard API all share one probe and one cache. Signed-in state is what
+// gates account-based dedup: when authed, the scrape sends
+// searchState.hideJobTypes and hiring.cafe hides Saved/Applied/Viewed jobs
+// server-side, so dedup follows the user's account across computers.
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { atomicWriteJson } from './io-helpers.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.join(__dirname, '..');
+
+// hiring.cafe button text varies; keep every known sign-in affordance here.
+export const SIGNIN_SELECTOR =
+  'button:has-text("Sign in"), button:has-text("Log in"), a:has-text("Sign in"):not(:has-text("Sign in with"))';
+
+// Probe the signed-in state on an already-open Playwright page. Navigates to
+// /saved (login-gated) and checks whether a sign-in button is still visible.
+// ~5s. The caller keeps ownership of the page — we just navigate it.
+export async function isSignedIn(page) {
+  await page.goto('https://hiring.cafe/saved', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.waitForTimeout(2500);
+  if (!page.url().includes('/saved')) return false;
+  const signInVisible = await page.locator(SIGNIN_SELECTOR).first().isVisible().catch(() => false);
+  return !signInVisible;
+}
+
+// The dashboard's "signed into hiring.cafe?" pill reads this cache instantly
+// instead of spinning up Playwright on every /api/status poll. Auth is a
+// single shared browser profile (data/browser-profile), NOT per-persona, so
+// the cache lives at the repo-level data/ dir, not inside a profile.
+export const HCAFE_AUTH_CACHE = path.join(ROOT, 'data', 'hcafe-auth.json');
+
+export function writeHcafeAuthCache(authed) {
+  try {
+    fs.mkdirSync(path.dirname(HCAFE_AUTH_CACHE), { recursive: true });
+    atomicWriteJson(HCAFE_AUTH_CACHE, { authed: !!authed, checkedAt: new Date().toISOString() });
+  } catch { /* cache write is best-effort — never fail the caller over it */ }
+}
+
+// Read the cached status without a browser spawn. Missing/unreadable cache →
+// null so callers can show "unknown" rather than a misleading "signed out".
+export function readHcafeAuthCache() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(HCAFE_AUTH_CACHE, 'utf8'));
+    return { authed: !!raw.authed, checkedAt: raw.checkedAt || null };
+  } catch {
+    return { authed: null, checkedAt: null };
+  }
+}

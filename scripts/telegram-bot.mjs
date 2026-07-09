@@ -65,6 +65,7 @@ import {
   LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
 } from './os-paths.mjs';
 import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
+import { readHcafeAuthCache } from './hcafe-session.mjs';
 import { telegramConfigured, parseEnvText } from './telegram-config.mjs';
 import { loadExport } from './export-batch.mjs';
 
@@ -575,6 +576,15 @@ function buildDiagnoseMessage() {
   try { seen = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Seen-jobs memory</b>`);
+  // v4.3: which dedup mode is active. Signed in → hiring.cafe hides
+  // Saved/Applied/Viewed server-side (syncs across computers); the local
+  // store below is the fallback/safety net.
+  const hcAuth = readHcafeAuthCache();
+  lines.push(hcAuth.authed === true
+    ? `  Dedup: hiring.cafe account (signed in) — seen jobs sync across your computers`
+    : hcAuth.authed === false
+    ? `  Dedup: local only — sign in to hiring.cafe from the dashboard (System page) to sync across devices`
+    : `  Dedup: local (hiring.cafe sign-in status unknown — check the dashboard's System page)`);
   const jobCount = seen?.jobs ? Object.keys(seen.jobs).length
                   : (Array.isArray(seen?.ids) ? seen.ids.length : 0);
   if (jobCount > 0) {
@@ -1123,11 +1133,16 @@ async function handleMessage(msg) {
 
   // /forget all
   if (/^\/?forget\s+all\b/.test(text)) {
+    // v4.3: /forget only clears the LOCAL store. When signed in, hiring.cafe's
+    // account-side Viewed/Applied memory still hides those jobs — say so.
+    const hcNote = readHcafeAuthCache().authed === true
+      ? '\n<i>Note: your hiring.cafe account still remembers viewed/applied jobs — they may not reappear while signed in.</i>'
+      : '';
     try {
       fs.unlinkSync(profilePaths().seenJobs);
-      return reply(chatId, '🗑 Wiped seen-jobs memory. Next /scrape treats every job as fresh.');
+      return reply(chatId, '🗑 Wiped seen-jobs memory. Next /scrape treats every job as fresh.' + hcNote);
     } catch {
-      return reply(chatId, '<i>No memory to wipe — you\'re already at a clean slate.</i>');
+      return reply(chatId, '<i>No memory to wipe — you\'re already at a clean slate.</i>' + hcNote);
     }
   }
 
@@ -1308,7 +1323,10 @@ async function handleMessage(msg) {
         after = seen.ids.length;
       }
       atomicWriteJson(seenPath, seen);
-      return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.`);
+      const hcNote = readHcafeAuthCache().authed === true
+        ? '\n<i>Note: your hiring.cafe account still remembers viewed jobs — some may stay hidden while signed in.</i>'
+        : '';
+      return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.` + hcNote);
     } catch (e) {
       return reply(chatId, '❌ ' + escHtml(e.message));
     }

@@ -31,6 +31,7 @@ import { atomicWriteJson } from './io-helpers.mjs';
 import { aiRerank } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
+import { isSignedIn, writeHcafeAuthCache } from './hcafe-session.mjs';
 
 // v1.0 E5: ensure config + data layout are profile-aware before we read anything.
 migrateIfNeeded();
@@ -300,6 +301,20 @@ async function checkBrowsable(page) {
   return false;
 }
 
+// v4.3: searchState builder, extracted pure so tests can pin the contract.
+// hideJobTypes is hiring.cafe's server-side account filter: it hides jobs the
+// signed-in account has Saved / Applied to / Viewed, so dedup follows the
+// user's account across computers. It only takes effect for signed-in
+// sessions (the reason v1.0.x removed it — back then the scrape ran unauth),
+// so we send it ONLY when this run has verified an authenticated session;
+// sending it signed-out is a silent no-op but would misrepresent the mode.
+export function buildSearchState(term, { formEaseFilter = null, accountDedup = false } = {}) {
+  const s = { searchQuery: term, workplaceTypes: ['Remote'] };
+  if (accountDedup) s.hideJobTypes = ['Saved', 'Applied', 'Viewed'];
+  if (formEaseFilter) s.applicationFormEase = formEaseFilter;
+  return s;
+}
+
 async function scrape() {
   log(`Launching headless Chromium with persistent profile…`);
   const ctx = await launchBrowser();
@@ -317,7 +332,8 @@ async function _scrapeWith(ctx) {
 
   // Browsability gate — Cloudflare may not have cleared yet on a fresh
   // profile. If cards never render, abort cleanly so we don't poison the
-  // seen-jobs store. (Renamed from "auth" gate; v1.0.x scraping is unauth.)
+  // seen-jobs store. (Renamed from "auth" gate; scraping works signed-out —
+  // v4.3: signing in additionally enables account-side dedup, see below.)
   log('Verifying hiring.cafe is browsable (Cloudflare cleared)…');
   const browsable = await checkBrowsable(page);
   if (!browsable) {
@@ -330,6 +346,21 @@ async function _scrapeWith(ctx) {
   // produces at least one card. /saved loading is necessary but not sufficient
   // — if every query then returns 0 cards the user is effectively broken and
   // /status / /diagnose should not display "auth OK" as if everything's fine.
+
+  // v4.3: account-based dedup. If the persistent profile is signed in to
+  // hiring.cafe, ask the server to hide Saved/Applied/Viewed jobs — dedup
+  // that lives on the account and follows the user to any computer. The
+  // probe (~5s, one /saved navigation on the already-open page) also
+  // refreshes the dashboard's data/hcafe-auth.json pill on every run.
+  const ACCOUNT_DEDUP = SCORING.accountDedup !== false; // default on
+  let hcafeAuthed = false;
+  if (ACCOUNT_DEDUP) {
+    hcafeAuthed = await isSignedIn(page).catch(() => false);
+    writeHcafeAuthCache(hcafeAuthed);
+    log(hcafeAuthed
+      ? '✓ signed in to hiring.cafe — account dedup active (server hides Saved/Applied/Viewed)'
+      : 'not signed in to hiring.cafe — local seen-jobs fallback (sign in from the dashboard to sync dedup across computers)');
+  }
   const results = {};
   // Map config's applicationFormEase → hiring.cafe URL filter
   const formEase = (CFG.filters?.applicationFormEase || 'all').toLowerCase();
@@ -360,14 +391,7 @@ async function _scrapeWith(ctx) {
   let runningFreshEstimate = 0;
 
   for (const [key, query] of QUERIES) {
-    const searchState = {
-      searchQuery: query,
-      workplaceTypes: ['Remote']
-      // v1.0.x: dropped hideJobTypes — that field only takes effect for
-      // logged-in users, and we now scrape unauth. Local seen-jobs.json +
-      // applications.md cover the dedup we actually need.
-    };
-    if (formEaseFilter) searchState.applicationFormEase = formEaseFilter;
+    const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed });
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
     const seenInQuery = new Set();
@@ -453,7 +477,7 @@ async function _scrapeWith(ctx) {
   // upstream is wrong even though /saved loaded — don't lie to /status.
   const totalCards = Object.values(results).reduce((s, rows) => s + rows.length, 0);
   if (totalCards > 0) recordAuthOk();
-  return results;
+  return { byQuery: results, hcafeAuthed };
 }
 
 // Per-query rolling 7-day card-count history. Read by /diagnose. Per-profile.
@@ -992,7 +1016,14 @@ function buildMessage(weather, top, directUrls, stats) {
   const headerTpl = (CFG.telegram?.messageHeader || '☀️ Good morning {NAME} — {DATE}')
     .replace('{NAME}', userName)
     .replace('{DATE}', today);
-  const authIndicator = CFG.telegram?.showAuthIndicator !== false ? '\n✓ logged in · sorted by CV match — best fits first.' : '\nSorted by CV match — best fits first.';
+  // v4.3: truthful dedup/auth line (the old one said "✓ logged in"
+  // unconditionally — stale since the v1.0.x switch to unauth scraping).
+  const dedupNote = stats.hcafeAuthed
+    ? '✓ hiring.cafe account dedup — seen jobs sync across your computers.'
+    : '⚠ Not signed in to hiring.cafe — seen-job memory is local to this computer. Sign in from the dashboard (System page) to sync.';
+  const authIndicator = CFG.telegram?.showAuthIndicator !== false
+    ? `\n${dedupNote}\nSorted by CV match — best fits first.`
+    : '\nSorted by CV match — best fits first.';
   const funnelStr = funnelLine(stats.funnel);
   const funnelBit = funnelStr ? `\n<i>${funnelStr}</i>` : '';
   const head = `<b>${headerTpl}</b>\n\n${weather}\n\n📊 <b>${top.length} fresh jobs</b> · ${stats.raw} raw${tail}${funnelBit}${authIndicator}`;
@@ -1033,6 +1064,9 @@ function buildBatchTxt(top, directUrls, weather, stats) {
   lines.push(`${top.length} jobs · ${stats.raw} raw${tail} · sorted by CV match`);
   const funnelStr = funnelLine(stats.funnel);
   if (funnelStr) lines.push(funnelStr);
+  lines.push(stats.hcafeAuthed
+    ? 'Dedup: hiring.cafe account (signed in) — seen jobs sync across computers'
+    : 'Dedup: local only — sign in to hiring.cafe from the dashboard to sync across computers');
   lines.push('');
   lines.push('================================================================');
   lines.push('');
@@ -1144,9 +1178,9 @@ if (IS_CLI) (async () => {
       return;
     }
 
-    let byQuery;
+    let byQuery, hcafeAuthed = false;
     try {
-      byQuery = await scrape();
+      ({ byQuery, hcafeAuthed } = await scrape());
     } catch (e) {
       if (e.unauth) {
         recordAuthFail();
@@ -1258,7 +1292,10 @@ if (IS_CLI) (async () => {
       sent: top.length,
       topPct: top[0]?.matchPct ?? 0,
       medianPct: top[Math.floor(top.length / 2)]?.matchPct ?? 0,
-      bottomPct: top[top.length - 1]?.matchPct ?? 0
+      bottomPct: top[top.length - 1]?.matchPct ?? 0,
+      // v4.3: which dedup mode produced this batch — true when the scrape ran
+      // signed-in and hiring.cafe hid Saved/Applied/Viewed server-side.
+      accountDedup: hcafeAuthed
     };
     writeBatchTsv(top, directUrls, funnel);
     const weather = await getWeather();
@@ -1269,6 +1306,7 @@ if (IS_CLI) (async () => {
       droppedClearance,
       skippedApplied,
       skippedSeen,
+      hcafeAuthed,
       funnel
     });
     if (banner) message = banner + '\n\n' + message;
@@ -1281,7 +1319,7 @@ if (IS_CLI) (async () => {
 
     // Always write the downloadable .txt (it's the disk record + /export
     // source); only attach it to Telegram when enabled.
-    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, funnel };
+    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, hcafeAuthed, funnel };
     try {
       const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
       if (TELEGRAM_ON) {

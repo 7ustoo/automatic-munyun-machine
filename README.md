@@ -129,8 +129,8 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/reauth` | Trigger re-login on your computer |
 | `/pause` | Stop the daily 7am push |
 | `/resume-bot` | Re-enable the daily 7am push |
-| `/forget all` | Wipe seen-jobs memory |
-| `/forget last` | Un-memorize the most recent batch |
+| `/forget all` | Wipe the local seen-jobs memory (signed-in installs: your hiring.cafe account may still hide viewed/applied jobs) |
+| `/forget last` | Un-memorize the most recent batch from the local memory |
 | `/cancel` | Cancel a multi-step interaction |
 | `/weather` | Just the weather |
 | `/version` | Show running version + latest on GitHub |
@@ -172,7 +172,7 @@ All settings live in `config.json` (created from `config.example.json` by the wi
 | `config.json` | User config (gitignored) |
 | `data/cv-parsed.json` | Parsed resume keywords (gitignored) |
 | `data/cv.md` | Markdown copy of resume (gitignored) |
-| `data/seen-jobs.json` | Local memory of jobs already surfaced (gitignored) |
+| `data/seen-jobs.json` | Local memory of jobs already surfaced — the fallback when signed out; signed-in installs dedup via your hiring.cafe account (v4.3, gitignored) |
 | `data/applications.md` | Application log (gitignored) |
 | `data/browser-profile/` | Playwright Chromium profile with hiring.cafe session (gitignored) |
 | `data/auth-state.json` | Last successful auth timestamp |

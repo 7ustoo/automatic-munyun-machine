@@ -119,6 +119,7 @@
   }
   #view-title { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .01em; }
   .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+  .top-help-btn { white-space: nowrap; }
 
   .status-chip, .profile-chip {
     display: inline-flex; align-items: center; gap: 7px;
@@ -600,6 +601,14 @@
   .tour-foot .tour-count { font-size: 11.5px; color: var(--text-3); }
   .tour-foot .tour-btns { display: flex; gap: 8px; }
 
+  /* ---- Boot veil (v4.3) — see the #boot-veil comment after <body> ---------- */
+  #boot-veil {
+    position: fixed; inset: 0; z-index: 90;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #boot-veil img { width: 56px; opacity: .5; }
+
   /* ---- Responsive -------------------------------------------------------------- */
   @media (max-width: 1060px) {
     td.src { display: none; }
@@ -614,6 +623,8 @@
     #topbar { padding: 0 14px; }
     #content { padding: 16px 14px 40px; }
     .watch-toggle span { display: none; }
+    .top-help-btn span { display: none; }   /* icon-only Setup/Tour */
+    #top-profile { display: none; }         /* informational; lives on Profiles page */
   }
   @media (max-width: 720px) {
     td.yoe, th.yoe { display: none; }
@@ -625,6 +636,21 @@
 </style>
 </head>
 <body>
+
+<!-- v4.3: boot veil. On a machine that has never finished (or skipped) the
+     walkthrough, the dashboard must not flash before the wizard opens — the
+     welcome splash should be the first thing a fresh install ever shows. The
+     veil covers the app shell until the first /api/status tick decides which
+     way to go; the inline script drops it instantly for known-onboarded
+     machines so they never see it at all. z-index 90 sits below the setup
+     overlay (100), so the wizard paints seamlessly over the veil. -->
+<div id="boot-veil"><img src="/favicon.png" alt="" /></div>
+<script>
+  if (localStorage.getItem("ammOnboarded") === "1"
+      || localStorage.getItem("ammSetupIncomplete") === "1") {
+    document.getElementById("boot-veil").style.display = "none";
+  }
+</script>
 
 <!-- Inline icon set (feather-style, stroke = currentColor). Self-contained:
      no CDN, works fully offline. -->
@@ -906,6 +932,14 @@
     <header id="topbar">
       <h1 id="view-title">Ranked jobs</h1>
       <div class="top-actions">
+        <!-- v4.3: onboarding entry points live here, always visible (moved out
+             of the System view's "Getting started" card). -->
+        <button class="sm ghost top-help-btn" id="top-setup-btn" title="Run setup walkthrough">
+          <svg class="ic"><use href="#i-zap"/></svg><span>Setup</span>
+        </button>
+        <button class="sm ghost top-help-btn" id="top-tour-btn" title="Take a tour">
+          <svg class="ic"><use href="#i-eye"/></svg><span>Tour</span>
+        </button>
         <span class="profile-chip" id="top-profile" title="Active profile — manage on the Profiles page">
           <svg class="ic"><use href="#i-users"/></svg><span id="profile-big">—</span>
         </span>
@@ -976,6 +1010,23 @@
         <div class="ub-actions">
           <button class="primary" id="sb-finish">Finish setup</button>
           <button class="ghost icon" id="sb-dismiss" aria-label="Dismiss for now"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
+      <!-- v4.3: hiring.cafe sign-in nudge. Shown when the cached auth status
+           says signed OUT (never on unknown). Signed-in dedup lives on the
+           account and follows the user across computers; signed-out it's
+           local-only. Dismiss is session-only — the nudge gently returns next
+           launch, and the System page's hiring.cafe card stays the permanent
+           surface. -->
+      <div id="hcafe-banner" class="update-banner setup-banner hidden" role="status">
+        <div class="ub-main">
+          <span class="ub-badge">Sign in</span>
+          <span>Sign in to hiring.cafe so AMM remembers seen jobs on your account — dedup follows you to any computer.</span>
+        </div>
+        <div class="ub-actions">
+          <button class="primary" id="hcb-signin">Sign in</button>
+          <button class="ghost icon" id="hcb-dismiss" aria-label="Dismiss for now"><svg class="ic"><use href="#i-x"/></svg></button>
         </div>
       </div>
 
@@ -1093,17 +1144,10 @@
       </section>
 
       <!-- =================== View: System =================== -->
+      <!-- v4.3: the "Getting started" card moved to the topbar (#top-setup-btn /
+           #top-tour-btn) so setup + tour are reachable from every view. -->
       <section class="view" data-view="system">
         <div class="grid">
-          <div class="card">
-            <h2>Getting started</h2>
-            <div class="muted-sm">New here, or want a refresher? Re-run the guided setup or take a quick tour of the dashboard anytime.</div>
-            <div class="row" style="margin-top:10px">
-              <button class="sm primary" id="sys-setup-btn"><svg class="ic"><use href="#i-zap"/></svg>Run setup walkthrough</button>
-              <button class="sm" id="sys-tour-btn"><svg class="ic"><use href="#i-eye"/></svg>Take a tour</button>
-            </div>
-          </div>
-
           <div class="card">
             <h2>Bot</h2>
             <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
@@ -1427,6 +1471,14 @@ function beginUpdateHandoff() {
   }, 4000);
 }
 
+// v4.3: drop the boot veil. Safe to call repeatedly; also armed with a 6s
+// safety net at boot so a hung first tick can never leave the veil up.
+function hideBootVeil() {
+  const v = $("boot-veil");
+  if (v) v.style.display = "none";
+}
+setTimeout(hideBootVeil, 6000);
+
 async function tick() {
   if (updatingState === "closing") return;
   try {
@@ -1437,6 +1489,7 @@ async function tick() {
     $("err").style.display = "none";
     render(s);
   } catch (e) {
+    hideBootVeil();   // never hide a connection error behind the veil
     if (updatingState === "applying") {
       // Wrapper went down mid-update — that's the installer doing its job.
       updateDownPolls++;
@@ -1463,6 +1516,10 @@ function render(s) {
     $("setup-overlay").classList.remove("hidden");
     setupWire();
   }
+  // v4.3: first status is in — either the wizard is open (and covers the
+  // veil from above) or setupNudges() decides synchronously right after this
+  // same microtask chain, so dropping the veil here can't flash the shell.
+  hideBootVeil();
 
   const ver = "v" + (s.wrapper?.version || "—");
   $("version").textContent = "AMM " + ver;
@@ -2207,7 +2264,23 @@ function renderHcafeAuth(d) {
   } else {
     $("hc-checked").textContent = "never";
   }
+  // v4.3: sign-in nudge banner — only on a confirmed "signed out" (never on
+  // unknown), never during first-run setup, and not after a same-session
+  // dismiss. Signed-in or unknown hides it.
+  const nudge = authed === false && !window.__hcafeNudgeDismissed && !window.__setupStarted;
+  $("hcafe-banner").classList.toggle("hidden", !nudge);
 }
+
+$("hcb-dismiss").addEventListener("click", () => {
+  window.__hcafeNudgeDismissed = true;   // session-only — returns next launch
+  $("hcafe-banner").classList.add("hidden");
+});
+$("hcb-signin").addEventListener("click", () => {
+  $("hcafe-banner").classList.add("hidden");
+  navTo("system");
+  $("hc-signin").scrollIntoView({ block: "center", behavior: "smooth" });
+  $("hc-signin").click();   // launches the existing login-once flow
+});
 
 async function loadHcafeAuthCached() {
   try {
@@ -2419,9 +2492,9 @@ function setupNudges() {
   $("sb-dismiss").addEventListener("click", () => $("setup-banner").classList.add("hidden"));
   $("tour-next").addEventListener("click", tourNext);
   $("tour-skip").addEventListener("click", tourEnd);
-  // Always-available entry points on the System page.
-  $("sys-setup-btn").addEventListener("click", reopenSetup);
-  $("sys-tour-btn").addEventListener("click", startTour);
+  // Always-available entry points in the topbar (v4.3: moved from System).
+  $("top-setup-btn").addEventListener("click", reopenSetup);
+  $("top-tour-btn").addEventListener("click", startTour);
 
   if (localStorage.getItem("ammSetupIncomplete") === "1") {
     $("setup-banner").classList.remove("hidden");
@@ -2435,10 +2508,13 @@ function setupNudges() {
   // (e.g. a partial/earlier setup left one behind, so needsSetup is false and
   // the wizard never auto-opened). Gated on "never scraped" so we never pop
   // over an already-working install. Shown once; Skip here just closes.
+  // v4.3: open synchronously — the boot veil is still up at this point, and
+  // opening in the same microtask chain means the welcome splash is the first
+  // thing painted (the old 400ms setTimeout let the bare dashboard flash).
   if (localStorage.getItem("ammOnboarded") !== "1"
       && localStorage.getItem("ammSetupIncomplete") !== "1"
       && !window.__hasBatch) {
-    setTimeout(reopenSetup, 400);
+    reopenSetup();
   }
 }
 
@@ -2448,7 +2524,8 @@ const TOUR_STEPS = [
   { sel: "#nav",                title: "Your control center",       body: "Jump between ranked Jobs, your Searches, Resume, Profiles, and System from this sidebar." },
   { sel: "#scrape-btn",         title: "Get jobs on demand",        body: "Scrape now pulls today's ~100 jobs immediately. It also runs on its own every weekday morning." },
   { sel: ".stats",              title: "Your matches at a glance",  body: "How many jobs came in, your average match, and how many are strong (70%+) — each scored against your resume." },
-  { sel: "[data-view='system']", title: "Health & hiring.cafe",     body: "Check the bot's status and sign in to hiring.cafe on the System page. That's the tour — you're all set!" },
+  { sel: "[data-view='system']", title: "Health & hiring.cafe",     body: "Check the bot's status and sign in to hiring.cafe on the System page." },
+  { sel: "#top-setup-btn",       title: "Help is always up here",    body: "Re-run the setup walkthrough or this tour anytime from these buttons. That's the tour — you're all set!" },
 ];
 
 function startTour() {

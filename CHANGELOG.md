@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [4.3.0] — 2026-07-09
+
+> **Seen jobs follow your hiring.cafe account now — and setup help lives in the header.** Sign in once and AMM asks hiring.cafe itself to hide everything you've already saved, applied to, or been shown — so switching computers no longer re-delivers old jobs. Setup and the tour moved to the top bar where you can always find them, and a fresh install opens straight into the walkthrough with zero dashboard flash.
+
+### Added
+
+- **Account-based dedup (signed-in installs).** When the persistent browser profile is signed in to hiring.cafe, every scrape sends `searchState.hideJobTypes: ["Saved","Applied","Viewed"]` so the *server* filters out jobs your account has already seen — dedup that follows your account to any computer. Delivered jobs are marked **Viewed** on your account automatically: hiring.cafe fires `POST /api/markJobViewed` whenever a signed-in session opens a job page, and the scraper already visits every shortlisted job page during apply-URL resolution (probed and confirmed live 2026-07-09: visited jobs vanish from a hide-viewed search; unvisited controls stay). Signed out, nothing changes — the local `seen-jobs.json` memory keeps working exactly as before, as it also does as a belt-and-suspenders safety net while signed in. New knob `scoring.accountDedup` (default `true`). The scrape start now logs which mode is active, `last-batch.json`'s funnel gains `accountDedup`, and the scrape refreshes the dashboard's `data/hcafe-auth.json` sign-in pill on every run. New shared module `scripts/hcafe-session.mjs` (sign-in probe + auth cache) — `job-action.mjs` and `dashboard-api.mjs` now use it too.
+- **Sign-in nudge.** Signed-out installs see a dismissible dashboard banner ("Sign in to hiring.cafe so AMM remembers seen jobs on your account"), an honest line in the Telegram batch header and `jobs(DATE).txt`, and a `Dedup:` line in `/diagnose`'s seen-jobs section. Dismissing the banner lasts for the session; the System page's hiring.cafe card remains the permanent surface.
+- **Setup + Tour in the top bar.** **Setup** (run setup walkthrough) and **Tour** (take a tour) buttons now live in the header next to Scrape now — always visible from every view, icon-only on narrow windows. The tour gained a final step pointing at them.
+- **Boot veil — the walkthrough is the first paint on a fresh install.** Machines that never finished (or skipped) onboarding boot behind a neutral logo veil until the first status check decides; the welcome splash is the first thing ever painted — the empty dashboard no longer flashes for ~half a second first. Known-onboarded machines never see the veil (localStorage check inline in `<head>`-adjacent script), connection errors always drop it, and a 6s safety net guarantees it can't stick.
+
+### Changed
+
+- **System page "Getting started" card removed** — replaced by the always-visible topbar buttons (the Jobs empty-state buttons remain).
+- **The batch header's auth line is truthful now.** It used to say "✓ logged in" unconditionally (stale since v1.0.x went unauth); it now reports the actual dedup mode — account-synced vs local-only with a sign-in pointer. Still gated by `telegram.showAuthIndicator`.
+- **`/forget all` / `/forget last` note the account.** Both still clear only the local store; when you're signed in they now warn that hiring.cafe's account-side memory may keep those jobs hidden.
+- **`hideJobTypes` returns, auth-gated.** v1.0.x removed it because the scrape ran unauthenticated and the field only works signed-in; v4.3 sends it exactly when a run has verified a signed-in session (`buildSearchState`, unit-tested in `scripts/__tests__/search-state.test.mjs`).
+
 ---
 
 ## [4.2.1] — 2026-07-09

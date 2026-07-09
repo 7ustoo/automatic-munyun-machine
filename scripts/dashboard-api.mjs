@@ -40,6 +40,7 @@ import {
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
+import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
 import { geocode } from './geocode.mjs';
 import { registerSchedulerForPlatform } from './scheduler-register.mjs';
@@ -363,28 +364,16 @@ async function setupHcafeLoginStatus() {
 // The dashboard shows a permanent "signed into hiring.cafe?" pill. The live
 // probe (job-action.mjs auth) spins up Playwright (~5-10s), far too heavy for
 // the frequent /api/status poll — so the result is cached to
-// data/hcafe-auth.json and read back instantly. Auth is a single shared
-// browser profile (data/browser-profile), NOT per-persona, so the cache lives
-// at the repo-level data/ dir, not inside a profile.
-const HCAFE_AUTH_CACHE = path.join(ROOT, 'data', 'hcafe-auth.json');
-
-function writeHcafeAuthCache(authed) {
-  try {
-    fs.mkdirSync(path.dirname(HCAFE_AUTH_CACHE), { recursive: true });
-    atomicWriteJson(HCAFE_AUTH_CACHE, { authed: !!authed, checkedAt: new Date().toISOString() });
-  } catch { /* cache write is best-effort — never fail the caller over it */ }
-}
+// data/hcafe-auth.json and read back instantly. v4.3: the cache read/write
+// moved to hcafe-session.mjs so the scraper (which now refreshes the cache on
+// every run) shares the exact same file and schema.
 
 // hcafe-auth-get: read the cached status instantly (no browser spawn). Missing
 // or unreadable cache → authed:null so the UI can show "unknown" and offer a
 // re-check rather than a misleading "signed out".
 function hcafeAuthGet() {
-  try {
-    const raw = JSON.parse(fs.readFileSync(HCAFE_AUTH_CACHE, 'utf8'));
-    out({ ok: true, authed: !!raw.authed, checkedAt: raw.checkedAt || null, cached: true });
-  } catch {
-    out({ ok: true, authed: null, checkedAt: null, cached: false });
-  }
+  const c = readHcafeAuthCache();
+  out({ ok: true, authed: c.authed, checkedAt: c.checkedAt, cached: c.authed !== null });
 }
 
 // hcafe-auth-check: run the live probe, persist it, and return the fresh

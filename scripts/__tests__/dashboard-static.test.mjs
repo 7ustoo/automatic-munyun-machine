@@ -48,3 +48,14 @@ test('page is fully offline — no external resources', () => {
   const ext = [...html.matchAll(/(?:src|href)="(https?:\/\/[^"]+)"/g)].map(m => m[1]);
   assert.deepEqual(ext, []);
 });
+
+// v4.3: setup + tour entry points moved from the System view into the topbar
+// so they're reachable from every view. Pin the new location and make sure
+// the old System-card ids don't quietly come back.
+test('onboarding entry points live in the topbar, not the System view', () => {
+  const topbar = html.slice(html.indexOf('<header id="topbar">'), html.indexOf('</header>'));
+  assert.ok(topbar.includes('id="top-setup-btn"'), 'top-setup-btn missing from topbar');
+  assert.ok(topbar.includes('id="top-tour-btn"'), 'top-tour-btn missing from topbar');
+  assert.ok(!html.includes('sys-setup-btn'), 'sys-setup-btn should be gone');
+  assert.ok(!html.includes('sys-tour-btn'), 'sys-tour-btn should be gone');
+});
