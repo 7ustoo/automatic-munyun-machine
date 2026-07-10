@@ -15,11 +15,7 @@
  */
 
 import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
+import { migrateIfNeeded, paths as profilePaths } from './profile-store.mjs';
 
 // Each cluster: if these signals appear in the CV, suggest these titles.
 const CLUSTERS = [
@@ -136,9 +132,10 @@ export function suggestKeywords(parsedCV, opts = {}) {
 // CLI test
 const file = process.argv[1] ? process.argv[1].replace(/\\/g, '/') : '';
 if (file.endsWith('role-suggester.mjs')) {
-  const cvPath = path.join(ROOT, 'data', 'cv-parsed.json');
+  migrateIfNeeded();
+  const cvPath = profilePaths().cvParsed;
   if (!fs.existsSync(cvPath)) {
-    console.error('No data/cv-parsed.json. Run: node scripts/resume-parser.mjs <resume>');
+    console.error('No parsed resume for the active profile. Run: node scripts/resume-parser.mjs <resume>');
     process.exit(2);
   }
   const cv = JSON.parse(fs.readFileSync(cvPath, 'utf8'));

@@ -19,6 +19,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths } from './profile-store.mjs';
+import { atomicWriteJson } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -106,8 +107,7 @@ export function writeParsedCV(parsed, profileSlug) {
   // v1.0 E5: writes to data/profiles/<active>/cv-parsed.json by default;
   // pass an explicit slug to write into a specific profile.
   const outPath = paths(profileSlug).cvParsed;
-  fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, JSON.stringify(parsed, null, 2));
+  atomicWriteJson(outPath, parsed);
   return outPath;
 }
 

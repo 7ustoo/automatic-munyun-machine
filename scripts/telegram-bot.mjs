@@ -153,13 +153,13 @@ const HEARTBEAT_FILE = path.join(ROOT, 'data', 'heartbeat.json');
 const BOT_STARTED_AT = Date.now();
 function writeHeartbeat(extra = {}) {
   try {
-    fs.writeFileSync(HEARTBEAT_FILE, JSON.stringify({
+    atomicWriteJson(HEARTBEAT_FILE, {
       ts: new Date().toISOString(),
       pid: process.pid,
       version: VERSION,
       startedAt: new Date(BOT_STARTED_AT).toISOString(),
       ...extra
-    }, null, 2));
+    });
   } catch { /* never let heartbeat write crash the bot */ }
 }
 
@@ -170,7 +170,7 @@ function loadOffset() {
   catch { return 0; }
 }
 function saveOffset(offset) {
-  fs.writeFileSync(OFFSET_FILE, JSON.stringify({ offset }));
+  atomicWriteJson(OFFSET_FILE, { offset });
 }
 
 // ---------- telegram api ----------

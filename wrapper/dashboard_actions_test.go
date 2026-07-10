@@ -106,6 +106,28 @@ func TestGuardPost_AcceptsLocalhostName(t *testing.T) {
 	}
 }
 
+func TestEmailOAuthCallbackRejectsNonLoopbackHost(t *testing.T) {
+	d := &dashboardServer{}
+	req := httptest.NewRequest(http.MethodGet, "http://evil.example/oauth/google/callback?error=access_denied", nil)
+	req.Host = "evil.example"
+	rec := httptest.NewRecorder()
+	d.handleEmailOAuthCallback(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("non-loopback OAuth callback → %d; want 403", rec.Code)
+	}
+}
+
+func TestEmailOAuthCallbackRendersCancellationWithoutHelper(t *testing.T) {
+	d := &dashboardServer{}
+	req := httptest.NewRequest(http.MethodGet, "http://127.0.0.1/oauth/google/callback?error=access_denied", nil)
+	req.Host = "127.0.0.1:5000"
+	rec := httptest.NewRecorder()
+	d.handleEmailOAuthCallback(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "access_denied") {
+		t.Errorf("cancelled OAuth callback = %d %q; want explanatory 200", rec.Code, rec.Body.String())
+	}
+}
+
 // handleIndex must substitute the CSRF placeholder so the page can read it.
 func TestHandleIndex_InjectsToken(t *testing.T) {
 	d := &dashboardServer{csrfToken: "INJECTED-TOKEN-123"}

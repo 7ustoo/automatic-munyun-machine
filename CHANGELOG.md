@@ -8,6 +8,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [4.4.0] — 2026-07-10
+
+### Added
+
+- **Connect Gmail with Google.** The desktop dashboard now uses Google's installed-app OAuth flow with PKCE and a loopback callback. AMM requests only identity plus `gmail.send`, sends through the Gmail API, refreshes access automatically, stores authorization locally, and removes it on Disconnect. Existing Gmail App Password SMTP setup remains under Advanced as a backward-compatible fallback.
+- **Dashboard browser E2E in CI.** A deterministic Playwright harness now boots the real dashboard against local fixture APIs, renders jobs and profiles, expands match reasoning, and completes a mocked Gmail OAuth popup/callback. CI installs Chromium and runs `npm run test:e2e` without touching hiring.cafe, Telegram, or Google accounts.
+- **OAuth release injection.** Release jobs can bundle a desktop OAuth client from `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` GitHub Actions secrets; source builds can provide the same names in `.env`.
+
+### Fixed
+
+- **Cross-platform watchdog recovery.** The macOS/Linux watchdog no longer attempts to launch Windows PowerShell and Task Scheduler; it terminates the heartbeat PID with `SIGTERM` and restarts the bot through the shared scheduler abstraction. Watchdog and missed-batch Telegram alerts now use the running Node executable instead of relying on `node` being present on `PATH`.
+- **Profile-aware supply diagnostics.** Dry-query warnings now read the active profile's `query-stats.json` instead of the removed global location, and the role-suggester CLI reads the active profile's parsed CV.
+
+### Changed
+
+- Runtime heartbeats, poll offsets, update state, watchdog state, parsed CV output, and daily batch artifacts now use atomic writes so a crash cannot expose truncated JSON or a partially published batch file. The synchronous file-lock retry ceiling was increased to avoid false failures under heavy concurrent writes.
+- Added regression coverage for Gmail PKCE, token exchange, MIME attachments, dry-query detection, and OS command/scheduler resolution (192 tests total).
+
 ## [4.3.0] — 2026-07-09
 
 > **Seen jobs follow your hiring.cafe account now — setup help lives in the header — and you can email each batch to a helper.** Sign in once and AMM asks hiring.cafe itself to hide everything you've already saved, applied to, or been shown — so switching computers no longer re-delivers old jobs. Setup and the tour moved to the top bar where you can always find them, a fresh install opens straight into the walkthrough with zero dashboard flash, and you can now hand the daily batch off by email to a VA who applies for you.

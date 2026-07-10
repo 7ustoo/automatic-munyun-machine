@@ -166,7 +166,7 @@
     "showAuthIndicator": true
   },
   "email": {
-    "_comment": "v4.3: email the daily job-batch .txt to someone (e.g. a virtual assistant who applies for you). Sends through your own Gmail over SMTP \u2014 connect it from the dashboard's System \u2192 Email card. Gmail needs a 16-char App Password (2-Step Verification on); your normal password won't work. Credentials live in .env (SMTP_USER / SMTP_APP_PASSWORD), never here. 'to' = recipient; 'autoSend' also emails automatically after each morning scrape; {DATE} in 'subject' expands to the batch date.",
+    "_comment": "v4.4: email the daily job-batch .txt to someone (e.g. a virtual assistant). Connect Gmail through Google's consent screen with send-only permission; App Password SMTP remains an advanced fallback. OAuth tokens and SMTP credentials stay local and never live in config.json. 'to' = recipient; 'autoSend' also emails automatically after each morning scrape; {DATE} in 'subject' expands to the batch date.",
     "enabled": false,
     "to": "",
     "from": "",

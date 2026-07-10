@@ -43,9 +43,11 @@ import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
 import {
-  emailConfigured, readEmailEnv, writeEmailEnv, disableEmailEnv,
-  verifyLogin, sendEmail, emailScrub, friendlyError, isEmailAddress, renderSubject
+  emailConfigured, readEmailEnv, writeEmailEnv,
+  verifyLogin, sendEmail, sendConfiguredEmail, disconnectEmail,
+  emailDeliveryStatus, oauthAvailable, emailScrub, friendlyError, isEmailAddress, renderSubject
 } from './email.mjs';
+import { beginOAuth, completeOAuth } from './gmail-oauth.mjs';
 import { geocode } from './geocode.mjs';
 import { registerSchedulerForPlatform } from './scheduler-register.mjs';
 
@@ -59,6 +61,7 @@ function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 // explicit so the UI never has to understand the full profile structure.
 function settingsGet() {
   const cfg = cfgRW.read();
+  const delivery = emailDeliveryStatus(readEmailEnv());
   out({
     ok: true,
     settings: {
@@ -85,7 +88,10 @@ function settingsGet() {
         from: cfg.email?.from || '',
         subject: cfg.email?.subject || 'Job batch — {DATE}',
         autoSend: !!cfg.email?.autoSend,
-        hasCreds: emailConfigured(readEmailEnv())
+        hasCreds: delivery.connected,
+        provider: delivery.provider,
+        connectedEmail: delivery.email,
+        oauthAvailable: oauthAvailable(readEmailEnv())
       },
       cvTermCount: (() => {
         try {
@@ -578,6 +584,41 @@ async function emailValidate(user, pass) {
   return out(await verifyLogin({ SMTP_USER: user, SMTP_APP_PASSWORD: pass }));
 }
 
+function emailOAuthStart(redirectUri, to, subject, autoSend) {
+  to = String(to || '').trim();
+  if (!isEmailAddress(to)) return out({ ok: false, error: 'Enter the recipient email address.' });
+  try {
+    const started = beginOAuth({
+      redirectUri, to,
+      subject: String(subject || '').trim().slice(0, 120) || 'Job batch — {DATE}',
+      autoSend: autoSend === true || autoSend === 'true' || autoSend === 'on'
+    });
+    return out({ ok: true, authUrl: started.authUrl });
+  } catch (e) {
+    return out({ ok: false, error: String(e.message || e) });
+  }
+}
+
+async function emailOAuthComplete(code, state, redirectUri) {
+  try {
+    const connected = await completeOAuth({ code, state, redirectUri });
+    if (!isEmailAddress(connected.to)) throw new Error('Recipient was lost during Google connection. Start again.');
+    await sendConfiguredEmail({
+      to: connected.to, from: connected.email,
+      subject: '✅ Automatic Munyun Machine connected',
+      text: 'This is a test from Automatic Munyun Machine. Your daily ranked job-batch .txt will be emailed to this address so you can apply. — AMM'
+    });
+    cfgRW.set('email.from', connected.email);
+    cfgRW.set('email.to', connected.to);
+    cfgRW.set('email.subject', connected.subject || 'Job batch — {DATE}');
+    cfgRW.set('email.autoSend', !!connected.autoSend);
+    cfgRW.set('email.enabled', true);
+    return out({ ok: true, email: connected.email, to: connected.to });
+  } catch (e) {
+    return out({ ok: false, error: String(e.message || e) });
+  }
+}
+
 // Step 2: verify login, send a test to the recipient, THEN persist (.env creds
 // + config knobs). Never persists something that didn't just work.
 async function emailSave(user, pass, to, subject, autoSend) {
@@ -611,7 +652,8 @@ async function emailSave(user, pass, to, subject, autoSend) {
 // Manual "Email batch" button: email the current batch .txt right now.
 async function emailSend() {
   const env = readEmailEnv();
-  if (!emailConfigured(env)) return out({ ok: false, error: 'Email isn’t connected yet — set it up in System → Email.' });
+  const delivery = emailDeliveryStatus(env);
+  if (!delivery.connected) return out({ ok: false, error: 'Email isn’t connected yet — set it up in System → Email.' });
   const cfg = cfgRW.read();
   const to = String(cfg.email?.to || '').trim();
   if (!isEmailAddress(to)) return out({ ok: false, error: 'No recipient set — add one in System → Email.' });
@@ -619,8 +661,8 @@ async function emailSend() {
   if (!att) return out({ ok: false, error: 'No batch yet — run a scrape first.' });
   const subject = renderSubject(cfg.email?.subject, att.date);
   try {
-    await sendEmail({
-      env, to, from: cfg.email?.from || env.SMTP_USER, subject,
+    await sendConfiguredEmail({
+      env, to, from: cfg.email?.from || delivery.email, subject,
       text: `Attached: ${att.filename} — today's ranked job batch from Automatic Munyun Machine.`,
       attachments: [{ filename: att.filename, path: att.path }]
     });
@@ -632,7 +674,7 @@ async function emailSend() {
 
 // Disconnect: strip creds from .env (backed up) + turn the knobs off.
 function emailDisable() {
-  try { disableEmailEnv(); } catch {}
+  try { disconnectEmail(); } catch {}
   try { cfgRW.set('email.enabled', false); cfgRW.set('email.autoSend', false); } catch {}
   return out({ ok: true });
 }
@@ -686,12 +728,14 @@ if (isMain) (async () => {
     case 'setup-init':               cfgRW.snapshotConfig('pre-setup'); return setupInit(a);
     case 'setup-finalize':           return setupFinalize();
     // v4.3: email-to-VA setup + send.
+    case 'email-oauth-start': return emailOAuthStart(a, b, a3, a4);
+    case 'email-oauth-complete': return emailOAuthComplete(a, b, a3);
     case 'email-validate': return emailValidate(a, b);
     case 'email-save':     return emailSave(a, b, a3, a4, a5);
     case 'email-send':     return emailSend();
     case 'email-disable':  return emailDisable();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-validate|email-save|email-send|email-disable> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });

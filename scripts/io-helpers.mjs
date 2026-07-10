@@ -161,11 +161,12 @@ export function lockedUpdateJsonSync(filePath, mutator) {
 
   // proper-lockfile's lockSync API does not accept a `retries` option (it's
   // sync — there's no async sleep to back off with). Implement our own
-  // bounded busy-retry: 12 attempts × ~80 ms = up to ~1 s total wait,
-  // matching the async path's effective ceiling.
+  // bounded busy-retry: 30 attempts x ~80 ms = up to ~2.4 s total wait.
+  // The previous ~1 s ceiling was flaky with three concurrent writers on
+  // slower Windows disks and under full-suite CPU contention.
   let release;
   let lastErr;
-  const MAX_ATTEMPTS = 12;
+  const MAX_ATTEMPTS = 30;
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
     try {
       release = lockfile.lockSync(filePath, { stale: 30000, realpath: false });

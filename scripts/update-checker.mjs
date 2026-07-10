@@ -15,6 +15,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { atomicWriteJson } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -51,8 +52,7 @@ function readState() {
 }
 
 function writeState(s) {
-  fs.mkdirSync(path.dirname(STATE_PATH), { recursive: true });
-  fs.writeFileSync(STATE_PATH, JSON.stringify(s, null, 2));
+  atomicWriteJson(STATE_PATH, s);
 }
 
 // Mark a version as "skip this one" — we won't notify about it again,
@@ -152,12 +152,11 @@ export async function checkForUpdate({ force = false } = {}) {
 // confirm the update succeeded and message the user accordingly.
 export function markUpdating(fromVersion, toVersion) {
   const flag = path.join(ROOT, 'data', '.updating');
-  fs.mkdirSync(path.dirname(flag), { recursive: true });
-  fs.writeFileSync(flag, JSON.stringify({
+  atomicWriteJson(flag, {
     from: fromVersion,
     to: toVersion,
     startedAt: new Date().toISOString()
-  }, null, 2));
+  });
 }
 
 // Read + clear the post-update flag. Called by bot at startup. Returns the

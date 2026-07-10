@@ -20,6 +20,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
+import { atomicWriteJson } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -41,14 +42,13 @@ function readState() {
 }
 function writeState(s) {
   try {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+    atomicWriteJson(STATE_FILE, s);
   } catch { /* ignore */ }
 }
 
 function alertTelegram(text) {
   try {
-    spawnSync('node', [TELEGRAM_SEND, text], {
+    spawnSync(process.execPath, [TELEGRAM_SEND, text], {
       stdio: 'ignore', timeout: 15000, windowsHide: true
     });
   } catch { /* ignore */ }
@@ -82,7 +82,7 @@ const scheduledTime = cfg.schedule?.time || '07:00';
 alertTelegram(
   `⚠️ <b>Daily batch didn't run.</b>\n` +
   `Expected at ${scheduledTime} ${dayName} but no <code>today-batch-${today}.tsv</code> exists. ` +
-  `Check Task Scheduler (<code>munyun-daily-batch</code>) and run <code>/scrape</code> from Telegram if you want today's jobs now.`
+  `Check AMM's scheduled jobs and run <code>/scrape</code> from Telegram if you want today's jobs now.`
 );
 
 writeState({ ...state, lastAlertedDate: today, lastAlertedAt: new Date().toISOString() });
