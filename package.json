@@ -1,6 +1,6 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "4.2.1",
+  "version": "4.3.0",
   "description": "Daily 100-job Telegram batch ranked by CV match. Local-first, free, runs on Windows + macOS + Linux.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",
@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "mammoth": "^1.7.0",
+    "nodemailer": "^9.0.3",
     "pdf-parse": "^1.1.1",
     "playwright-core": "^1.45.0",
     "proper-lockfile": "^4.0.0"

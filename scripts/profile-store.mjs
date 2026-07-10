@@ -34,7 +34,7 @@ const CFG_EXAMPLE = path.join(ROOT, 'config.example.json');
 const PROFILES_DIR = path.join(ROOT, 'data', 'profiles');
 
 // Fields that live "inside" a profile vs at config top level.
-const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram'];
+const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram', 'email'];
 
 // Per-profile data files (relocated under data/profiles/<slug>/ on migration).
 const PROFILE_DATA_FILES = [

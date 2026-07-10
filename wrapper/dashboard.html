@@ -119,6 +119,7 @@
   }
   #view-title { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .01em; }
   .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
+  .top-help-btn { white-space: nowrap; }
 
   .status-chip, .profile-chip {
     display: inline-flex; align-items: center; gap: 7px;
@@ -600,6 +601,14 @@
   .tour-foot .tour-count { font-size: 11.5px; color: var(--text-3); }
   .tour-foot .tour-btns { display: flex; gap: 8px; }
 
+  /* ---- Boot veil (v4.3) — see the #boot-veil comment after <body> ---------- */
+  #boot-veil {
+    position: fixed; inset: 0; z-index: 90;
+    background: var(--bg);
+    display: flex; align-items: center; justify-content: center;
+  }
+  #boot-veil img { width: 56px; opacity: .5; }
+
   /* ---- Responsive -------------------------------------------------------------- */
   @media (max-width: 1060px) {
     td.src { display: none; }
@@ -614,6 +623,8 @@
     #topbar { padding: 0 14px; }
     #content { padding: 16px 14px 40px; }
     .watch-toggle span { display: none; }
+    .top-help-btn span { display: none; }   /* icon-only Setup/Tour */
+    #top-profile { display: none; }         /* informational; lives on Profiles page */
   }
   @media (max-width: 720px) {
     td.yoe, th.yoe { display: none; }
@@ -625,6 +636,21 @@
 </style>
 </head>
 <body>
+
+<!-- v4.3: boot veil. On a machine that has never finished (or skipped) the
+     walkthrough, the dashboard must not flash before the wizard opens — the
+     welcome splash should be the first thing a fresh install ever shows. The
+     veil covers the app shell until the first /api/status tick decides which
+     way to go; the inline script drops it instantly for known-onboarded
+     machines so they never see it at all. z-index 90 sits below the setup
+     overlay (100), so the wizard paints seamlessly over the veil. -->
+<div id="boot-veil"><img src="/favicon.png" alt="" /></div>
+<script>
+  if (localStorage.getItem("ammOnboarded") === "1"
+      || localStorage.getItem("ammSetupIncomplete") === "1") {
+    document.getElementById("boot-veil").style.display = "none";
+  }
+</script>
 
 <!-- Inline icon set (feather-style, stroke = currentColor). Self-contained:
      no CDN, works fully offline. -->
@@ -906,6 +932,14 @@
     <header id="topbar">
       <h1 id="view-title">Ranked jobs</h1>
       <div class="top-actions">
+        <!-- v4.3: onboarding entry points live here, always visible (moved out
+             of the System view's "Getting started" card). -->
+        <button class="sm ghost top-help-btn" id="top-setup-btn" title="Run setup walkthrough">
+          <svg class="ic"><use href="#i-zap"/></svg><span>Setup</span>
+        </button>
+        <button class="sm ghost top-help-btn" id="top-tour-btn" title="Take a tour">
+          <svg class="ic"><use href="#i-eye"/></svg><span>Tour</span>
+        </button>
         <span class="profile-chip" id="top-profile" title="Active profile — manage on the Profiles page">
           <svg class="ic"><use href="#i-users"/></svg><span id="profile-big">—</span>
         </span>
@@ -979,6 +1013,23 @@
         </div>
       </div>
 
+      <!-- v4.3: hiring.cafe sign-in nudge. Shown when the cached auth status
+           says signed OUT (never on unknown). Signed-in dedup lives on the
+           account and follows the user across computers; signed-out it's
+           local-only. Dismiss is session-only — the nudge gently returns next
+           launch, and the System page's hiring.cafe card stays the permanent
+           surface. -->
+      <div id="hcafe-banner" class="update-banner setup-banner hidden" role="status">
+        <div class="ub-main">
+          <span class="ub-badge">Sign in</span>
+          <span>Sign in to hiring.cafe so AMM remembers seen jobs on your account — dedup follows you to any computer.</span>
+        </div>
+        <div class="ub-actions">
+          <button class="primary" id="hcb-signin">Sign in</button>
+          <button class="ghost icon" id="hcb-dismiss" aria-label="Dismiss for now"><svg class="ic"><use href="#i-x"/></svg></button>
+        </div>
+      </div>
+
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
         <div class="stats">
@@ -1016,6 +1067,7 @@
                 <a href="/api/export?format=xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
               </div>
             </details>
+            <button class="sm" id="email-btn" title="Email this batch to your recipient (e.g. your VA)"><svg class="ic"><use href="#i-send"/></svg>Email</button>
             <button class="sm icon" id="refresh-btn" title="Refresh the list" aria-label="Refresh the list"><svg class="ic"><use href="#i-refresh"/></svg></button>
           </div>
           <div class="table-wrap"><div id="lb-body"></div></div>
@@ -1093,17 +1145,10 @@
       </section>
 
       <!-- =================== View: System =================== -->
+      <!-- v4.3: the "Getting started" card moved to the topbar (#top-setup-btn /
+           #top-tour-btn) so setup + tour are reachable from every view. -->
       <section class="view" data-view="system">
         <div class="grid">
-          <div class="card">
-            <h2>Getting started</h2>
-            <div class="muted-sm">New here, or want a refresher? Re-run the guided setup or take a quick tour of the dashboard anytime.</div>
-            <div class="row" style="margin-top:10px">
-              <button class="sm primary" id="sys-setup-btn"><svg class="ic"><use href="#i-zap"/></svg>Run setup walkthrough</button>
-              <button class="sm" id="sys-tour-btn"><svg class="ic"><use href="#i-eye"/></svg>Take a tour</button>
-            </div>
-          </div>
-
           <div class="card">
             <h2>Bot</h2>
             <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
@@ -1149,6 +1194,49 @@
                   <button class="sm primary" id="tg-save">Save &amp; enable</button>
                   <button class="sm" id="tg-cancel">Cancel</button>
                   <div class="note" id="tg-save-note"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Email batch <span class="pill" id="email-pill">off</span></h2>
+            <div class="big" id="email-big"><span class="dot" id="email-dot"></span><span id="email-state">—</span></div>
+
+            <!-- CONNECTED view -->
+            <div id="email-on" class="hidden">
+              <div class="stat-row"><span class="k">Sends to</span><span class="v" id="email-to-v">—</span></div>
+              <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send every morning after the scrape</span></label>
+              <div class="row">
+                <button class="sm primary" id="email-send-now"><svg class="ic"><use href="#i-send"/></svg>Send latest batch now</button>
+                <button class="danger sm" id="email-disable">Disconnect</button>
+              </div>
+              <div class="note" id="email-on-note"></div>
+            </div>
+
+            <!-- DISABLED / setup view -->
+            <div id="email-off">
+              <div class="muted-sm">Off — email your daily job batch (.txt) to someone (e.g. a virtual assistant) so they can apply for you. Sends through your own Gmail; nothing leaves your computer except the email you send.</div>
+              <button class="sm" id="email-setup-start"><svg class="ic"><use href="#i-send"/></svg>Set up email…</button>
+
+              <div id="email-setup" class="hidden">
+                <div class="step">
+                  <div class="muted-sm">1. Gmail needs an <b>App Password</b> — not your normal password. Turn on 2-Step Verification, then create one at <code>myaccount.google.com/apppasswords</code>. Paste your Gmail address and that 16-character password:</div>
+                  <input type="email" id="email-user" placeholder="you@gmail.com" autocomplete="off" spellcheck="false" />
+                  <input type="password" id="email-pass" placeholder="app password (16 characters)" autocomplete="off" spellcheck="false" style="margin-top:6px" />
+                  <button class="sm primary" id="email-validate" style="margin-top:8px">Verify Gmail</button>
+                  <div class="note" id="email-validate-note"></div>
+                </div>
+                <div class="step hidden" id="email-step-to">
+                  <div class="muted-sm">2. Who receives the batch, and the subject line (<code>{DATE}</code> = the batch date):</div>
+                  <input type="email" id="email-to" placeholder="assistant@example.com" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="email-subject" placeholder="Job batch — {DATE}" style="margin-top:6px" />
+                  <label class="watch-toggle" style="margin-top:8px"><input type="checkbox" id="email-autosend-new" checked /><span>Auto-send every morning after the scrape</span></label>
+                </div>
+                <div class="step hidden" id="email-step-save">
+                  <button class="sm primary" id="email-save">Save &amp; send test</button>
+                  <button class="sm" id="email-cancel">Cancel</button>
+                  <div class="note" id="email-save-note"></div>
                 </div>
               </div>
             </div>
@@ -1427,6 +1515,14 @@ function beginUpdateHandoff() {
   }, 4000);
 }
 
+// v4.3: drop the boot veil. Safe to call repeatedly; also armed with a 6s
+// safety net at boot so a hung first tick can never leave the veil up.
+function hideBootVeil() {
+  const v = $("boot-veil");
+  if (v) v.style.display = "none";
+}
+setTimeout(hideBootVeil, 6000);
+
 async function tick() {
   if (updatingState === "closing") return;
   try {
@@ -1437,6 +1533,7 @@ async function tick() {
     $("err").style.display = "none";
     render(s);
   } catch (e) {
+    hideBootVeil();   // never hide a connection error behind the veil
     if (updatingState === "applying") {
       // Wrapper went down mid-update — that's the installer doing its job.
       updateDownPolls++;
@@ -1463,6 +1560,10 @@ function render(s) {
     $("setup-overlay").classList.remove("hidden");
     setupWire();
   }
+  // v4.3: first status is in — either the wizard is open (and covers the
+  // veil from above) or setupNudges() decides synchronously right after this
+  // same microtask chain, so dropping the veil here can't flash the shell.
+  hideBootVeil();
 
   const ver = "v" + (s.wrapper?.version || "—");
   $("version").textContent = "AMM " + ver;
@@ -2185,6 +2286,132 @@ $("tg-disable").addEventListener("click", async () => {
   if (r.ok) tick();
 });
 
+// ---- Email-to-VA (v4.3) ----
+// State comes from /api/settings (settings.email); the app password is never
+// returned, only settings.email.hasCreds. Connected = hasCreds && enabled.
+let emailUser = "", emailPass = "";
+
+function renderEmail(e) {
+  const connected = !!(e && e.hasCreds && e.enabled);
+  window.__emailConnected = connected;
+  $("email-pill").textContent = connected ? "on" : "off";
+  $("email-dot").className = "dot " + (connected ? "alive" : "unknown");
+  $("email-state").textContent = connected ? "Connected" : "Off";
+  $("email-on").classList.toggle("hidden", !connected);
+  $("email-off").classList.toggle("hidden", connected);
+  if (connected) {
+    $("email-to-v").textContent = e.to || "—";
+    $("email-autosend").checked = !!e.autoSend;
+  }
+}
+
+async function loadEmail() {
+  try {
+    const r = await (await fetch("/api/settings", { cache: "no-store" })).json();
+    if (r.ok) renderEmail(r.settings.email);
+  } catch {}
+}
+
+$("email-setup-start").addEventListener("click", () => {
+  $("email-setup").classList.remove("hidden");
+  $("email-setup-start").classList.add("hidden");
+  $("email-user").focus();
+});
+
+function resetEmailSetup() {
+  emailUser = ""; emailPass = "";
+  $("email-setup").classList.add("hidden");
+  $("email-setup-start").classList.remove("hidden");
+  $("email-step-to").classList.add("hidden");
+  $("email-step-save").classList.add("hidden");
+  $("email-user").value = ""; $("email-pass").value = "";
+  $("email-to").value = ""; $("email-subject").value = "";
+  note("email-validate-note", ""); note("email-save-note", "");
+}
+$("email-cancel").addEventListener("click", resetEmailSetup);
+
+$("email-validate").addEventListener("click", async () => {
+  const user = $("email-user").value.trim();
+  const pass = $("email-pass").value.trim();
+  if (!user || !pass) return note("email-validate-note", "Enter your Gmail and app password.", false);
+  note("email-validate-note", "Checking Gmail sign-in…", true);
+  const r = await postJSON("/api/email/validate", { user, pass });
+  if (r.ok) {
+    emailUser = user; emailPass = pass;
+    note("email-validate-note", "✓ Gmail sign-in works.", true);
+    $("email-step-to").classList.remove("hidden");
+    $("email-to").focus();
+  } else {
+    note("email-validate-note", "✗ " + (r.error || "Gmail rejected the sign-in"), false);
+  }
+});
+
+// A valid recipient unlocks Save.
+$("email-to").addEventListener("input", () => {
+  const v = $("email-to").value.trim();
+  $("email-step-save").classList.toggle("hidden", !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v));
+});
+
+$("email-save").addEventListener("click", async () => {
+  const to = $("email-to").value.trim();
+  const subject = $("email-subject").value.trim() || "Job batch — {DATE}";
+  const autoSend = $("email-autosend-new").checked ? "true" : "false";
+  if (!emailUser || !emailPass) return note("email-save-note", "Verify your Gmail first.", false);
+  if (!to) return note("email-save-note", "Enter the recipient email.", false);
+  note("email-save-note", "Saving + sending a test email…", true);
+  const r = await postJSON("/api/email/save", { user: emailUser, pass: emailPass, to, subject, autoSend });
+  if (r.ok) {
+    toast(`Email connected — sent a test to ${r.to}.`, "good");
+    resetEmailSetup();
+    loadEmail();
+  } else {
+    note("email-save-note", "✗ " + (r.error || "could not save"), false);
+  }
+});
+
+$("email-autosend").addEventListener("change", async e => {
+  const r = await postJSON("/api/settings/set", { path: "email.autoSend", value: e.target.checked ? "true" : "false" });
+  note("email-on-note", r.ok ? "✓ Saved." : ("✗ " + (r.error || "could not save")), r.ok);
+  if (r.ok) setTimeout(() => note("email-on-note", ""), 1500);
+});
+
+$("email-send-now").addEventListener("click", async () => {
+  const btn = $("email-send-now"); btn.disabled = true;
+  note("email-on-note", "Sending…", true);
+  const r = await postJSON("/api/email/send", {});
+  note("email-on-note", r.ok ? `✓ Emailed ${r.filename || "the batch"} to ${r.to}.` : ("✗ " + (r.error || "send failed")), r.ok);
+  btn.disabled = false;
+});
+
+$("email-disable").addEventListener("click", async () => {
+  const ok = await confirmModal({
+    title: "Disconnect email?",
+    body: "Your Gmail app password is removed from this computer and auto-send stops. You can reconnect anytime.",
+    confirmText: "Disconnect", danger: true,
+  });
+  if (!ok) return;
+  const r = await postJSON("/api/email/disable");
+  toast(r.ok ? "Email disconnected." : ("Could not disconnect: " + (r.error || "error")), r.ok ? "good" : "bad");
+  if (r.ok) loadEmail();
+});
+
+// The "Email" button in the Jobs toolbar — send the current batch on demand.
+$("email-btn").addEventListener("click", async () => {
+  if (!window.__emailConnected) {
+    setView("system");
+    toast("Set up email first — see the Email card on this page.", "bad");
+    return;
+  }
+  const btn = $("email-btn"); btn.disabled = true;
+  const old = btn.innerHTML; btn.innerHTML = "Sending…";
+  try {
+    const r = await postJSON("/api/email/send", {});
+    toast(r.ok ? `Emailed batch to ${r.to}.` : ("Email failed: " + (r.error || "error")), r.ok ? "good" : "bad");
+  } finally {
+    btn.disabled = false; btn.innerHTML = old;
+  }
+});
+
 // ---- Hiring.cafe sign-in status (v4.1) ----
 // Auth status is NOT part of the 5s /api/status poll: the live probe spins up
 // Playwright (~5-10s), so it's cached server-side (data/hcafe-auth.json) and
@@ -2207,7 +2434,26 @@ function renderHcafeAuth(d) {
   } else {
     $("hc-checked").textContent = "never";
   }
+  // v4.3: sign-in nudge banner — only on a confirmed "signed out" (never on
+  // unknown), never while the setup wizard is open (either the needsSetup
+  // path via __setupStarted or the v4.2.1 greeting path, hence the live
+  // overlay check), and not after a same-session dismiss.
+  const wizardOpen = !$("setup-overlay").classList.contains("hidden");
+  const nudge = authed === false && !window.__hcafeNudgeDismissed
+    && !window.__setupStarted && !wizardOpen;
+  $("hcafe-banner").classList.toggle("hidden", !nudge);
 }
+
+$("hcb-dismiss").addEventListener("click", () => {
+  window.__hcafeNudgeDismissed = true;   // session-only — returns next launch
+  $("hcafe-banner").classList.add("hidden");
+});
+$("hcb-signin").addEventListener("click", () => {
+  $("hcafe-banner").classList.add("hidden");
+  navTo("system");
+  $("hc-signin").scrollIntoView({ block: "center", behavior: "smooth" });
+  $("hc-signin").click();   // launches the existing login-once flow
+});
 
 async function loadHcafeAuthCached() {
   try {
@@ -2405,6 +2651,7 @@ $("ub-update").addEventListener("click", async () => {
     loadProfiles();
     loadBackups();
     loadHcafeAuthCached();
+    loadEmail();
     checkForUpdate();
     setInterval(checkForUpdate, 30 * 60 * 1000);
     setupNudges();   // v4.1.1: finish-setup banner (after a Skip) + post-finish tour
@@ -2419,9 +2666,9 @@ function setupNudges() {
   $("sb-dismiss").addEventListener("click", () => $("setup-banner").classList.add("hidden"));
   $("tour-next").addEventListener("click", tourNext);
   $("tour-skip").addEventListener("click", tourEnd);
-  // Always-available entry points on the System page.
-  $("sys-setup-btn").addEventListener("click", reopenSetup);
-  $("sys-tour-btn").addEventListener("click", startTour);
+  // Always-available entry points in the topbar (v4.3: moved from System).
+  $("top-setup-btn").addEventListener("click", reopenSetup);
+  $("top-tour-btn").addEventListener("click", startTour);
 
   if (localStorage.getItem("ammSetupIncomplete") === "1") {
     $("setup-banner").classList.remove("hidden");
@@ -2435,10 +2682,20 @@ function setupNudges() {
   // (e.g. a partial/earlier setup left one behind, so needsSetup is false and
   // the wizard never auto-opened). Gated on "never scraped" so we never pop
   // over an already-working install. Shown once; Skip here just closes.
+  // v4.3: open synchronously — the boot veil is still up at this point, and
+  // opening in the same microtask chain means the welcome splash is the first
+  // thing painted (the old 400ms setTimeout let the bare dashboard flash).
   if (localStorage.getItem("ammOnboarded") !== "1"
-      && localStorage.getItem("ammSetupIncomplete") !== "1"
-      && !window.__hasBatch) {
-    setTimeout(reopenSetup, 400);
+      && localStorage.getItem("ammSetupIncomplete") !== "1") {
+    if (!window.__hasBatch) {
+      reopenSetup();
+    } else {
+      // v4.3: veteran install (pre-v4.3 upgrade, or a fresh browser profile
+      // on a working machine) — it has batches, so the greeting never opens
+      // and nothing else would ever write ammOnboarded. Persist it here so
+      // the boot veil's inline fast-hide kicks in from the next launch on.
+      localStorage.setItem("ammOnboarded", "1");
+    }
   }
 }
 
@@ -2448,7 +2705,8 @@ const TOUR_STEPS = [
   { sel: "#nav",                title: "Your control center",       body: "Jump between ranked Jobs, your Searches, Resume, Profiles, and System from this sidebar." },
   { sel: "#scrape-btn",         title: "Get jobs on demand",        body: "Scrape now pulls today's ~100 jobs immediately. It also runs on its own every weekday morning." },
   { sel: ".stats",              title: "Your matches at a glance",  body: "How many jobs came in, your average match, and how many are strong (70%+) — each scored against your resume." },
-  { sel: "[data-view='system']", title: "Health & hiring.cafe",     body: "Check the bot's status and sign in to hiring.cafe on the System page. That's the tour — you're all set!" },
+  { sel: "[data-view='system']", title: "Health & hiring.cafe",     body: "Check the bot's status and sign in to hiring.cafe on the System page." },
+  { sel: "#top-setup-btn",       title: "Help is always up here",    body: "Re-run the setup walkthrough or this tour anytime from these buttons. That's the tour — you're all set!" },
 ];
 
 function startTour() {
@@ -2747,6 +3005,10 @@ async function setupSkip() {
   if (!window.__needsSetup) {
     localStorage.setItem("ammOnboarded", "1");
     $("setup-overlay").classList.add("hidden");
+    // v4.3: this close path has no reload — re-read the hiring.cafe auth
+    // cache so the sign-in nudge reflects anything that happened inside the
+    // wizard (e.g. the user signed in at step 3) instead of boot-time state.
+    loadHcafeAuthCached();
     return;
   }
   if (window.__setupSkipping) return;
@@ -2776,6 +3038,7 @@ async function setupSkip() {
 // so this is safe whether or not the wizard was already wired this session.
 function reopenSetup() {
   $("setup-banner").classList.add("hidden");
+  $("hcafe-banner").classList.add("hidden");   // v4.3: never nudge under the wizard
   if (tourState) tourEnd();
   $("setup-overlay").classList.remove("hidden");
   setupWire();

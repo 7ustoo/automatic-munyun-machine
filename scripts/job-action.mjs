@@ -15,6 +15,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { resolveBrowser } from './browser-launcher.mjs';
+import { isSignedIn } from './hcafe-session.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -43,14 +44,8 @@ const ctx = await chromium.launchPersistentContext(profileDir, {
 });
 const page = ctx.pages()[0] || await ctx.newPage();
 
-async function checkAuth() {
-  await page.goto('https://hiring.cafe/saved', { waitUntil: 'domcontentloaded', timeout: 30000 });
-  await page.waitForTimeout(2500);
-  const finalUrl = page.url();
-  if (!finalUrl.includes('/saved')) return false;
-  const signInVisible = await page.locator('button:has-text("Sign in"), button:has-text("Log in"), a:has-text("Sign in"):not(:has-text("Sign in with"))').first().isVisible().catch(() => false);
-  return !signInVisible;
-}
+// v4.3: probe extracted to hcafe-session.mjs so the scraper shares it.
+const checkAuth = () => isSignedIn(page);
 
 try {
   if (action === 'auth') {
