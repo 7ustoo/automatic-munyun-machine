@@ -164,5 +164,13 @@
   "telegram": {
     "messageHeader": "\u2600\ufe0f Good morning {NAME} \u2014 {DATE}",
     "showAuthIndicator": true
+  },
+  "email": {
+    "_comment": "v4.3: email the daily job-batch .txt to someone (e.g. a virtual assistant who applies for you). Sends through your own Gmail over SMTP \u2014 connect it from the dashboard's System \u2192 Email card. Gmail needs a 16-char App Password (2-Step Verification on); your normal password won't work. Credentials live in .env (SMTP_USER / SMTP_APP_PASSWORD), never here. 'to' = recipient; 'autoSend' also emails automatically after each morning scrape; {DATE} in 'subject' expands to the batch date.",
+    "enabled": false,
+    "to": "",
+    "from": "",
+    "subject": "Job batch \u2014 {DATE}",
+    "autoSend": false
   }
 }

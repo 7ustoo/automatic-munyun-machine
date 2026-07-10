@@ -42,6 +42,10 @@ import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
+import {
+  emailConfigured, readEmailEnv, writeEmailEnv, disableEmailEnv,
+  verifyLogin, sendEmail, emailScrub, friendlyError, isEmailAddress, renderSubject
+} from './email.mjs';
 import { geocode } from './geocode.mjs';
 import { registerSchedulerForPlatform } from './scheduler-register.mjs';
 
@@ -73,6 +77,16 @@ function settingsGet() {
       aiHasKey: !!(cfg.scoring?.ai?.apiKey),
       aiModel: cfg.scoring?.ai?.model || 'claude-opus-4-8',
       mutedTerms: cfg.scoring?.mutedTerms || [],
+      // v4.3: email-to-VA. The app password is NEVER returned — only whether
+      // Gmail credentials are present in .env (hasCreds).
+      email: {
+        enabled: !!cfg.email?.enabled,
+        to: cfg.email?.to || '',
+        from: cfg.email?.from || '',
+        subject: cfg.email?.subject || 'Job batch — {DATE}',
+        autoSend: !!cfg.email?.autoSend,
+        hasCreds: emailConfigured(readEmailEnv())
+      },
       cvTermCount: (() => {
         try {
           const cv = JSON.parse(fs.readFileSync(profilePaths().cvParsed, 'utf8'));
@@ -91,10 +105,19 @@ function settingsSet(dotPath, jsonValue) {
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.applicationFormEase', 'filters.maxJobAge',
     'scoring.matchFloorPercent', 'schedule.time', 'search.mode',
-    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore'
+    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
+    // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
+    // here — they go through email-save into .env. These are the plain knobs.
+    'email.autoSend', 'email.subject', 'email.to'
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'email.subject') { value = String(value || '').trim().slice(0, 120) || 'Job batch — {DATE}'; }
+  if (dotPath === 'email.to') {
+    value = String(value || '').trim();
+    if (value && !isEmailAddress(value)) return out({ ok: false, error: 'that does not look like an email address' });
+  }
   if (dotPath === 'scoring.ai.apiKey') {
     value = String(value || '').trim();
     if (value && !/^[\x21-\x7e]{20,200}$/.test(value)) return out({ ok: false, error: 'that does not look like an API key' });
@@ -529,11 +552,96 @@ function profileSwitch(slug) {
   } catch (e) { out({ ok: false, error: String(e.message || e) }); }
 }
 
+// ---- email-to-VA (v4.3) ----
+// Pick the .txt to attach. Prefer the rich jobs(DATE).txt the scraper wrote
+// (title, company, match %, matched terms, apply link); fall back to
+// rebuilding the minimal apply-links list from last-batch.json.
+function resolveBatchAttachment() {
+  let date = null;
+  try { date = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')).date; } catch {}
+  if (date) {
+    const rich = path.join(profilePaths().dir, `jobs(${date}).txt`);
+    if (fs.existsSync(rich)) return { path: rich, filename: `jobs(${date}).txt`, date };
+  }
+  const ex = loadExport('txt');
+  if (!ex.ok) return null;
+  const tmp = path.join(profilePaths().dir, ex.filename);
+  try { fs.writeFileSync(tmp, ex.content); } catch { return null; }
+  return { path: tmp, filename: ex.filename, date, count: ex.count };
+}
+
+// Step 1: confirm the Gmail app password can log in (no message sent).
+async function emailValidate(user, pass) {
+  user = String(user || '').trim(); pass = String(pass || '').trim();
+  if (!emailConfigured({ SMTP_USER: user, SMTP_APP_PASSWORD: pass }))
+    return out({ ok: false, error: 'Enter your Gmail address and a 16-character App Password.' });
+  return out(await verifyLogin({ SMTP_USER: user, SMTP_APP_PASSWORD: pass }));
+}
+
+// Step 2: verify login, send a test to the recipient, THEN persist (.env creds
+// + config knobs). Never persists something that didn't just work.
+async function emailSave(user, pass, to, subject, autoSend) {
+  user = String(user || '').trim(); pass = String(pass || '').trim();
+  to = String(to || '').trim();
+  subject = String(subject || '').trim().slice(0, 120) || 'Job batch — {DATE}';
+  const on = (autoSend === true || autoSend === 'true' || autoSend === 'on');
+  if (!emailConfigured({ SMTP_USER: user, SMTP_APP_PASSWORD: pass }))
+    return out({ ok: false, error: 'Enter your Gmail address and a 16-character App Password.' });
+  if (!isEmailAddress(to)) return out({ ok: false, error: 'Enter the recipient email address.' });
+  const v = await verifyLogin({ SMTP_USER: user, SMTP_APP_PASSWORD: pass });
+  if (!v.ok) return out(v);
+  try {
+    await sendEmail({
+      env: { SMTP_USER: user, SMTP_APP_PASSWORD: pass }, to, from: user,
+      subject: '✅ Automatic Munyun Machine connected',
+      text: 'This is a test from Automatic Munyun Machine. Your daily ranked job-batch .txt will be emailed to this address so you can apply. — AMM'
+    });
+  } catch (e) {
+    return out({ ok: false, error: emailScrub('Could not send the test email: ' + friendlyError(e), pass) });
+  }
+  writeEmailEnv({ user, pass });
+  cfgRW.set('email.from', user);
+  cfgRW.set('email.to', to);
+  cfgRW.set('email.subject', subject);
+  cfgRW.set('email.autoSend', on);
+  cfgRW.set('email.enabled', true);
+  return out({ ok: true, to });
+}
+
+// Manual "Email batch" button: email the current batch .txt right now.
+async function emailSend() {
+  const env = readEmailEnv();
+  if (!emailConfigured(env)) return out({ ok: false, error: 'Email isn’t connected yet — set it up in System → Email.' });
+  const cfg = cfgRW.read();
+  const to = String(cfg.email?.to || '').trim();
+  if (!isEmailAddress(to)) return out({ ok: false, error: 'No recipient set — add one in System → Email.' });
+  const att = resolveBatchAttachment();
+  if (!att) return out({ ok: false, error: 'No batch yet — run a scrape first.' });
+  const subject = renderSubject(cfg.email?.subject, att.date);
+  try {
+    await sendEmail({
+      env, to, from: cfg.email?.from || env.SMTP_USER, subject,
+      text: `Attached: ${att.filename} — today's ranked job batch from Automatic Munyun Machine.`,
+      attachments: [{ filename: att.filename, path: att.path }]
+    });
+    return out({ ok: true, to, filename: att.filename });
+  } catch (e) {
+    return out({ ok: false, error: emailScrub('Send failed: ' + friendlyError(e), env.SMTP_APP_PASSWORD) });
+  }
+}
+
+// Disconnect: strip creds from .env (backed up) + turn the knobs off.
+function emailDisable() {
+  try { disableEmailEnv(); } catch {}
+  try { cfgRW.set('email.enabled', false); cfgRW.set('email.autoSend', false); } catch {}
+  return out({ ok: true });
+}
+
 // Only dispatch CLI when this file was invoked directly (not imported by a
 // test that just wants buildInitConfig). ESM main-module check via
 // pathToFileURL so Windows backslash paths don't false-negative.
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
-const [, , cmd, a, b] = process.argv;
+const [, , cmd, a, b, a3, a4, a5] = process.argv;
 if (isMain) (async () => {
   switch (cmd) {
     case 'settings-get': return settingsGet();
@@ -577,8 +685,13 @@ if (isMain) (async () => {
     case 'hcafe-auth-check':         return hcafeAuthCheck();
     case 'setup-init':               cfgRW.snapshotConfig('pre-setup'); return setupInit(a);
     case 'setup-finalize':           return setupFinalize();
+    // v4.3: email-to-VA setup + send.
+    case 'email-validate': return emailValidate(a, b);
+    case 'email-save':     return emailSave(a, b, a3, a4, a5);
+    case 'email-send':     return emailSend();
+    case 'email-disable':  return emailDisable();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-validate|email-save|email-send|email-disable> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });

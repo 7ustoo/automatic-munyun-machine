@@ -31,7 +31,25 @@ import { atomicWriteJson } from './io-helpers.mjs';
 import { aiRerank } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
-import { isSignedIn, writeHcafeAuthCache } from './hcafe-session.mjs';
+import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
+import { emailConfigured, sendEmail, renderSubject } from './email.mjs';
+
+// v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
+// message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
+// 'unknown' can't arise here (the scrape always has a fresh boolean), but map
+// it defensively to the signed-out wording so a stray null never prints blank.
+const DEDUP_NOTE = {
+  account: '✓ hiring.cafe account dedup — seen jobs sync across your computers.',
+  'local-disabled': 'Seen-job memory: local (account dedup disabled in settings).',
+  'signed-out': '⚠ Not signed in to hiring.cafe — seen-job memory is local to this computer. Sign in from the dashboard (System page) to sync.',
+  unknown: '⚠ Not signed in to hiring.cafe — seen-job memory is local to this computer. Sign in from the dashboard (System page) to sync.',
+};
+const DEDUP_TXT = {
+  account: 'Dedup: hiring.cafe account (signed in) — seen jobs sync across computers',
+  'local-disabled': 'Dedup: local (account dedup disabled in settings)',
+  'signed-out': 'Dedup: local only — sign in to hiring.cafe from the dashboard to sync across computers',
+  unknown: 'Dedup: local only — sign in to hiring.cafe from the dashboard to sync across computers',
+};
 
 // v1.0 E5: ensure config + data layout are profile-aware before we read anything.
 migrateIfNeeded();
@@ -65,6 +83,11 @@ const env = fs.existsSync(ENV_PATH)
 const TG_TOKEN = env.TELEGRAM_BOT_TOKEN;
 const TG_CHAT = env.TELEGRAM_CHAT_ID;
 const TELEGRAM_ON = telegramConfigured(env);
+// v4.3: optional email delivery (batch .txt → a VA/recipient via Gmail SMTP).
+// "On" = usable Gmail creds in .env; the per-run decision also checks
+// CFG.email.enabled + CFG.email.autoSend below.
+const SMTP_PASS = env.SMTP_APP_PASSWORD;
+const EMAIL_ON = emailConfigured(env);
 
 // Token scrubber for everything that lands in logs or user-visible error
 // messages. Telegram URL is `…/bot<TOKEN>/sendMessage`; if a fetch failure
@@ -75,6 +98,7 @@ const SCRUB = (s) => {
   if (s == null) return '';
   let str = String(s);
   if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
+  if (SMTP_PASS) str = str.split(SMTP_PASS).join('<APP_PASSWORD>');
   return str;
 };
 
@@ -355,11 +379,18 @@ async function _scrapeWith(ctx) {
   const ACCOUNT_DEDUP = SCORING.accountDedup !== false; // default on
   let hcafeAuthed = false;
   if (ACCOUNT_DEDUP) {
-    hcafeAuthed = await isSignedIn(page).catch(() => false);
-    writeHcafeAuthCache(hcafeAuthed);
-    log(hcafeAuthed
-      ? '✓ signed in to hiring.cafe — account dedup active (server hides Saved/Applied/Viewed)'
-      : 'not signed in to hiring.cafe — local seen-jobs fallback (sign in from the dashboard to sync dedup across computers)');
+    // Tri-state on purpose: a probe ERROR (flaky /saved navigation) is not a
+    // confirmed "signed out" — treat the run as unauth (safe: no hideJobTypes)
+    // but DON'T clobber the dashboard's cached pill with a false negative.
+    try {
+      hcafeAuthed = await isSignedIn(page);
+      writeHcafeAuthCache(hcafeAuthed);
+      log(hcafeAuthed
+        ? '✓ signed in to hiring.cafe — account dedup active (server hides Saved/Applied/Viewed)'
+        : 'not signed in to hiring.cafe — local seen-jobs fallback (sign in from the dashboard to sync dedup across computers)');
+    } catch (e) {
+      log(`hiring.cafe sign-in probe failed (transient: ${SCRUB(e.message || e).split('\n')[0]}) — running this batch signed-out; auth cache left untouched`);
+    }
   }
   const results = {};
   // Map config's applicationFormEase → hiring.cafe URL filter
@@ -477,7 +508,7 @@ async function _scrapeWith(ctx) {
   // upstream is wrong even though /saved loaded — don't lie to /status.
   const totalCards = Object.values(results).reduce((s, rows) => s + rows.length, 0);
   if (totalCards > 0) recordAuthOk();
-  return { byQuery: results, hcafeAuthed };
+  return { byQuery: results, hcafeAuthed, accountDedupEnabled: ACCOUNT_DEDUP };
 }
 
 // Per-query rolling 7-day card-count history. Read by /diagnose. Per-profile.
@@ -1018,9 +1049,9 @@ function buildMessage(weather, top, directUrls, stats) {
     .replace('{DATE}', today);
   // v4.3: truthful dedup/auth line (the old one said "✓ logged in"
   // unconditionally — stale since the v1.0.x switch to unauth scraping).
-  const dedupNote = stats.hcafeAuthed
-    ? '✓ hiring.cafe account dedup — seen jobs sync across your computers.'
-    : '⚠ Not signed in to hiring.cafe — seen-job memory is local to this computer. Sign in from the dashboard (System page) to sync.';
+  // dedupMode() centralizes the branch so this line, the .txt header, and
+  // /diagnose can never disagree; the wording per mode stays local.
+  const dedupNote = DEDUP_NOTE[dedupMode({ authed: stats.hcafeAuthed, enabled: stats.accountDedupEnabled })];
   const authIndicator = CFG.telegram?.showAuthIndicator !== false
     ? `\n${dedupNote}\nSorted by CV match — best fits first.`
     : '\nSorted by CV match — best fits first.';
@@ -1064,9 +1095,7 @@ function buildBatchTxt(top, directUrls, weather, stats) {
   lines.push(`${top.length} jobs · ${stats.raw} raw${tail} · sorted by CV match`);
   const funnelStr = funnelLine(stats.funnel);
   if (funnelStr) lines.push(funnelStr);
-  lines.push(stats.hcafeAuthed
-    ? 'Dedup: hiring.cafe account (signed in) — seen jobs sync across computers'
-    : 'Dedup: local only — sign in to hiring.cafe from the dashboard to sync across computers');
+  lines.push(DEDUP_TXT[dedupMode({ authed: stats.hcafeAuthed, enabled: stats.accountDedupEnabled })]);
   lines.push('');
   lines.push('================================================================');
   lines.push('');
@@ -1178,9 +1207,9 @@ if (IS_CLI) (async () => {
       return;
     }
 
-    let byQuery, hcafeAuthed = false;
+    let byQuery, hcafeAuthed = false, accountDedupEnabled = true;
     try {
-      ({ byQuery, hcafeAuthed } = await scrape());
+      ({ byQuery, hcafeAuthed, accountDedupEnabled } = await scrape());
     } catch (e) {
       if (e.unauth) {
         recordAuthFail();
@@ -1307,6 +1336,7 @@ if (IS_CLI) (async () => {
       skippedApplied,
       skippedSeen,
       hcafeAuthed,
+      accountDedupEnabled,
       funnel
     });
     if (banner) message = banner + '\n\n' + message;
@@ -1319,9 +1349,10 @@ if (IS_CLI) (async () => {
 
     // Always write the downloadable .txt (it's the disk record + /export
     // source); only attach it to Telegram when enabled.
-    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, hcafeAuthed, funnel };
+    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
+    let txtPath = null;
     try {
-      const txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
+      txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
       if (TELEGRAM_ON) {
         await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
         log(`Sent batch .txt: ${path.basename(txtPath)}`);
@@ -1332,8 +1363,35 @@ if (IS_CLI) (async () => {
       log(`Batch .txt write/attach failed (non-fatal): ${e.message}`);
     }
 
+    // v4.3: optionally email the batch .txt to a VA/recipient. Independent,
+    // non-fatal try — a Telegram or email failure must never abort the run or
+    // stop the seen-jobs persistence below.
+    if (txtPath && EMAIL_ON && CFG.email?.enabled && CFG.email?.autoSend && String(CFG.email?.to || '').trim()) {
+      try {
+        const to = String(CFG.email.to).trim();
+        await sendEmail({
+          env,
+          to,
+          from: CFG.email.from || env.SMTP_USER,
+          subject: renderSubject(CFG.email.subject, DATE),
+          text: `Attached: jobs(${DATE}).txt — today's ranked job batch from Automatic Munyun Machine.`,
+          attachments: [{ filename: path.basename(txtPath), path: txtPath }],
+        });
+        log(`Emailed batch .txt to ${to}`);
+      } catch (e) {
+        log(`Batch email failed (non-fatal): ${SCRUB(e.message || e)}`);
+      }
+    }
+
     // Only persist seen-jobs *after* successful Telegram delivery —
     // so a failed run doesn't burn jobs we never actually surfaced.
+    // v4.3 caveat: when signed in, this invariant only protects the LOCAL
+    // store. hiring.cafe marks every job page the resolve pass visits as
+    // Viewed on the account (server-side, at visit time, no unmark API) —
+    // so a run that fails after resolveAll() still hides the ~130
+    // shortlisted jobs from future signed-in scrapes. Accepted tradeoff
+    // (same mechanism that makes delivered-job marking free); the local
+    // 60-day decay does not apply to the account's memory.
     saveSeenStore(blockedSeen, top);
     log(`Persisted seen-jobs.json (${top.length} new, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 

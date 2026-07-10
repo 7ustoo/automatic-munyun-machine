@@ -102,6 +102,13 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/telegram/detect", d.guardPost(d.handleTelegramDetect))
 	mux.HandleFunc("/api/telegram/save", d.guardPost(d.handleTelegramSave))
 	mux.HandleFunc("/api/telegram/disable", d.guardPost(d.handleTelegramDisable))
+	// v4.3: email-to-VA. validate = Gmail SMTP login check; save = verify +
+	// test-send + persist creds to .env; send = email the current batch now;
+	// disable = strip creds + turn the knobs off. All state-changing (POST + CSRF).
+	mux.HandleFunc("/api/email/validate", d.guardPost(d.handleEmailValidate))
+	mux.HandleFunc("/api/email/save", d.guardPost(d.handleEmailSave))
+	mux.HandleFunc("/api/email/send", d.guardPost(d.handleEmailSend))
+	mux.HandleFunc("/api/email/disable", d.guardPost(d.handleEmailDisable))
 	// v2.5: resume rescan + self-update.
 	mux.HandleFunc("/api/update/check", d.handleUpdateCheck) // GET: current vs latest
 	mux.HandleFunc("/api/resume/upload", d.guardPost(d.handleResumeUpload))

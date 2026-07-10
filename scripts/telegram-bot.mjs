@@ -43,7 +43,8 @@ import {
   addProfile,
   setActiveProfile,
   deleteProfile,
-  getActiveProfile
+  getActiveProfile,
+  readActiveConfig
 } from './profile-store.mjs';
 
 // v1.0 E5: ensure migration ran before any path is resolved.
@@ -65,7 +66,14 @@ import {
   LOGIN_HELPER_DOC, SETUP_HELPER_DOC, RESTART_HINT_DOC, INSTALL_DIR_HINT
 } from './os-paths.mjs';
 import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
-import { readHcafeAuthCache } from './hcafe-session.mjs';
+import { readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
+
+// v4.3: is account dedup on for the active profile? Read fresh each call —
+// settings edits can flip it while the bot runs. Fail-open to the default.
+function accountDedupEnabled() {
+  try { return readActiveConfig()?.scoring?.accountDedup !== false; }
+  catch { return true; }
+}
 import { telegramConfigured, parseEnvText } from './telegram-config.mjs';
 import { loadExport } from './export-batch.mjs';
 
@@ -576,15 +584,18 @@ function buildDiagnoseMessage() {
   try { seen = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Seen-jobs memory</b>`);
-  // v4.3: which dedup mode is active. Signed in → hiring.cafe hides
-  // Saved/Applied/Viewed server-side (syncs across computers); the local
-  // store below is the fallback/safety net.
+  // v4.3: which dedup mode is active. Signed in + knob on → hiring.cafe
+  // hides Saved/Applied/Viewed server-side (syncs across computers); the
+  // local store below is the fallback/safety net. Knob off → account dedup
+  // never runs regardless of sign-in state, so don't claim it does.
   const hcAuth = readHcafeAuthCache();
-  lines.push(hcAuth.authed === true
-    ? `  Dedup: hiring.cafe account (signed in) — seen jobs sync across your computers`
-    : hcAuth.authed === false
-    ? `  Dedup: local only — sign in to hiring.cafe from the dashboard (System page) to sync across devices`
-    : `  Dedup: local (hiring.cafe sign-in status unknown — check the dashboard's System page)`);
+  const DEDUP_LINE = {
+    account: `  Dedup: hiring.cafe account (signed in) — seen jobs sync across your computers`,
+    'local-disabled': `  Dedup: local (account dedup disabled in settings)`,
+    'signed-out': `  Dedup: local only — sign in to hiring.cafe from the dashboard (System page) to sync across devices`,
+    unknown: `  Dedup: local (hiring.cafe sign-in status unknown — check the dashboard's System page)`,
+  };
+  lines.push(DEDUP_LINE[dedupMode({ authed: hcAuth.authed, enabled: accountDedupEnabled() })]);
   const jobCount = seen?.jobs ? Object.keys(seen.jobs).length
                   : (Array.isArray(seen?.ids) ? seen.ids.length : 0);
   if (jobCount > 0) {
@@ -1133,9 +1144,10 @@ async function handleMessage(msg) {
 
   // /forget all
   if (/^\/?forget\s+all\b/.test(text)) {
-    // v4.3: /forget only clears the LOCAL store. When signed in, hiring.cafe's
-    // account-side Viewed/Applied memory still hides those jobs — say so.
-    const hcNote = readHcafeAuthCache().authed === true
+    // v4.3: /forget only clears the LOCAL store. When signed in (and the
+    // account-dedup knob is on), hiring.cafe's account-side Viewed/Applied
+    // memory still hides those jobs — say so.
+    const hcNote = accountDedupEnabled() && readHcafeAuthCache().authed === true
       ? '\n<i>Note: your hiring.cafe account still remembers viewed/applied jobs — they may not reappear while signed in.</i>'
       : '';
     try {
@@ -1323,7 +1335,7 @@ async function handleMessage(msg) {
         after = seen.ids.length;
       }
       atomicWriteJson(seenPath, seen);
-      const hcNote = readHcafeAuthCache().authed === true
+      const hcNote = accountDedupEnabled() && readHcafeAuthCache().authed === true
         ? '\n<i>Note: your hiring.cafe account still remembers viewed jobs — some may stay hidden while signed in.</i>'
         : '';
       return reply(chatId, `✅ Forgot ${before - after} jobs from the last batch. They'll come back next /scrape.` + hcNote);

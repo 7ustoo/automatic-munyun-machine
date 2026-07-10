@@ -1067,6 +1067,7 @@
                 <a href="/api/export?format=xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
               </div>
             </details>
+            <button class="sm" id="email-btn" title="Email this batch to your recipient (e.g. your VA)"><svg class="ic"><use href="#i-send"/></svg>Email</button>
             <button class="sm icon" id="refresh-btn" title="Refresh the list" aria-label="Refresh the list"><svg class="ic"><use href="#i-refresh"/></svg></button>
           </div>
           <div class="table-wrap"><div id="lb-body"></div></div>
@@ -1193,6 +1194,49 @@
                   <button class="sm primary" id="tg-save">Save &amp; enable</button>
                   <button class="sm" id="tg-cancel">Cancel</button>
                   <div class="note" id="tg-save-note"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Email batch <span class="pill" id="email-pill">off</span></h2>
+            <div class="big" id="email-big"><span class="dot" id="email-dot"></span><span id="email-state">—</span></div>
+
+            <!-- CONNECTED view -->
+            <div id="email-on" class="hidden">
+              <div class="stat-row"><span class="k">Sends to</span><span class="v" id="email-to-v">—</span></div>
+              <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send every morning after the scrape</span></label>
+              <div class="row">
+                <button class="sm primary" id="email-send-now"><svg class="ic"><use href="#i-send"/></svg>Send latest batch now</button>
+                <button class="danger sm" id="email-disable">Disconnect</button>
+              </div>
+              <div class="note" id="email-on-note"></div>
+            </div>
+
+            <!-- DISABLED / setup view -->
+            <div id="email-off">
+              <div class="muted-sm">Off — email your daily job batch (.txt) to someone (e.g. a virtual assistant) so they can apply for you. Sends through your own Gmail; nothing leaves your computer except the email you send.</div>
+              <button class="sm" id="email-setup-start"><svg class="ic"><use href="#i-send"/></svg>Set up email…</button>
+
+              <div id="email-setup" class="hidden">
+                <div class="step">
+                  <div class="muted-sm">1. Gmail needs an <b>App Password</b> — not your normal password. Turn on 2-Step Verification, then create one at <code>myaccount.google.com/apppasswords</code>. Paste your Gmail address and that 16-character password:</div>
+                  <input type="email" id="email-user" placeholder="you@gmail.com" autocomplete="off" spellcheck="false" />
+                  <input type="password" id="email-pass" placeholder="app password (16 characters)" autocomplete="off" spellcheck="false" style="margin-top:6px" />
+                  <button class="sm primary" id="email-validate" style="margin-top:8px">Verify Gmail</button>
+                  <div class="note" id="email-validate-note"></div>
+                </div>
+                <div class="step hidden" id="email-step-to">
+                  <div class="muted-sm">2. Who receives the batch, and the subject line (<code>{DATE}</code> = the batch date):</div>
+                  <input type="email" id="email-to" placeholder="assistant@example.com" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="email-subject" placeholder="Job batch — {DATE}" style="margin-top:6px" />
+                  <label class="watch-toggle" style="margin-top:8px"><input type="checkbox" id="email-autosend-new" checked /><span>Auto-send every morning after the scrape</span></label>
+                </div>
+                <div class="step hidden" id="email-step-save">
+                  <button class="sm primary" id="email-save">Save &amp; send test</button>
+                  <button class="sm" id="email-cancel">Cancel</button>
+                  <div class="note" id="email-save-note"></div>
                 </div>
               </div>
             </div>
@@ -2242,6 +2286,132 @@ $("tg-disable").addEventListener("click", async () => {
   if (r.ok) tick();
 });
 
+// ---- Email-to-VA (v4.3) ----
+// State comes from /api/settings (settings.email); the app password is never
+// returned, only settings.email.hasCreds. Connected = hasCreds && enabled.
+let emailUser = "", emailPass = "";
+
+function renderEmail(e) {
+  const connected = !!(e && e.hasCreds && e.enabled);
+  window.__emailConnected = connected;
+  $("email-pill").textContent = connected ? "on" : "off";
+  $("email-dot").className = "dot " + (connected ? "alive" : "unknown");
+  $("email-state").textContent = connected ? "Connected" : "Off";
+  $("email-on").classList.toggle("hidden", !connected);
+  $("email-off").classList.toggle("hidden", connected);
+  if (connected) {
+    $("email-to-v").textContent = e.to || "—";
+    $("email-autosend").checked = !!e.autoSend;
+  }
+}
+
+async function loadEmail() {
+  try {
+    const r = await (await fetch("/api/settings", { cache: "no-store" })).json();
+    if (r.ok) renderEmail(r.settings.email);
+  } catch {}
+}
+
+$("email-setup-start").addEventListener("click", () => {
+  $("email-setup").classList.remove("hidden");
+  $("email-setup-start").classList.add("hidden");
+  $("email-user").focus();
+});
+
+function resetEmailSetup() {
+  emailUser = ""; emailPass = "";
+  $("email-setup").classList.add("hidden");
+  $("email-setup-start").classList.remove("hidden");
+  $("email-step-to").classList.add("hidden");
+  $("email-step-save").classList.add("hidden");
+  $("email-user").value = ""; $("email-pass").value = "";
+  $("email-to").value = ""; $("email-subject").value = "";
+  note("email-validate-note", ""); note("email-save-note", "");
+}
+$("email-cancel").addEventListener("click", resetEmailSetup);
+
+$("email-validate").addEventListener("click", async () => {
+  const user = $("email-user").value.trim();
+  const pass = $("email-pass").value.trim();
+  if (!user || !pass) return note("email-validate-note", "Enter your Gmail and app password.", false);
+  note("email-validate-note", "Checking Gmail sign-in…", true);
+  const r = await postJSON("/api/email/validate", { user, pass });
+  if (r.ok) {
+    emailUser = user; emailPass = pass;
+    note("email-validate-note", "✓ Gmail sign-in works.", true);
+    $("email-step-to").classList.remove("hidden");
+    $("email-to").focus();
+  } else {
+    note("email-validate-note", "✗ " + (r.error || "Gmail rejected the sign-in"), false);
+  }
+});
+
+// A valid recipient unlocks Save.
+$("email-to").addEventListener("input", () => {
+  const v = $("email-to").value.trim();
+  $("email-step-save").classList.toggle("hidden", !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(v));
+});
+
+$("email-save").addEventListener("click", async () => {
+  const to = $("email-to").value.trim();
+  const subject = $("email-subject").value.trim() || "Job batch — {DATE}";
+  const autoSend = $("email-autosend-new").checked ? "true" : "false";
+  if (!emailUser || !emailPass) return note("email-save-note", "Verify your Gmail first.", false);
+  if (!to) return note("email-save-note", "Enter the recipient email.", false);
+  note("email-save-note", "Saving + sending a test email…", true);
+  const r = await postJSON("/api/email/save", { user: emailUser, pass: emailPass, to, subject, autoSend });
+  if (r.ok) {
+    toast(`Email connected — sent a test to ${r.to}.`, "good");
+    resetEmailSetup();
+    loadEmail();
+  } else {
+    note("email-save-note", "✗ " + (r.error || "could not save"), false);
+  }
+});
+
+$("email-autosend").addEventListener("change", async e => {
+  const r = await postJSON("/api/settings/set", { path: "email.autoSend", value: e.target.checked ? "true" : "false" });
+  note("email-on-note", r.ok ? "✓ Saved." : ("✗ " + (r.error || "could not save")), r.ok);
+  if (r.ok) setTimeout(() => note("email-on-note", ""), 1500);
+});
+
+$("email-send-now").addEventListener("click", async () => {
+  const btn = $("email-send-now"); btn.disabled = true;
+  note("email-on-note", "Sending…", true);
+  const r = await postJSON("/api/email/send", {});
+  note("email-on-note", r.ok ? `✓ Emailed ${r.filename || "the batch"} to ${r.to}.` : ("✗ " + (r.error || "send failed")), r.ok);
+  btn.disabled = false;
+});
+
+$("email-disable").addEventListener("click", async () => {
+  const ok = await confirmModal({
+    title: "Disconnect email?",
+    body: "Your Gmail app password is removed from this computer and auto-send stops. You can reconnect anytime.",
+    confirmText: "Disconnect", danger: true,
+  });
+  if (!ok) return;
+  const r = await postJSON("/api/email/disable");
+  toast(r.ok ? "Email disconnected." : ("Could not disconnect: " + (r.error || "error")), r.ok ? "good" : "bad");
+  if (r.ok) loadEmail();
+});
+
+// The "Email" button in the Jobs toolbar — send the current batch on demand.
+$("email-btn").addEventListener("click", async () => {
+  if (!window.__emailConnected) {
+    setView("system");
+    toast("Set up email first — see the Email card on this page.", "bad");
+    return;
+  }
+  const btn = $("email-btn"); btn.disabled = true;
+  const old = btn.innerHTML; btn.innerHTML = "Sending…";
+  try {
+    const r = await postJSON("/api/email/send", {});
+    toast(r.ok ? `Emailed batch to ${r.to}.` : ("Email failed: " + (r.error || "error")), r.ok ? "good" : "bad");
+  } finally {
+    btn.disabled = false; btn.innerHTML = old;
+  }
+});
+
 // ---- Hiring.cafe sign-in status (v4.1) ----
 // Auth status is NOT part of the 5s /api/status poll: the live probe spins up
 // Playwright (~5-10s), so it's cached server-side (data/hcafe-auth.json) and
@@ -2265,9 +2435,12 @@ function renderHcafeAuth(d) {
     $("hc-checked").textContent = "never";
   }
   // v4.3: sign-in nudge banner — only on a confirmed "signed out" (never on
-  // unknown), never during first-run setup, and not after a same-session
-  // dismiss. Signed-in or unknown hides it.
-  const nudge = authed === false && !window.__hcafeNudgeDismissed && !window.__setupStarted;
+  // unknown), never while the setup wizard is open (either the needsSetup
+  // path via __setupStarted or the v4.2.1 greeting path, hence the live
+  // overlay check), and not after a same-session dismiss.
+  const wizardOpen = !$("setup-overlay").classList.contains("hidden");
+  const nudge = authed === false && !window.__hcafeNudgeDismissed
+    && !window.__setupStarted && !wizardOpen;
   $("hcafe-banner").classList.toggle("hidden", !nudge);
 }
 
@@ -2478,6 +2651,7 @@ $("ub-update").addEventListener("click", async () => {
     loadProfiles();
     loadBackups();
     loadHcafeAuthCached();
+    loadEmail();
     checkForUpdate();
     setInterval(checkForUpdate, 30 * 60 * 1000);
     setupNudges();   // v4.1.1: finish-setup banner (after a Skip) + post-finish tour
@@ -2512,9 +2686,16 @@ function setupNudges() {
   // opening in the same microtask chain means the welcome splash is the first
   // thing painted (the old 400ms setTimeout let the bare dashboard flash).
   if (localStorage.getItem("ammOnboarded") !== "1"
-      && localStorage.getItem("ammSetupIncomplete") !== "1"
-      && !window.__hasBatch) {
-    reopenSetup();
+      && localStorage.getItem("ammSetupIncomplete") !== "1") {
+    if (!window.__hasBatch) {
+      reopenSetup();
+    } else {
+      // v4.3: veteran install (pre-v4.3 upgrade, or a fresh browser profile
+      // on a working machine) — it has batches, so the greeting never opens
+      // and nothing else would ever write ammOnboarded. Persist it here so
+      // the boot veil's inline fast-hide kicks in from the next launch on.
+      localStorage.setItem("ammOnboarded", "1");
+    }
   }
 }
 
@@ -2824,6 +3005,10 @@ async function setupSkip() {
   if (!window.__needsSetup) {
     localStorage.setItem("ammOnboarded", "1");
     $("setup-overlay").classList.add("hidden");
+    // v4.3: this close path has no reload — re-read the hiring.cafe auth
+    // cache so the sign-in nudge reflects anything that happened inside the
+    // wizard (e.g. the user signed in at step 3) instead of boot-time state.
+    loadHcafeAuthCached();
     return;
   }
   if (window.__setupSkipping) return;
@@ -2853,6 +3038,7 @@ async function setupSkip() {
 // so this is safe whether or not the wizard was already wired this session.
 function reopenSetup() {
   $("setup-banner").classList.add("hidden");
+  $("hcafe-banner").classList.add("hidden");   // v4.3: never nudge under the wizard
   if (tourState) tourEnd();
   $("setup-overlay").classList.remove("hidden");
   setupWire();

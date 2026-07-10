@@ -220,6 +220,32 @@ func (d *dashboardServer) handleTelegramDisable(w http.ResponseWriter, r *http.R
 	}
 }
 
+// --- v4.3: email-to-VA ---
+// All four go through dashboard-api.mjs (email-* subcommands) like the other
+// state-changing actions — the Go layer stays a thin relay. The Gmail app
+// password rides through as a POST-body field → CLI arg (same trust model as
+// the Telegram token); dashboard-api scrubs it out of every response/log.
+
+func (d *dashboardServer) handleEmailValidate(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	// SMTP login check can be slow on a cold TLS handshake; give it headroom.
+	d.relayDashboardAPI(w, 30*time.Second, "email-validate", b["user"], b["pass"])
+}
+
+func (d *dashboardServer) handleEmailSave(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	// Verifies login + sends a test message before persisting — bound generously.
+	d.relayDashboardAPI(w, 40*time.Second, "email-save", b["user"], b["pass"], b["to"], b["subject"], b["autoSend"])
+}
+
+func (d *dashboardServer) handleEmailSend(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 40*time.Second, "email-send")
+}
+
+func (d *dashboardServer) handleEmailDisable(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 15*time.Second, "email-disable")
+}
+
 // --- v2.5: resume rescan ---
 
 // handleResumeUpload accepts a multipart resume file, saves it under

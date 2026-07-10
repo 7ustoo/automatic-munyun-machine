@@ -59,3 +59,11 @@ test('onboarding entry points live in the topbar, not the System view', () => {
   assert.ok(!html.includes('sys-setup-btn'), 'sys-setup-btn should be gone');
   assert.ok(!html.includes('sys-tour-btn'), 'sys-tour-btn should be gone');
 });
+
+// v4.3: email-to-VA — the "Email" batch button sits in the Jobs toolbar next to
+// Export, and the connect flow lives in a System-view card.
+test('email-to-VA button + setup card are present', () => {
+  assert.ok(html.includes('id="email-btn"'), 'email-btn (Jobs toolbar) missing');
+  assert.ok(html.includes('id="email-setup-start"'), 'email-setup-start (System card) missing');
+  assert.ok(html.includes('id="email-validate"') && html.includes('id="email-save"'), 'email connect steps missing');
+});

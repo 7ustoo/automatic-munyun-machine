@@ -52,3 +52,18 @@ export function readHcafeAuthCache() {
     return { authed: null, checkedAt: null };
   }
 }
+
+// v4.3: the single dedup-mode decision. Batch messages, the jobs(date).txt
+// header, and /diagnose all render which dedup is in effect — each with its own
+// wording, but the *branching* must stay identical, or one surface tells the
+// user they're synced while another nags them to sign in. `authed` is
+// tri-state: true (signed in), false (confirmed signed out), null/undefined
+// (unknown — cache missing). `enabled` is scoring.accountDedup (default on):
+// when off, account dedup never runs regardless of sign-in, so the mode is
+// 'local-disabled' and no surface should nag the user to sign in.
+export function dedupMode({ authed, enabled = true } = {}) {
+  if (enabled === false) return 'local-disabled';
+  if (authed === true) return 'account';
+  if (authed === false) return 'signed-out';
+  return 'unknown';
+}
