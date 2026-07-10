@@ -20,6 +20,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import nodemailer from 'nodemailer';
 import { parseEnvText } from './telegram-config.mjs';
+import { atomicWriteText } from './io-helpers.mjs';
+import { oauthStatus, oauthAvailable, sendGmail, disconnectOAuth } from './gmail-oauth.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -49,6 +51,19 @@ export function emailConfigured(env = {}) {
   return true;
 }
 
+export function emailDeliveryStatus(env = readEmailEnv()) {
+  const oauth = oauthStatus();
+  if (oauth.connected) return { connected: true, provider: 'gmail-oauth', email: oauth.email };
+  if (emailConfigured(env)) return { connected: true, provider: 'smtp', email: String(env.SMTP_USER || '').trim() };
+  return { connected: false, provider: null, email: '' };
+}
+
+export function emailDeliveryConfigured(env = readEmailEnv()) {
+  return emailDeliveryStatus(env).connected;
+}
+
+export { oauthAvailable };
+
 export function isEmailAddress(s) {
   return EMAIL_RX.test(String(s || '').trim());
 }
@@ -69,8 +84,7 @@ export function writeEmailEnv({ user, pass }) {
     if (rx.test(body)) body = body.replace(rx, `${k}=${v}`);
     else body += (body.endsWith('\n') || body === '' ? '' : '\n') + `${k}=${v}\n`;
   }
-  fs.mkdirSync(path.dirname(ENV_PATH), { recursive: true });
-  fs.writeFileSync(ENV_PATH, body);
+  atomicWriteText(ENV_PATH, body);
 }
 
 // Strip SMTP keys from .env (backing them up to .env.email-bak first so a
@@ -81,14 +95,14 @@ export function disableEmailEnv() {
   const env = parseEnvText(body);
   if (env.SMTP_USER || env.SMTP_APP_PASSWORD) {
     try {
-      fs.writeFileSync(ENV_PATH + '.email-bak',
+      atomicWriteText(ENV_PATH + '.email-bak',
         `SMTP_USER=${env.SMTP_USER || ''}\nSMTP_APP_PASSWORD=${env.SMTP_APP_PASSWORD || ''}\n`);
     } catch {}
   }
   const stripped = body.split('\n')
     .filter(l => !/^\s*SMTP_USER=/.test(l) && !/^\s*SMTP_APP_PASSWORD=/.test(l))
     .join('\n');
-  fs.writeFileSync(ENV_PATH, stripped);
+  atomicWriteText(ENV_PATH, stripped);
 }
 
 // --- sending -----------------------------------------------------------------
@@ -147,6 +161,19 @@ export async function sendEmail({ env, to, from, subject, text, attachments }) {
   } finally {
     try { t.close(); } catch {}
   }
+}
+
+// Preferred provider first: Gmail OAuth when connected, App Password SMTP as
+// the backward-compatible advanced fallback.
+export async function sendConfiguredEmail({ env = readEmailEnv(), to, from, subject, text, attachments }) {
+  if (oauthStatus().connected) return sendGmail({ to, from, subject, text, attachments }, { env });
+  if (emailConfigured(env)) return sendEmail({ env, to, from, subject, text, attachments });
+  throw new Error('Email is not connected.');
+}
+
+export function disconnectEmail() {
+  disconnectOAuth();
+  disableEmailEnv();
 }
 
 // Expand the user's subject template. Only {DATE} is supported for now.

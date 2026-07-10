@@ -27,12 +27,12 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
-import { atomicWriteJson } from './io-helpers.mjs';
+import { atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
 import { aiRerank } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
-import { emailConfigured, sendEmail, renderSubject } from './email.mjs';
+import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
 // message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
@@ -87,7 +87,7 @@ const TELEGRAM_ON = telegramConfigured(env);
 // "On" = usable Gmail creds in .env; the per-run decision also checks
 // CFG.email.enabled + CFG.email.autoSend below.
 const SMTP_PASS = env.SMTP_APP_PASSWORD;
-const EMAIL_ON = emailConfigured(env);
+const EMAIL_ON = emailDeliveryConfigured(env);
 
 // Token scrubber for everything that lands in logs or user-visible error
 // messages. Telegram URL is `…/bot<TOKEN>/sendMessage`; if a fetch failure
@@ -1015,16 +1015,22 @@ function buildSupplyBanner({ funnel, byQuery }) {
   // Dry-query detection — read the freshly-written stats and find queries
   // averaging zero across the most recent 3+ runs.
   let stats = null;
-  try { stats = JSON.parse(fs.readFileSync(path.join(ROOT, 'data', 'query-stats.json'), 'utf8')); } catch {}
-  const dryQueries = [];
-  for (const [term, slot] of Object.entries(stats?.queries || {})) {
-    const recent = (slot.history || []).slice(-3);
-    if (recent.length >= 3 && recent.every(h => h.cards === 0)) dryQueries.push(term);
-  }
+  try { stats = JSON.parse(fs.readFileSync(QUERY_STATS_PATH, 'utf8')); } catch {}
+  const dryQueries = findDryQueries(stats);
   if (dryQueries.length) {
     warnings.push(`⚠️ <b>Dry queries (3+ days at 0 cards):</b>\n${dryQueries.map(q => '  · ' + escHtml(q)).join('\n')}\nLikely typos or terms hiring.cafe doesn't index. Edit via <code>/jobs remove</code> + <code>/jobs add</code>.`);
   }
   return warnings.length ? warnings.join('\n\n') : null;
+}
+
+export function findDryQueries(stats, minRuns = 3) {
+  const requiredRuns = Math.max(1, Number.parseInt(minRuns, 10) || 3);
+  const dry = [];
+  for (const [term, slot] of Object.entries(stats?.queries || {})) {
+    const recent = Array.isArray(slot?.history) ? slot.history.slice(-requiredRuns) : [];
+    if (recent.length >= requiredRuns && recent.every(h => h?.cards === 0)) dry.push(term);
+  }
+  return dry;
 }
 // v4.1: one-line funnel so "3,000 raw but only 100 jobs — where'd they go?" is
 // answerable at a glance. Every number comes straight off the funnel object
@@ -1118,7 +1124,7 @@ function writeBatchTxt(top, directUrls, weather, stats) {
   // Per-profile location so /profile switch doesn't show another persona's batch.
   fs.mkdirSync(PP.dir, { recursive: true });
   const file = path.join(PP.dir, `jobs(${DATE}).txt`);
-  fs.writeFileSync(file, buildBatchTxt(top, directUrls, weather, stats));
+  atomicWriteText(file, buildBatchTxt(top, directUrls, weather, stats));
   return file;
 }
 
@@ -1132,11 +1138,10 @@ function writeBatchTsv(top, directUrls, funnel) {
     const yoe = r.yoe ?? '';
     return `${i + 1}\t${id}\t${title}\t${co}\t${yoe}\t${r.q}\t${url}`;
   }).join('\n');
-  // TSV + direct-URLs files are write-once-per-day artifacts; not contended,
-  // plain writes are fine. last-batch.json IS contended (bot's /forget last
-  // can mutate while a scrape is mid-run), so use atomicWriteJson for it.
-  fs.writeFileSync(path.join(PP.dir, `today-batch-${DATE}.tsv`), tsv + '\n');
-  fs.writeFileSync(path.join(PP.dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
+  // The missed-batch watcher treats TSV existence as the success signal, so
+  // publish artifacts atomically: readers never observe a partial file.
+  atomicWriteText(path.join(PP.dir, `today-batch-${DATE}.tsv`), tsv + '\n');
+  atomicWriteText(path.join(PP.dir, `today-batch-direct-urls-${DATE}.txt`), directUrls.filter(Boolean).join('\n') + '\n');
 
   // Rich per-job match details, used by the bot's /why N command.
   // Funnel data is read by /diagnose to show the supply pipeline.
@@ -1369,7 +1374,7 @@ if (IS_CLI) (async () => {
     if (txtPath && EMAIL_ON && CFG.email?.enabled && CFG.email?.autoSend && String(CFG.email?.to || '').trim()) {
       try {
         const to = String(CFG.email.to).trim();
-        await sendEmail({
+        await sendConfiguredEmail({
           env,
           to,
           from: CFG.email.from || env.SMTP_USER,

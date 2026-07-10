@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"html"
 	"io"
 	"log"
 	"net/http"
@@ -236,6 +237,53 @@ func (d *dashboardServer) handleEmailSave(w http.ResponseWriter, r *http.Request
 	b := readBody(r)
 	// Verifies login + sends a test message before persisting — bound generously.
 	d.relayDashboardAPI(w, 40*time.Second, "email-save", b["user"], b["pass"], b["to"], b["subject"], b["autoSend"])
+}
+
+func (d *dashboardServer) handleEmailOAuthStart(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	redirectURI := "http://" + r.Host + "/oauth/google/callback"
+	d.relayDashboardAPI(w, 15*time.Second, "email-oauth-start", redirectURI, b["to"], b["subject"], b["autoSend"])
+}
+
+// Google returns here in the system browser. OAuth state + PKCE are validated
+// in gmail-oauth.mjs; this handler additionally rejects non-loopback Hosts.
+func (d *dashboardServer) handleEmailOAuthCallback(w http.ResponseWriter, r *http.Request) {
+	host := r.Host
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	if r.Method != http.MethodGet || (host != "127.0.0.1" && host != "localhost" && host != "[::1]") {
+		http.Error(w, "loopback only", http.StatusForbidden)
+		return
+	}
+	message := "Gmail connected. You can close this tab and return to AMM."
+	ok := false
+	if denied := r.URL.Query().Get("error"); denied != "" {
+		message = "Google connection was cancelled: " + denied
+	} else {
+		redirectURI := "http://" + r.Host + "/oauth/google/callback"
+		out, err := d.execDashboardAPI(45*time.Second, "email-oauth-complete", r.URL.Query().Get("code"), r.URL.Query().Get("state"), redirectURI)
+		var result struct {
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		}
+		if err == nil && json.Unmarshal(out, &result) == nil && result.OK {
+			ok = true
+		} else if result.Error != "" {
+			message = result.Error
+		} else {
+			message = "AMM could not finish the Google connection. Return to AMM and try again."
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	status := "Connection failed"
+	if ok {
+		status = "Gmail connected"
+	}
+	_, _ = w.Write([]byte("<!doctype html><meta charset=utf-8><title>" + html.EscapeString(status) + "</title>" +
+		"<body style='font:16px system-ui;max-width:560px;margin:15vh auto;padding:24px;background:#111827;color:#f9fafb'>" +
+		"<h1>" + html.EscapeString(status) + "</h1><p>" + html.EscapeString(message) + "</p>" +
+		"<script>if(window.opener){setTimeout(()=>window.close(),1200)}</script></body>"))
 }
 
 func (d *dashboardServer) handleEmailSend(w http.ResponseWriter, r *http.Request) {

@@ -1216,11 +1216,21 @@
 
             <!-- DISABLED / setup view -->
             <div id="email-off">
-              <div class="muted-sm">Off — email your daily job batch (.txt) to someone (e.g. a virtual assistant) so they can apply for you. Sends through your own Gmail; nothing leaves your computer except the email you send.</div>
+              <div class="muted-sm">Off — connect Gmail with Google, then email your daily job batch (.txt) to someone such as a virtual assistant. AMM can send messages but cannot read or delete your mail.</div>
               <button class="sm" id="email-setup-start"><svg class="ic"><use href="#i-send"/></svg>Set up email…</button>
 
               <div id="email-setup" class="hidden">
-                <div class="step">
+                <div class="step" id="email-oauth-step">
+                  <div class="muted-sm">Who receives the batch? Google will open in your browser and ask permission to <b>send email only</b>.</div>
+                  <input type="email" id="email-oauth-to" placeholder="assistant@example.com" autocomplete="off" spellcheck="false" />
+                  <input type="text" id="email-oauth-subject" placeholder="Job batch — {DATE}" style="margin-top:6px" />
+                  <label class="watch-toggle" style="margin-top:8px"><input type="checkbox" id="email-oauth-autosend" checked /><span>Auto-send every morning after the scrape</span></label>
+                  <button class="sm primary" id="email-oauth-connect" style="margin-top:8px">Connect Gmail with Google</button>
+                  <button class="sm" id="email-oauth-cancel" style="margin-top:8px">Cancel</button>
+                  <div class="note" id="email-oauth-note"></div>
+                </div>
+                <details style="margin-top:10px"><summary class="muted-sm">Advanced: use a Gmail App Password instead</summary>
+                <div class="step" style="margin-top:8px">
                   <div class="muted-sm">1. Gmail needs an <b>App Password</b> — not your normal password. Turn on 2-Step Verification, then create one at <code>myaccount.google.com/apppasswords</code>. Paste your Gmail address and that 16-character password:</div>
                   <input type="email" id="email-user" placeholder="you@gmail.com" autocomplete="off" spellcheck="false" />
                   <input type="password" id="email-pass" placeholder="app password (16 characters)" autocomplete="off" spellcheck="false" style="margin-top:6px" />
@@ -1238,6 +1248,7 @@
                   <button class="sm" id="email-cancel">Cancel</button>
                   <div class="note" id="email-save-note"></div>
                 </div>
+                </details>
               </div>
             </div>
           </div>
@@ -2294,6 +2305,8 @@ let emailUser = "", emailPass = "";
 function renderEmail(e) {
   const connected = !!(e && e.hasCreds && e.enabled);
   window.__emailConnected = connected;
+  window.__emailOAuthAvailable = !!e?.oauthAvailable;
+  $("email-oauth-step").classList.toggle("hidden", !e?.oauthAvailable);
   $("email-pill").textContent = connected ? "on" : "off";
   $("email-dot").className = "dot " + (connected ? "alive" : "unknown");
   $("email-state").textContent = connected ? "Connected" : "Off";
@@ -2302,6 +2315,9 @@ function renderEmail(e) {
   if (connected) {
     $("email-to-v").textContent = e.to || "—";
     $("email-autosend").checked = !!e.autoSend;
+    $("email-on-note").textContent = e.provider === "gmail-oauth"
+      ? `Connected securely with Google as ${e.connectedEmail || e.from || "Gmail"}.`
+      : "Connected with a Gmail App Password (advanced setup).";
   }
 }
 
@@ -2315,7 +2331,42 @@ async function loadEmail() {
 $("email-setup-start").addEventListener("click", () => {
   $("email-setup").classList.remove("hidden");
   $("email-setup-start").classList.add("hidden");
-  $("email-user").focus();
+  $(window.__emailOAuthAvailable ? "email-oauth-to" : "email-user").focus();
+});
+
+$("email-oauth-cancel").addEventListener("click", resetEmailSetup);
+$("email-oauth-connect").addEventListener("click", async () => {
+  const to = $("email-oauth-to").value.trim();
+  const subject = $("email-oauth-subject").value.trim() || "Job batch — {DATE}";
+  const autoSend = $("email-oauth-autosend").checked ? "true" : "false";
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return note("email-oauth-note", "Enter a valid recipient email.", false);
+  const popup = window.open("about:blank", "amm-google-oauth", "width=560,height=720");
+  note("email-oauth-note", "Opening Google…", true);
+  const r = await postJSON("/api/email/oauth/start", { to, subject, autoSend });
+  if (!r.ok) {
+    if (popup) popup.close();
+    return note("email-oauth-note", "✗ " + (r.error || "Google connection is unavailable"), false);
+  }
+  if (popup) popup.location = r.authUrl;
+  else window.open(r.authUrl, "_blank", "noopener");
+  note("email-oauth-note", "Finish approving AMM in Google. This page will update automatically.", true);
+  const deadline = Date.now() + 120000;
+  const poll = setInterval(async () => {
+    if (Date.now() > deadline) {
+      clearInterval(poll);
+      note("email-oauth-note", "Google connection timed out. Try again.", false);
+      return;
+    }
+    try {
+      const s = await (await fetch("/api/settings", { cache: "no-store" })).json();
+      if (s.ok && s.settings.email?.enabled && s.settings.email?.provider === "gmail-oauth") {
+        clearInterval(poll);
+        renderEmail(s.settings.email);
+        resetEmailSetup();
+        toast(`Gmail connected — sent a test to ${s.settings.email.to}.`, "good");
+      }
+    } catch {}
+  }, 1200);
 });
 
 function resetEmailSetup() {
@@ -2326,7 +2377,8 @@ function resetEmailSetup() {
   $("email-step-save").classList.add("hidden");
   $("email-user").value = ""; $("email-pass").value = "";
   $("email-to").value = ""; $("email-subject").value = "";
-  note("email-validate-note", ""); note("email-save-note", "");
+  $("email-oauth-to").value = ""; $("email-oauth-subject").value = "";
+  note("email-oauth-note", ""); note("email-validate-note", ""); note("email-save-note", "");
 }
 $("email-cancel").addEventListener("click", resetEmailSetup);
 
@@ -2386,7 +2438,7 @@ $("email-send-now").addEventListener("click", async () => {
 $("email-disable").addEventListener("click", async () => {
   const ok = await confirmModal({
     title: "Disconnect email?",
-    body: "Your Gmail app password is removed from this computer and auto-send stops. You can reconnect anytime.",
+    body: "Your local Gmail authorization or App Password is removed and auto-send stops. You can reconnect anytime.",
     confirmText: "Disconnect", danger: true,
   });
   if (!ok) return;

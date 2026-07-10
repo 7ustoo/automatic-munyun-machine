@@ -22,6 +22,7 @@
  */
 
 import os from 'node:os';
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -309,7 +310,6 @@ export const INSTALL_DIR_HINT = IS_WIN32
 // registering the scheduled task) and by /status to verify the wrapper is
 // installed. Returns null if the binary doesn't exist (fresh checkout
 // without `cd wrapper && make build`).
-import fs from 'node:fs';
 export function wrapperBinaryPath(installDir) {
   const candidates = IS_WIN32
     ? [path.join(installDir, 'wrapper', 'dist', 'AMM.exe')]

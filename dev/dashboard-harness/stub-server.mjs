@@ -11,6 +11,7 @@ const page = () => readFileSync(HTML_PATH, "utf8").replace("__AMM_TOKEN__", "stu
 const companies = ["Cloudscale Systems", "Meridian Health", "Vertex Financial", "Nimbus Labs", "Atlas Aerospace", "Quantum Grid", "Harborview Tech", "Brightpath", "Ironclad Security", "Bluefin Analytics"];
 const titles = ["IAM Engineer", "Identity & Access Management Analyst", "Cloud Security Engineer", "Security Operations Analyst", "Systems Administrator", "M365 Administrator", "Infrastructure Engineer", "IT Security Specialist", "Access Management Engineer", "Cybersecurity Analyst"];
 const queries = ["iam", "cloud security", "m365", "linux"];
+let oauthEmailConnected = false;
 const jobs = Array.from({ length: 42 }, (_, i) => ({
   idx: i + 1,
   title: titles[i % titles.length] + (i > 19 ? ` ${["II","III","Sr.","Lead"][i % 4]}` : ""),
@@ -55,10 +56,12 @@ const routes = (needsSetup, opts = {}) => ({
     now: new Date().toISOString(),
   }),
   "/api/batch": () => ({ ok: true, available: true, date: "2026-07-06", profile: "default", generatedAt: genAt(), jobCount: liveJobs().length, jobs: liveJobs() }),
-  "/api/settings": { ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
-      aiEnabled: true, aiHasKey: true, aiModel: "claude-opus-4-8", mutedTerms: ["palo alto"], cvTermCount: 34 } },
+  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
+      aiEnabled: true, aiHasKey: true, aiModel: "claude-opus-4-8", mutedTerms: ["palo alto"], cvTermCount: 34,
+      email: { enabled: oauthEmailConnected, hasCreds: oauthEmailConnected, provider: oauthEmailConnected ? "gmail-oauth" : null, connectedEmail: oauthEmailConnected ? "owner@gmail.com" : "", oauthAvailable: true, to: oauthEmailConnected ? "helper@example.com" : "", autoSend: true } } }),
   "/api/config/backups": { ok: true, backups: ["config-2026-07-06T12-00-00-000Z-pre-setup.json", "config-2026-07-05T09-10-00-000Z-pre-rename.json"] },
   "/api/profile/list": { ok: true, profiles: [ { slug: "default", active: true, hasCV: true }, { slug: "marketing", active: false, hasCV: false } ] },
+  "/api/hcafe/auth": { ok: true, authed: true, checkedAt: "2026-07-10T12:00:00Z" },
 });
 
 // POST endpoints reply generically so buttons can be exercised.
@@ -71,6 +74,7 @@ const postReplies = {
   "/api/jobs/clear": { ok: true, list: [] },
   "/api/suggest": { ok: true, mode: "titles", suggestions: ["IAM Engineer", "Cloud Security Engineer", "Security Analyst"] },
   "/api/telegram/validate": { ok: true, username: "demo_bot" },
+  "/api/email/oauth/start": { ok: true, authUrl: "http://127.0.0.1:8765/oauth/google/callback?stub=1" },
   "/api/profile/add": { ok: true },
 };
 
@@ -79,6 +83,12 @@ function serve(port, needsSetup, opts) {
   createServer((req, res) => {
     const path = req.url.split("?")[0];
     if (path === "/" ) { res.writeHead(200, { "content-type": "text/html" }); res.end(page()); return; }
+    if (path === "/oauth/google/callback") {
+      oauthEmailConnected = true;
+      res.writeHead(200, { "content-type": "text/html" });
+      res.end("<!doctype html><title>Gmail connected</title><p>Gmail connected. Return to AMM.</p><script>if(window.opener)setTimeout(()=>window.close(),100)</script>");
+      return;
+    }
     if (path === "/favicon.png" || path === "/favicon.ico") { res.writeHead(204); res.end(); return; }
     if (R[path]) {
       const body = typeof R[path] === "function" ? R[path]() : R[path];

@@ -107,6 +107,8 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	// disable = strip creds + turn the knobs off. All state-changing (POST + CSRF).
 	mux.HandleFunc("/api/email/validate", d.guardPost(d.handleEmailValidate))
 	mux.HandleFunc("/api/email/save", d.guardPost(d.handleEmailSave))
+	mux.HandleFunc("/api/email/oauth/start", d.guardPost(d.handleEmailOAuthStart))
+	mux.HandleFunc("/oauth/google/callback", d.handleEmailOAuthCallback)
 	mux.HandleFunc("/api/email/send", d.guardPost(d.handleEmailSend))
 	mux.HandleFunc("/api/email/disable", d.guardPost(d.handleEmailDisable))
 	// v2.5: resume rescan + self-update.

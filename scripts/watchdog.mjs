@@ -24,7 +24,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
+import { IS_WIN32, POWERSHELL, runScheduledTask } from './os-paths.mjs';
+import { atomicWriteJson } from './io-helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -34,10 +36,6 @@ const STATE_FILE         = path.join(ROOT, 'data', 'watchdog-state.json');
 const SELF_HEARTBEAT     = path.join(ROOT, 'data', 'watchdog-heartbeat.json');
 const LOG_FILE           = path.join(ROOT, 'data', 'watchdog.log');
 const TELEGRAM_SEND      = path.join(__dirname, 'telegram-send.mjs');
-
-const SYS32              = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32');
-const POWERSHELL         = path.join(SYS32, 'WindowsPowerShell', 'v1.0', 'powershell.exe');
-const SCHTASKS           = path.join(SYS32, 'schtasks.exe');
 
 const STALE_THRESHOLD_MS = 10 * 60 * 1000;        // bot heartbeat older than this → dead
 const RESTART_WINDOW_MS  = 60 * 60 * 1000;        // sliding window for restart attempts
@@ -55,11 +53,11 @@ function log(line) {
 
 function writeSelfHeartbeat(extra = {}) {
   try {
-    fs.writeFileSync(SELF_HEARTBEAT, JSON.stringify({
+    atomicWriteJson(SELF_HEARTBEAT, {
       ts: new Date().toISOString(),
       pid: process.pid,
       ...extra
-    }, null, 2));
+    });
   } catch { /* ignore */ }
 }
 
@@ -69,8 +67,7 @@ function readState() {
 }
 function writeState(s) {
   try {
-    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true });
-    fs.writeFileSync(STATE_FILE, JSON.stringify(s, null, 2));
+    atomicWriteJson(STATE_FILE, s);
   } catch (e) { log(`state write failed: ${e.message}`); }
 }
 
@@ -84,7 +81,7 @@ function readHeartbeat() {
 // next watchdog tick.
 function alertTelegram(text) {
   try {
-    const r = spawnSync('node', [TELEGRAM_SEND, text], {
+    const r = spawnSync(process.execPath, [TELEGRAM_SEND, text], {
       stdio: 'ignore',
       timeout: 15000,
       windowsHide: true
@@ -99,6 +96,17 @@ function alertTelegram(text) {
 // (cleanest), then fall back to a command-line match (handles the case where
 // heartbeat is gone or stale-process PID).
 function killBot(hb) {
+  if (!IS_WIN32) {
+    if (!hb?.pid) return;
+    try {
+      process.kill(hb.pid, 'SIGTERM');
+      log(`kill PID ${hb.pid}: SIGTERM sent`);
+    } catch (e) {
+      if (e.code !== 'ESRCH') log(`kill PID ${hb.pid} failed: ${e.message}`);
+    }
+    return;
+  }
+
   // Try precise PID kill via PowerShell if heartbeat had one and process exists
   if (hb?.pid) {
     const r = spawnSync(POWERSHELL, [
@@ -125,11 +133,10 @@ function killBot(hb) {
 }
 
 function startBot() {
-  const r = spawnSync(SCHTASKS, ['/run', '/tn', 'munyun-bot'], {
-    stdio: 'pipe', timeout: 15000, windowsHide: true
-  });
-  log(`schtasks /run munyun-bot → exit ${r.status}`);
-  return r.status === 0;
+  const scheduled = runScheduledTask('bot');
+  const r = { status: scheduled.code };
+  log(`scheduler run bot → exit ${r.status}`);
+  return scheduled.ok;
 }
 
 function pruneRestarts(restarts) {

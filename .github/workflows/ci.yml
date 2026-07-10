@@ -111,3 +111,18 @@ jobs:
           else
             ./dist/amm-tray --version
           fi
+
+  dashboard-e2e:
+    name: Dashboard E2E (Chromium)
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with: { node-version: 20, cache: npm }
+      - run: npm ci
+      - name: Install Chromium and system dependencies
+        run: npx playwright install --with-deps chromium
+      - name: Exercise dashboard and mocked Gmail OAuth flow
+        run: npm run test:e2e
