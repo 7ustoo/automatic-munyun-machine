@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [4.4.1] — 2026-07-10
+
+### Fixed
+
+- Accept Google's standard downloaded Desktop OAuth credential JSON (`installed.client_id` / `installed.client_secret`) in addition to AMM's release-build format.
+
+### Added
+
+- Add an explicit live Gmail verification command (`npm run test:gmail-live -- --to <address>`) that exercises real Google consent, token exchange, and a labeled Gmail API send without exposing credentials.
+
 ## [4.4.0] — 2026-07-10
 
 ### Added

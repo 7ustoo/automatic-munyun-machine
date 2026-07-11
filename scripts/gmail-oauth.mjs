@@ -31,12 +31,21 @@ function readEnv() {
   catch { return {}; }
 }
 
+export function parseOAuthClientConfig(value = {}) {
+  const installed = value?.installed || value?.web || {};
+  return {
+    clientId: String(value?.clientId || installed.client_id || '').trim(),
+    clientSecret: String(value?.clientSecret || installed.client_secret || '').trim()
+  };
+}
+
 export function oauthClientConfig(env = readEnv()) {
   let bundled = {};
   try { bundled = JSON.parse(fs.readFileSync(CLIENT_PATH, 'utf8')); } catch {}
+  const fileConfig = parseOAuthClientConfig(bundled);
   return {
-    clientId: String(env.GOOGLE_OAUTH_CLIENT_ID || bundled.clientId || '').trim(),
-    clientSecret: String(env.GOOGLE_OAUTH_CLIENT_SECRET || bundled.clientSecret || '').trim()
+    clientId: String(env.GOOGLE_OAUTH_CLIENT_ID || fileConfig.clientId || '').trim(),
+    clientSecret: String(env.GOOGLE_OAUTH_CLIENT_SECRET || fileConfig.clientSecret || '').trim()
   };
 }
 
