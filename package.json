@@ -1,6 +1,6 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "5.0.0",
+  "version": "5.0.1",
   "description": "Daily job batch (50–200, your pick) ranked by CV match, pushed to Telegram. Local-first, free, runs on Windows + macOS + Linux.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",

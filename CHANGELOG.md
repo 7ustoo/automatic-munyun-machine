@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [5.0.1] — 2026-07-11
+
+### Fixed
+
+- CI green for the v5.0 line. A pre-existing scoring test hardcoded the old `salaryFloorUsd` default (90000) and failed on a clean checkout now that v5.0 ships a `0` floor (no floor until you set one); the below-floor assertion is now derived from the actual floor and skipped when none is set. `SALARY_FLOOR_K` is exported for testability. (v5.0.0's release build failed on this before publishing artifacts; v5.0.1 is the first published build of the line.)
+
 ## [5.0.0] — 2026-07-11
 
 > **AMM is for everyone now — not just one security engineer.** v5.0 removes every default that was tailored to the original owner, teaches the resume parser 8 non-tech fields, lets you search on-site/hybrid jobs (not just remote), pulls jobs straight from company ATS boards, and fixes 20 bugs the review turned up. A nurse, a sales rep, or an accountant can now install AMM and get relevant jobs from their very first scrape.

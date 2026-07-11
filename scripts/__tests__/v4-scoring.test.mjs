@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   termAllowedInText, AMBIGUOUS_TERM_CONTEXT, OFF_FAMILY_RX, FAMILY_PENALTY,
-  jdScoreToPercent, salaryRank, compareJobs,
+  jdScoreToPercent, salaryRank, compareJobs, SALARY_FLOOR_K,
 } from '../daily-batch.mjs';
 import { buildPrompt, DEFAULT_AI_MODEL } from '../ai-rerank.mjs';
 
@@ -54,9 +54,14 @@ test('salary breaks ties but never outranks match %', () => {
   assert.ok(compareJobs(hiMatch, loMatchRich) < 0, 'higher match wins regardless of salary');
   const a = { matchPct: 70, salaryK: 150 }, b = { matchPct: 70, salaryK: 120 };
   assert.ok(compareJobs(a, b) < 0, 'equal match: higher salary first');
-  const unknown = { matchPct: 70, salaryK: 0 }, below = { matchPct: 70, salaryK: 40 };
-  assert.ok(salaryRank(unknown) > salaryRank(below) || salaryRank(below) < 0,
-    'below-floor salary ranks under unknown');
+  // Below-floor penalty is only exercised when a floor is configured. v5.0's
+  // default floor is 0 (no floor) — a clean install penalizes no salary — so
+  // derive the "below" value from the actual floor and skip when there is none.
+  if (SALARY_FLOOR_K > 0) {
+    const unknown = { matchPct: 70, salaryK: 0 }, below = { matchPct: 70, salaryK: Math.max(1, SALARY_FLOOR_K - 5) };
+    assert.ok(salaryRank(below) < 0, 'a salary below the floor is penalized');
+    assert.ok(salaryRank(unknown) > salaryRank(below), 'unknown salary ranks above a below-floor salary');
+  }
 });
 
 test('ai prompt embeds cv summary + jobs and model default is opus 4.8', () => {
