@@ -9,7 +9,7 @@
 - **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
 - **Desktop dashboard (primary).** A local control surface in your browser — see the ranked batch, open jobs to apply, and click **Scrape now** for a fresh batch. Opened from the system-tray icon, which also shows real-time health (green/yellow/red).
 - **Telegram (optional, since v2.1).** Want batches on your phone too? Turn Telegram on right from the dashboard — paste a bot token, connect your chat, done. Skip it and AMM is a pure desktop app; no bot token needed. When on, you also get `/scrape`, `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
-- **Export your apply links as .txt, .csv, or Excel .xlsx.** One click in the dashboard (or `/export` on Telegram) downloads the latest batch as a clean list — number, job title, apply link. The `.xlsx` workbook has the Apply Link column as real clickable hyperlinks (CSV is plain text and can't carry links — pick `.xlsx` if you want to click straight from Excel). The full detailed `jobs(YYYY-MM-DD).txt` archive is still written every run and sent to Telegram when it's enabled.
+- **Export your apply links as .txt, .csv, or Excel .xlsx.** One click in the dashboard (or `/export` on Telegram) downloads the latest batch as a clean list — number, job title, apply link. The automatic Telegram and email attachments use that same compact `apply-links(YYYY-MM-DD).txt` format. The `.xlsx` workbook has real clickable hyperlinks; the detailed `jobs(YYYY-MM-DD).txt` remains a local archive.
 - **Email the batch to a helper (v4.4).** Hand off applying to someone else — a virtual assistant, say. Connect Gmail from System → **Email** using Google's browser consent screen; AMM requests send-only permission and cannot read or delete mail. Click **Email** next to Export or turn on **Auto-send** for every morning. Gmail App Password SMTP remains available under Advanced setup. Authorization stays on this computer.
 - **Full control over what you search (v2.5).** From the dashboard: filter jobs by recency (posted today / last 3 days / this week / this month / any), rescan a new resume to re-tune your CV match and get fresh search-term suggestions, and edit every filter (YOE, salary floor, match floor, clearance, application forms, search terms) live.
 - **Automatic updates (v2.5).** The dashboard tells you when a new version is out and updates itself in one click — silent download, in-place install, and relaunch. No more re-downloading the installer by hand.
@@ -178,7 +178,8 @@ All settings live in `config.json` (created from `config.example.json` by the wi
 | `data/browser-profile/` | Playwright Chromium profile with hiring.cafe session (gitignored) |
 | `data/auth-state.json` | Last successful auth timestamp |
 | `data/today-batch-{date}.tsv` | Each day's batch as TSV (machine-readable) |
-| `data/jobs({date}).txt` | Each day's batch as plain text (human-readable, sent as Telegram attachment) |
+| `data/jobs({date}).txt` | Detailed local archive with scores, companies, matched terms, and links. |
+| `data/apply-links({date}).txt` | Compact number · title · direct-link handoff sent through Telegram and email. |
 | `data/daily-batch-{date}.log` | Per-run log |
 | `data/telegram-bot.log` | Bot poll log |
 

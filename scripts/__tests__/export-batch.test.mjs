@@ -25,9 +25,20 @@ test('exportRows: number + title + apply link only, direct URL preferred', () =>
 
 test('txt export: numbered title lines with the apply link under each', () => {
   const txt = buildExportTxt(exportRows(LB), LB.date);
-  assert.match(txt, /apply links \(2026-07-02\)/);
-  assert.match(txt, /^1\. IAM Engineer$/m);
-  assert.match(txt, /^ {3}https:\/\/ats\.example\/apply\/1$/m);
+  assert.equal(txt, [
+    'Automatic Munyun Machine — apply links (2026-07-02)',
+    '3 jobs · number · title · apply link',
+    '',
+    '1. IAM Engineer',
+    '   https://ats.example/apply/1',
+    '',
+    '2. Cloud Security, Sr. "IAM"',
+    '   https://hiring.cafe/viewjob/bbb',
+    '',
+    '3. (untitled)',
+    '   https://hiring.cafe/viewjob/ccc',
+    ''
+  ].join('\n'));
   // Only the three fields — no company/match%/search-query lines like the
   // old full export.
   assert.ok(!/Company:|Matched:|Search:|YOE:/.test(txt));
