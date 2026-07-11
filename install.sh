@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Automatic Munyun Machine — Mac/Linux one-line installer (v1.1).
+# Automatic Munyun Machine — macOS/Linux one-line installer.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.sh | bash

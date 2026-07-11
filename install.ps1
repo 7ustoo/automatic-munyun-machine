@@ -13,7 +13,7 @@ $banner = @"
 
   $('═' * 60)
   AUTOMATIC MUNYUN MACHINE — Installer
-  Daily 100-job Telegram batch, scored against your CV
+  Daily job matches ranked against your resume
   $('═' * 60)
 "@
 Write-Host $banner -ForegroundColor Cyan

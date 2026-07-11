@@ -397,7 +397,7 @@ setInterval(() => {
 const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 
 <b>Core actions</b>
-/scrape, /daily, gm  → weather + 100 jobs ranked by CV match
+/scrape, /daily, gm  → fresh jobs ranked by CV match
 /batch [N]           → tap-friendly browser with Save/Applied/Why buttons
 /save N              → bookmark job locally + on hiring.cafe (if /reauth'd)
 /applied N           → mark applied locally + on hiring.cafe (if /reauth'd)

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Daily 100-job batch.
+ * Daily ranked job batch (50–200 jobs, user-configurable).
  *   1. Launches a headless Chromium with the persistent profile (Cloudflare
  *      cookies live there); warmup probe verifies hiring.cafe is browsable.
- *   2. Runs EVERY configured hiring.cafe search (default 16), paginating
+ *   2. Runs EVERY configured hiring.cafe search, paginating
  *      each until its Next button is gone / no fresh cards (hard ceiling
  *      maxPagesPerQuery, default 50). v2.3: full scan is the default —
  *      the old cross-query early stop (quit once fresh estimate ≥ 1.5 ×
@@ -14,8 +14,8 @@
  *   5. Resolves each viewjob URL to its direct ATS URL via 5-page browser
  *      pool (Cloudflare blocks plain Node fetch; browser nav works).
  *   6. Pulls weather from open-meteo (lat/lon/city are user-configurable).
- *   7. Sends chunked HTML messages + apply-links(<DATE>).txt attachment + inline
- *      callback CTA to Telegram. Persists seen-jobs only after delivery.
+ *   7. Writes the local batch, then optionally sends Telegram/email handoffs.
+ *      Persists seen-jobs after the run completes.
  *
  * Prereq: persistent Chromium profile (created on first run / login-once
  * warmup). No CDP, no remote debugging port. Local-first.
