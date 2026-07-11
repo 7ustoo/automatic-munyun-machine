@@ -67,6 +67,7 @@ import {
 } from './os-paths.mjs';
 import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
 import { readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
+import { clampBatchSize } from './batch-size.mjs';
 
 // v4.3: is account dedup on for the active profile? Read fresh each call —
 // settings edits can flip it while the bot runs. Fail-open to the default.
@@ -418,6 +419,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /yoe N               → set max years of experience
 /salary N            → set salary floor in $K (e.g. /salary 120)
 /floor N             → minimum match-% to include in batch (default 25)
+/batchsize N         → jobs per batch: 50, 100, 150, or 200 (default 100)
 /clearance on/off    → toggle gov clearance filter
 /forms all/simple/long → application form filter (Easy Apply etc.)
 /skip &lt;company&gt;      → never show this company again
@@ -929,6 +931,16 @@ async function handleMessage(msg) {
     return reply(chatId, n === 0
       ? `✅ Match floor set to <b>0%</b> — every scored job will surface (filler included).`
       : `✅ Match floor set to <b>${n}%</b>. Jobs scoring below this are dropped before the top-100 cut.`);
+  }
+
+  // /batchsize N — v4.5: how many ranked jobs make the final batch. Snaps to
+  // the nearest of 50/100/150/200 (same options as the dashboard). Bigger
+  // batches resolve more apply-URL pages, so scrapes take longer.
+  const bsM = text.match(/^\/?batch\s*size\s+(\d{1,4})\b/);
+  if (bsM) {
+    const n = clampBatchSize(parseInt(bsM[1]));
+    cfgRW.set('scoring.targetJobsPerBatch', n);
+    return reply(chatId, `✅ Batch size set to <b>${n} jobs</b>. Your next /scrape delivers up to ${n} (fewer if fresh supply runs out first).`);
   }
 
   // /clearance on/off

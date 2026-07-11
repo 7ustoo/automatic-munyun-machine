@@ -116,6 +116,7 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 | `/jobs mode titles\|keywords` | What `/jobs suggest` proposes: full job titles ("IAM Engineer") or short keywords ("iam", "m365", "linux") |
 | `/yoe N` | Set max years of experience |
 | `/salary N` | Set salary floor in $K (e.g. `/salary 120`) |
+| `/batchsize N` | Jobs per batch — `50`, `100`, `150`, or `200` (default `100`) |
 | `/clearance on/off` | Toggle gov clearance filter |
 | `/forms all\|simple\|long` | Application form filter — `all` (default), `simple` (Easy Apply, no account needed), `long` (multi-step apps only) |
 | `/skip <company>` | Never show this company again |
@@ -151,7 +152,7 @@ Double-clicking the AMM icon opens the dashboard — the app's primary surface, 
 - **Resume** — rescan a new resume, flip between title-style and keyword-style suggestions, and apply them as your search list.
 - **Profiles** — add / switch / rename / delete personas, each with its own resume, searches, and history.
 - **System** — bot health (alive / stale / dead, uptime, heartbeat), the optional Telegram connection with its full in-app setup flow, and a manual update check.
-- **Settings** — YOE, salary floor, match floor, scrape time, and all job filters; every change saves instantly.
+- **Settings** — YOE, salary floor, match floor, jobs per batch (50/100/150/200), scrape time, and all job filters; every change saves instantly.
 
 First-run setup is a five-step panel in the same window (resume → basics → job-feed warmup → optional Telegram → finish). The dashboard binds to `127.0.0.1` on an OS-assigned port — it is **not reachable from the LAN or the internet** — and auto-refreshes health every 5 seconds. State-changing actions are CSRF-protected with a per-process token.
 

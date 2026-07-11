@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **Choose how many jobs each batch delivers — 50, 100, 150, or 200.** A new **Jobs per batch** picker in dashboard Settings (and `/batchsize N` in the Telegram bot) controls the size of every batch, scheduled or manual. Default stays **100**, so nothing changes unless you pick a new size. Larger batches naturally take longer to build (each delivered job's apply-URL page is visited during resolution, and — when signed in — marked Viewed on your hiring.cafe account) and may deliver fewer than the target on low-supply days once fresh jobs above the match floor run out. New shared module `scripts/batch-size.mjs` is the single source of truth for the options; the stored `scoring.targetJobsPerBatch` is clamped to the nearest offered value everywhere it's read, so a hand-edited config can't make the resolve pass visit an unbounded number of pages. `last-batch.json`'s funnel gains `targetJobsPerBatch` so the dashboard/`/why` can show "delivered N of your chosen size."
+
 ## [4.4.2] — 2026-07-11
 
 ### Changed
