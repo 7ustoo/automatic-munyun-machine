@@ -13,6 +13,18 @@ function response(body, status = 200) {
   return { ok: status >= 200 && status < 300, status, json: async () => body };
 }
 
+test('Google Desktop credential JSON is accepted without conversion', () => {
+  assert.deepEqual(oauth.parseOAuthClientConfig({
+    installed: {
+      client_id: 'downloaded.apps.googleusercontent.com',
+      client_secret: 'desktop-secret'
+    }
+  }), {
+    clientId: 'downloaded.apps.googleusercontent.com',
+    clientSecret: 'desktop-secret'
+  });
+});
+
 test('beginOAuth creates a PKCE Google URL and pending state', () => {
   const started = oauth.beginOAuth({
     redirectUri: 'http://127.0.0.1:43210/oauth/google/callback',

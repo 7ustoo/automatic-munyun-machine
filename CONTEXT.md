@@ -6,7 +6,7 @@
 
 > **2026-07-10 audit/refactor:** watchdog recovery is now platform-aware; helper-process alerts use `process.execPath`; supply diagnostics and the role-suggester CLI are active-profile aware; frequently updated runtime state and batch artifacts use atomic writes; sync lock contention has a 2.4-second bounded retry; regression suite is 188 tests.
 
-> **2026-07-10 v4.4:** Gmail OAuth is now the primary email connection (desktop PKCE + dashboard loopback callback + `gmail.send` API); App Password SMTP remains an advanced fallback. New deterministic Chromium dashboard E2E runs in CI. Version is 4.4.0; regression suite is 192 tests.
+> **2026-07-10 v4.4.1:** Gmail OAuth now accepts Google's standard downloaded Desktop credential JSON, and `npm run test:gmail-live -- --to <address>` proves the real consent/token/send path. App Password SMTP remains an advanced fallback. Version is 4.4.1; regression suite is 193 tests.
 
 ---
 
@@ -71,6 +71,7 @@ iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main
 | `hcafe-session.mjs` | **v4.3.** Shared "signed in to hiring.cafe?" probe (`isSignedIn(page)`, extracted from job-action) + `data/hcafe-auth.json` cache read/write. Used by daily-batch (account-dedup gate), job-action, dashboard-api, telegram-bot. Also `dedupMode({authed, enabled})` — the one branch batch messages/`.txt`/`/diagnose` share. |
 | `email.mjs` | **v4.4.** Provider selector for Gmail OAuth (preferred) or App Password SMTP fallback; manual and automatic batch delivery share `sendConfiguredEmail()`. |
 | `gmail-oauth.mjs` | **v4.4.** Google installed-app OAuth with PKCE, loopback state validation, token refresh, MIME attachment construction, and Gmail API `users.messages.send`. Local tokens live in gitignored `data/gmail-oauth.json`. |
+| `dev/live-gmail-e2e.mjs` | **v4.4.1.** Explicit live smoke test for real Google consent, token exchange, and one labeled Gmail API send; requires `--to` and writes only a non-secret result under `data/`. |
 | `login-once.mjs` | Opens visible Chromium, navigates to hiring.cafe, waits for user to sign in via Google SSO, persists session in profile. |
 | `setup-tasks.ps1` | Registers Task Scheduler entries (`munyun-daily-batch` + `munyun-bot`). Reads time/days from config.json. Migrates legacy `career-ops-*` entries. |
 | `run-daily-batch.cmd` | Wrapper invoked by Task Scheduler 7am task. Just calls `node scripts/daily-batch.mjs`. |
@@ -202,6 +203,8 @@ node scripts/telegram-send.mjs "<message>"
 - ⏭ v2.0 — embeddings + optional LLM rerank, salary database, browser extension. **Tauri desktop GUI cut from roadmap entirely** — Telegram-first inline UI replaces it.
 
 ## Recent change history (newest first)
+
+- **2026-07-10 — v4.4.1 (branch `v4.4.1`).** Corrective Gmail release after the v4.4.0 client was not live-verified. Google Auth Platform configured with only `openid`, email identity, and `gmail.send`; Gmail API enabled; test user and Desktop client created. The first exposed client was deleted and replaced. Added standard Google credential-JSON parsing plus the explicit `test:gmail-live` harness. Proven locally with real consent, token exchange, Gmail API send, Gmail inbox delivery, a checksum-verified native Windows wrapper build, the wrapper's real OAuth callback, and its connection-test delivery. Auto-send left disabled. 193 Node tests and Go tests green.
 
 - **2026-07-10 — v4.4.0 (branch `v4.4`).** Gmail connection upgraded from App Password-only SMTP to Google desktop OAuth: system-browser consent, PKCE, loopback callback owned by the Go dashboard, send-only Gmail API scope, automatic refresh, local disconnect, and SMTP fallback under Advanced. Release workflow can inject the desktop client from GitHub secrets. Added deterministic dashboard browser E2E (`npm run test:e2e`) and CI Chromium job; added OAuth/PKCE/MIME unit coverage. Also includes the full reliability audit: cross-platform watchdog restart, `process.execPath` helper spawns, profile-aware diagnostics/role CLI, atomic runtime and batch writes, and a less-flaky lock retry. 192 Node tests green locally; Go/packaging delegated to CI.
 

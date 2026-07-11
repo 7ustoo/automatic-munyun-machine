@@ -255,6 +255,8 @@ Pull requests welcome. Likely-needed contributions:
 - Additional keyword domains in `scripts/cv-keywords.json` (data eng, software, design)
 - macOS / Linux distro testing — the v1.1 ports are functionally complete but each new distro/version surfaces small things (especially around launchd plist quirks and systemd user-unit linger semantics)
 
+For a deliberate live Gmail verification, place a Google Desktop OAuth credential at `scripts/google-oauth-client.json` (the file is gitignored), add your account as an OAuth test user, then run `npm run test:gmail-live -- --to you@example.com`. This opens the real consent flow and sends one clearly labeled test message through the Gmail API.
+
 ## Troubleshooting
 
 ### Wizard crashed with `spawn powershell ENOENT`
