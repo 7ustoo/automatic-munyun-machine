@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [4.6.0] — 2026-07-11
+
+> **See how the hunt is going, tune it from the dashboard, and hear about every batch.** Salary on every job card, a light theme, blocked companies without touching Telegram, desktop notifications even when the app is closed, and a new Trends page that finally remembers yesterday.
+
+### Added
+
+- **Salary on job rows.** The salary AMM already parses from each posting (e.g. `~$140k`) now shows under the company name on the Jobs list, with a **Show salary on jobs** toggle in Settings (`display.showSalary`, new profile-scoped `display` config block, default on). Best-effort — postings without a listed salary simply show no badge. Your VA's link-only file is unchanged by design.
+- **Blocked companies in the dashboard.** A new card on the Searches page manages `filters.skipCompanies` (add/remove chips) — previously Telegram-only via `/skip`/`/unskip`. Jobs from blocked companies are dropped before scoring; matching is a case-insensitive prefix ("Google" also blocks "Google LLC"). New guarded POST routes `/api/skip/{add,remove}` → `dashboard-api.mjs` `skip-add`/`skip-remove`.
+- **Light theme.** The dashboard now has a full light palette alongside the original dark one, with a sun/moon toggle in the top bar. First run follows your OS preference; an explicit pick is remembered (`localStorage amm-theme`) and applied before first paint — no flash. Fixed the topbar being hardcoded dark while theming.
+- **Desktop notifications — batch ready & scrape failed.** Two layers: (1) the always-running tray app watches `data/scrape-status.json` and fires a **native OS toast** (Windows WinRT toast / macOS osascript / Linux notify-send, dependency-free) even when the dashboard is closed — the 7am break finally reaches you; (2) with the dashboard open in a background tab, a browser notification fires too (asked for permission on your first Scrape click; suppressed while you're actively viewing). New `wrapper/notify.go`; the tray seeds the last outcome at startup so stale statuses never toast.
+- **Trends page — the app finally remembers yesterday.** Every scrape now appends a compact daily snapshot to the profile's `batch-history.json` (new `scripts/batch-history.mjs`, capped at 90 days, same-day re-runs replace that day). The new **Trends** view charts jobs delivered + average match per day (self-contained SVG, no chart library) and a **Search leaderboard** ranking your search terms by the match quality of the jobs they bring (jobs, avg match, strong count, share — weak terms dimmed, with a pointer to prune them on Searches). Falls back to the current batch on day one. New GET `/api/history` in the Go wrapper.
+
+## [4.5.0] — 2026-07-10
+
 ### Added
 
 - **Choose how many jobs each batch delivers — 50, 100, 150, or 200.** A new **Jobs per batch** picker in dashboard Settings (and `/batchsize N` in the Telegram bot) controls the size of every batch, scheduled or manual. Default stays **100**, so nothing changes unless you pick a new size. Larger batches naturally take longer to build (each delivered job's apply-URL page is visited during resolution, and — when signed in — marked Viewed on your hiring.cafe account) and may deliver fewer than the target on low-supply days once fresh jobs above the match floor run out. New shared module `scripts/batch-size.mjs` is the single source of truth for the options; the stored `scoring.targetJobsPerBatch` is clamped to the nearest offered value everywhere it's read, so a hand-edited config can't make the resolve pass visit an unbounded number of pages. `last-batch.json`'s funnel gains `targetJobsPerBatch` so the dashboard/`/why` can show "delivered N of your chosen size."

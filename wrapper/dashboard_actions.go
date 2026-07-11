@@ -146,6 +146,17 @@ func (d *dashboardServer) handleJobsMode(w http.ResponseWriter, r *http.Request)
 	d.relayDashboardAPI(w, 15*time.Second, "jobs-mode", b["mode"])
 }
 
+// v4.6: block / unblock a company from the dashboard (mirrors Telegram /skip).
+func (d *dashboardServer) handleSkipAdd(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "skip-add", b["company"])
+}
+
+func (d *dashboardServer) handleSkipRemove(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "skip-remove", b["company"])
+}
+
 // v2.8: clear the entire search-term list in one shot.
 func (d *dashboardServer) handleJobsClear(w http.ResponseWriter, r *http.Request) {
 	d.relayDashboardAPI(w, 15*time.Second, "jobs-clear")

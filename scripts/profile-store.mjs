@@ -34,7 +34,7 @@ const CFG_EXAMPLE = path.join(ROOT, 'config.example.json');
 const PROFILES_DIR = path.join(ROOT, 'data', 'profiles');
 
 // Fields that live "inside" a profile vs at config top level.
-const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram', 'email'];
+const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram', 'email', 'display'];
 
 // Per-profile data files (relocated under data/profiles/<slug>/ on migration).
 const PROFILE_DATA_FILES = [
@@ -127,7 +127,8 @@ export function paths(slug) {
     lastBatch:          path.join(dir, 'last-batch.json'),
     lastBatchCallbacks: path.join(dir, 'last-batch-callbacks.json'),
     applications:       path.join(dir, 'applications.md'),
-    queryStats:         path.join(dir, 'query-stats.json')
+    queryStats:         path.join(dir, 'query-stats.json'),
+    batchHistory:       path.join(dir, 'batch-history.json') // v4.6: daily snapshots for Trends
   };
 }
 

@@ -83,6 +83,7 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/favicon.ico", d.handleFavicon)
 	mux.HandleFunc("/api/status", d.handleStatus)
 	mux.HandleFunc("/api/batch", d.handleBatch)       // GET: full ranked batch (all jobs + matched)
+	mux.HandleFunc("/api/history", d.handleHistory)   // GET: daily snapshots → Trends + leaderboard (v4.6)
 	mux.HandleFunc("/api/settings", d.handleSettings) // GET: editable knobs + search terms
 	mux.HandleFunc("/api/export", d.handleExport)   // GET ?format=txt|csv: number·title·apply-link export (v2.4)
 	mux.HandleFunc("/api/jobs-txt", d.handleExport) // legacy alias (pre-v2.4 bookmark) → txt export
@@ -96,6 +97,8 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
 	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
 	mux.HandleFunc("/api/jobs/clear", d.guardPost(d.handleJobsClear)) // v2.8: clear all terms
+	mux.HandleFunc("/api/skip/add", d.guardPost(d.handleSkipAdd))       // v4.6: block a company
+	mux.HandleFunc("/api/skip/remove", d.guardPost(d.handleSkipRemove)) // v4.6: unblock a company
 	mux.HandleFunc("/api/jobs/mode", d.guardPost(d.handleJobsMode))
 	mux.HandleFunc("/api/suggest", d.guardPost(d.handleSuggest)) // v2.8: re-suggest from current CV
 	mux.HandleFunc("/api/telegram/validate", d.guardPost(d.handleTelegramValidate))
@@ -222,6 +225,45 @@ func (d *dashboardServer) handleBatch(w http.ResponseWriter, r *http.Request) {
 // (yoe, salary, filters, schedule, search mode, search terms).
 func (d *dashboardServer) handleSettings(w http.ResponseWriter, r *http.Request) {
 	d.relayDashboardAPI(w, 15*time.Second, "settings-get")
+}
+
+// handleHistory (GET /api/history) returns the active profile's daily batch
+// snapshots (data/profiles/<active>/batch-history.json, written by
+// daily-batch on every run) for the dashboard's Trends view + search-term
+// leaderboard. Missing file → ok with empty days. v4.6.
+func (d *dashboardServer) handleHistory(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	out := struct {
+		OK   bool              `json:"ok"`
+		Days []json.RawMessage `json:"days"`
+	}{OK: true, Days: []json.RawMessage{}}
+	if active := activeProfileSlug(d.installDir); active != "" {
+		if data, err := os.ReadFile(filepath.Join(d.installDir, "data", "profiles", active, "batch-history.json")); err == nil {
+			var hist struct {
+				Days []json.RawMessage `json:"days"`
+			}
+			if json.Unmarshal(data, &hist) == nil && hist.Days != nil {
+				out.Days = hist.Days
+			}
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// activeProfileSlug reads config.json's active_profile ("" when unreadable).
+func activeProfileSlug(installDir string) string {
+	data, err := os.ReadFile(filepath.Join(installDir, "config.json"))
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		ActiveProfile string `json:"active_profile"`
+	}
+	if json.Unmarshal(data, &cfg) != nil {
+		return ""
+	}
+	return cfg.ActiveProfile
 }
 
 // handleFavicon serves the AMM logo so the app window shows the brand icon.
@@ -380,6 +422,7 @@ type batchJob struct {
 	Matched   []string `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
 	DirectURL string   `json:"directUrl"`
 	ViewURL   string   `json:"viewjobUrl"`
+	SalaryK   int      `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the
@@ -538,6 +581,7 @@ func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
 			Matched   []string `json:"matched"`
 			DirectURL string   `json:"directUrl"`
 			ViewURL   string   `json:"viewjobUrl"`
+			SalaryK   int      `json:"salaryK"`
 		}
 		if err := json.Unmarshal(raw[i], &j); err != nil {
 			continue
@@ -556,6 +600,7 @@ func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
 			Matched:   j.Matched,
 			DirectURL: j.DirectURL,
 			ViewURL:   j.ViewURL,
+			SalaryK:   j.SalaryK,
 		})
 	}
 	return jobs
@@ -565,15 +610,7 @@ func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
 // matched keywords) for GET /api/batch. Empty result when no batch exists.
 func readFullBatch(installDir string) lastBatchInfo {
 	info := lastBatchInfo{Jobs: []batchJob{}}
-	var active string
-	if data, err := os.ReadFile(filepath.Join(installDir, "config.json")); err == nil {
-		var cfg struct {
-			ActiveProfile string `json:"active_profile"`
-		}
-		if json.Unmarshal(data, &cfg) == nil {
-			active = cfg.ActiveProfile
-		}
-	}
+	active := activeProfileSlug(installDir)
 	if active == "" {
 		return info
 	}
