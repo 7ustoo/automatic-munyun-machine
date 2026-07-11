@@ -619,7 +619,10 @@ const W_SKILL       = SCORING.skillWeight       ?? 3;
 const W_COMPLIANCE  = SCORING.complianceWeight  ?? 2;
 const SALARY_BONUS  = SCORING.salaryBonus       ?? 5;
 const SALARY_PENALTY= SCORING.salaryPenalty     ?? -10;
-const SALARY_FLOOR_K= Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
+// v5.0: default 0 (no floor) — a fresh install shouldn't penalize any salary
+// until the user sets a floor in setup. `?? 90000` only applies if the field is
+// entirely absent (legacy configs); config.example ships 0.
+export const SALARY_FLOOR_K = Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
 const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 25;
 const TF_CAP        = 3; // count term occurrences up to this many times
 
