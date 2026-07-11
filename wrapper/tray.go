@@ -33,6 +33,8 @@ type trayState struct {
 	miQuit      *systray.MenuItem
 
 	currentIcon iconState
+
+	lastScrapeAt string // v4.6: last scrape-status.json "at" we notified on
 }
 
 type iconState int
@@ -210,7 +212,12 @@ func (s *trayState) pollHeartbeat() {
 	ticker := time.NewTicker(heartbeatPollInterval)
 	defer ticker.Stop()
 
+	// v4.6: seed the last scrape outcome so we only toast on NEW ones, never
+	// on a stale status that was already on disk when the wrapper started.
+	s.seedScrapeAt()
+
 	for {
+		s.checkScrapeNotify() // v4.6: native toast on batch-ready / scrape-failed
 		if s.needsSetup {
 			if isSetUp(s.installDir) {
 				s.exitNeedsSetupMode()
@@ -256,6 +263,48 @@ type heartbeat struct {
 	StartedAt           string `json:"startedAt"`
 	LastPollOk          bool   `json:"lastPollOk"`
 	ConsecutiveFailures int    `json:"consecutiveFailures"`
+}
+
+// readScrapeStatus loads data/scrape-status.json (reusing scrapeStatusInfo from
+// dashboard.go). Returns ok=false on missing/malformed/empty. v4.6.
+func (s *trayState) readScrapeStatus() (scrapeStatusInfo, bool) {
+	data, err := os.ReadFile(filepath.Join(s.installDir, "data", "scrape-status.json"))
+	if err != nil {
+		return scrapeStatusInfo{}, false
+	}
+	var st scrapeStatusInfo
+	if json.Unmarshal(data, &st) != nil || st.At == "" {
+		return scrapeStatusInfo{}, false
+	}
+	return st, true
+}
+
+// seedScrapeAt records the scrape outcome already on disk at startup so the
+// first poll doesn't toast a stale batch. v4.6.
+func (s *trayState) seedScrapeAt() {
+	if st, ok := s.readScrapeStatus(); ok {
+		s.lastScrapeAt = st.At
+	}
+}
+
+// checkScrapeNotify fires a native desktop toast when a NEW scrape outcome
+// appears — even if the dashboard is closed (the tray is always running). The
+// in-dashboard browser notification covers the tab-open case. v4.6.
+func (s *trayState) checkScrapeNotify() {
+	st, ok := s.readScrapeStatus()
+	if !ok || st.At == s.lastScrapeAt {
+		return
+	}
+	s.lastScrapeAt = st.At
+	if st.OK {
+		go notifyOS("AMM: batch ready", fmt.Sprintf("%d jobs ranked. Send today's list to your assistant.", st.JobCount))
+	} else {
+		msg := st.Error
+		if msg == "" {
+			msg = "The scrape didn't complete."
+		}
+		go notifyOS("AMM: scrape failed", msg)
+	}
 }
 
 func (s *trayState) refreshHeartbeat() {

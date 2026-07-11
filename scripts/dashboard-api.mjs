@@ -70,8 +70,10 @@ function settingsGet() {
       salaryFloorUsd: cfg.user?.salaryFloorUsd ?? 90000,
       filterClearance: cfg.filters?.filterClearance !== false,
       applicationFormEase: cfg.filters?.applicationFormEase || 'all',
+      skipCompanies: cfg.filters?.skipCompanies || [], // v4.6: blocked-companies UI
       matchFloorPercent: cfg.scoring?.matchFloorPercent ?? 25,
       targetJobsPerBatch: clampBatchSize(cfg.scoring?.targetJobsPerBatch),
+      showSalary: cfg.display?.showSalary !== false, // v4.6: default on
       scheduleTime: cfg.schedule?.time || '07:00',
       searchMode: cfg.search?.mode === 'keywords' ? 'keywords' : 'titles',
       maxJobAge: cfg.filters?.maxJobAge || 'any',
@@ -113,6 +115,7 @@ function settingsSet(dotPath, jsonValue) {
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.applicationFormEase', 'filters.maxJobAge',
     'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'search.mode',
+    'display.showSalary',
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
@@ -120,6 +123,7 @@ function settingsSet(dotPath, jsonValue) {
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
   if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
+  if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.subject') { value = String(value || '').trim().slice(0, 120) || 'Job batch — {DATE}'; }
@@ -169,6 +173,21 @@ function jobsMode(mode) {
 function jobsClear() {
   cfgRW.set('queries', []);
   out({ ok: true, list: [] });
+}
+
+// v4.6: blocked-companies management from the dashboard (was Telegram-only via
+// /skip and /unskip). Same filters.skipCompanies array the scraper drops on in
+// its pre-score filter (daily-batch's SKIP_CO: case-insensitive prefix match
+// anchored at the start of the company name, so "Google" blocks "Google LLC").
+function skipAdd(company) {
+  company = (company || '').trim();
+  if (!company) return out({ ok: false, error: 'empty company' });
+  const r = cfgRW.appendUnique('filters.skipCompanies', company);
+  out({ ok: true, added: r.added, list: r.list });
+}
+function skipRemove(company) {
+  const r = cfgRW.removeFromArray('filters.skipCompanies', (company || '').trim());
+  out({ ok: true, removed: r.removed, list: r.list });
 }
 
 // v2.8: pick the suggester flavor and flatten to plain search strings. Pure —
@@ -704,6 +723,8 @@ if (isMain) (async () => {
       try { cfgRW.restoreConfigSnapshot(a); return out({ ok: true }); }
       catch (e) { return out({ ok: false, error: String(e.message || e) }); }
     }
+    case 'skip-add':     return skipAdd(a);
+    case 'skip-remove':  return skipRemove(a);
     case 'jobs-add':     return jobsAdd(a);
     case 'jobs-remove':  return jobsRemove(a);
     case 'jobs-clear':   return jobsClear();
@@ -737,7 +758,7 @@ if (isMain) (async () => {
     case 'email-send':     return emailSend();
     case 'email-disable':  return emailDisable();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|skip-add|skip-remove|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });

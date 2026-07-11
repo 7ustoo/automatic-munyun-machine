@@ -35,6 +35,7 @@ import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs'
 import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize } from './batch-size.mjs';
+import { summarizeBatch, appendHistory } from './batch-history.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
 // message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
@@ -1189,6 +1190,19 @@ function writeBatchTsv(top, directUrls, funnel) {
     }))
   };
   atomicWriteJson(PP.lastBatch, lastBatch);
+
+  // v4.6: append today's snapshot to batch-history.json (Trends view + search
+  // leaderboard). Re-runs on the same date replace that day's entry. Non-fatal.
+  try {
+    appendHistory(PP.batchHistory, summarizeBatch({
+      date: DATE,
+      generatedAt: lastBatch.generatedAt,
+      jobs: lastBatch.jobs,
+      funnel
+    }));
+  } catch (e) {
+    log(`batch-history write skipped (non-fatal): ${SCRUB(String(e.message || e))}`);
+  }
 }
 
 // Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation

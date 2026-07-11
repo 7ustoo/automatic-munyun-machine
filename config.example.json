@@ -139,6 +139,10 @@
       "model": "claude-opus-4-8"
     }
   },
+  "display": {
+    "showSalary": true,
+    "_showSalaryComment": "v4.6: show the salary parsed from each posting (e.g. ~$140k) on the dashboard job list. Toggle from Settings. Salary is best-effort — many postings don't list one, and those rows simply show no badge. Your VA's link-only file is unaffected."
+  },
   "browser": {
     "channel": "auto",
     "executablePath": "",

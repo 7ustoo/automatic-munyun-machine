@@ -56,12 +56,25 @@ const routes = (needsSetup, opts = {}) => ({
     now: new Date().toISOString(),
   }),
   "/api/batch": () => ({ ok: true, available: true, date: "2026-07-06", profile: "default", generatedAt: genAt(), jobCount: liveJobs().length, jobs: liveJobs() }),
-  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
+  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
+      showSalary: true, skipCompanies: ["Deloitte", "Accenture"],
       aiEnabled: true, aiHasKey: true, aiModel: "claude-opus-4-8", mutedTerms: ["palo alto"], cvTermCount: 34,
       email: { enabled: oauthEmailConnected, hasCreds: oauthEmailConnected, provider: oauthEmailConnected ? "gmail-oauth" : null, connectedEmail: oauthEmailConnected ? "owner@gmail.com" : "", oauthAvailable: true, to: oauthEmailConnected ? "helper@example.com" : "", autoSend: true } } }),
   "/api/config/backups": { ok: true, backups: ["config-2026-07-06T12-00-00-000Z-pre-setup.json", "config-2026-07-05T09-10-00-000Z-pre-rename.json"] },
   "/api/profile/list": { ok: true, profiles: [ { slug: "default", active: true, hasCV: true }, { slug: "marketing", active: false, hasCV: false } ] },
   "/api/hcafe/auth": { ok: true, authed: true, checkedAt: "2026-07-10T12:00:00Z" },
+  // v4.6: 14 days of batch history for the Trends view + leaderboard.
+  "/api/history": { ok: true, days: Array.from({ length: 14 }, (_, i) => ({
+    date: new Date(Date.UTC(2026, 5, 23 + i)).toISOString().slice(0, 10), // 2026-06-23 … 2026-07-06
+    generatedAt: "T", sent: 60 + (i * 7) % 45, target: 100, avgPct: 45 + (i * 3) % 30, strongCount: 8 + (i * 2) % 14,
+    raw: 900, keptAfterFilter: 400, afterDedup: 150,
+    terms: {
+      "iam": { count: 20 + i, avgPct: 72 + (i % 6), strong: 10 },
+      "cloud security": { count: 15, avgPct: 64, strong: 6 },
+      "m365": { count: 12, avgPct: 55, strong: 3 },
+      "linux": { count: 10, avgPct: 41, strong: 1 },
+    },
+  })) },
 });
 
 // POST endpoints reply generically so buttons can be exercised.
@@ -72,6 +85,8 @@ const postReplies = {
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
   "/api/jobs/remove": { ok: true, list: queries.slice(0, 3) },
   "/api/jobs/clear": { ok: true, list: [] },
+  "/api/skip/add": { ok: true, added: true, list: ["Deloitte", "Accenture", "New Co"] },
+  "/api/skip/remove": { ok: true, list: ["Deloitte"] },
   "/api/suggest": { ok: true, mode: "titles", suggestions: ["IAM Engineer", "Cloud Security Engineer", "Security Analyst"] },
   "/api/telegram/validate": { ok: true, username: "demo_bot" },
   "/api/email/oauth/start": { ok: true, authUrl: "http://127.0.0.1:8765/oauth/google/callback?stub=1" },

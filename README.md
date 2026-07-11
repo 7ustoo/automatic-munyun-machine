@@ -147,12 +147,15 @@ After setup, the bot runs in the background and delivers a batch every weekday m
 
 Double-clicking the AMM icon opens the dashboard — the app's primary surface, redesigned in v3.0 as a full application with sidebar navigation:
 
-- **Jobs** — the whole ranked batch with stat tiles (batch size, average match, strong matches), live search (press `/`), match-strength filters, sorting by rank/match/title/company/YOE, per-job match meters, the source query that found each job, and one-click **Apply / Why / Save / Applied** actions. Export the apply links as `.txt`, `.csv`, or `.xlsx` from the toolbar — or **Email** the batch to a helper (once you've connected Gmail on the System page).
-- **Searches** — add, remove, or clear the terms AMM searches every morning.
+- **Jobs** — the whole ranked batch with stat tiles (batch size, average match, strong matches), live search (press `/`), match-strength filters, sorting by rank/match/title/company/YOE, per-job match meters, parsed salary (v4.6, toggleable), the source query that found each job, and one-click **Apply / Why / Save / Applied** actions. Export the apply links as `.txt`, `.csv`, or `.xlsx` from the toolbar — or **Email** the batch to a helper (once you've connected Gmail on the System page).
+- **Searches** — add, remove, or clear the terms AMM searches every morning, plus a **Blocked companies** list (v4.6) — jobs from those companies are dropped before scoring.
 - **Resume** — rescan a new resume, flip between title-style and keyword-style suggestions, and apply them as your search list.
 - **Profiles** — add / switch / rename / delete personas, each with its own resume, searches, and history.
+- **Trends** (v4.6) — jobs delivered + average match per day, and a **Search leaderboard** ranking your search terms by the match quality of the jobs they bring, so you know which searches to keep and which to cut.
 - **System** — bot health (alive / stale / dead, uptime, heartbeat), the optional Telegram connection with its full in-app setup flow, and a manual update check.
-- **Settings** — YOE, salary floor, match floor, jobs per batch (50/100/150/200), scrape time, and all job filters; every change saves instantly.
+- **Settings** — YOE, salary floor, match floor, jobs per batch (50/100/150/200), salary display, scrape time, and all job filters; every change saves instantly.
+
+The dashboard also has a **light theme** (v4.6 — sun/moon toggle in the top bar, follows your OS by default), and AMM raises a **desktop notification** when a batch lands or a scrape fails — from the tray app even when the dashboard window is closed.
 
 First-run setup is a five-step panel in the same window (resume → basics → job-feed warmup → optional Telegram → finish). The dashboard binds to `127.0.0.1` on an OS-assigned port — it is **not reachable from the LAN or the internet** — and auto-refreshes health every 5 seconds. State-changing actions are CSRF-protected with a per-process token.
 
