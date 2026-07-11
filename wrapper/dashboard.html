@@ -278,6 +278,14 @@
   .set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 7px 0; }
   .set-row label { color: var(--text-2); }
   .set-row + .set-row { border-top: 1px solid var(--border); }
+  /* v5.0: workplace-type checkbox group + ATS source rows */
+  .wp-group { display: flex; gap: 14px; flex-wrap: wrap; }
+  .wp-opt { display: inline-flex; align-items: center; gap: 5px; color: var(--text-1); cursor: pointer; }
+  .wp-opt input { accent-color: var(--accent); }
+  .src-row { display: flex; flex-direction: column; gap: 5px; padding: 9px 0; }
+  .src-row + .src-row { border-top: 1px solid var(--border); }
+  .src-row label { color: var(--text-2); font-size: 13px; }
+  .src-row input { width: 100%; }
 
   .pill {
     display: inline-block; padding: 1px 9px; border-radius: 999px;
@@ -694,10 +702,14 @@
     if (_t !== "light" && _t !== "dark") _t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
     document.documentElement.dataset.theme = _t;
   } catch (e) {}
-  if (localStorage.getItem("ammOnboarded") === "1"
-      || localStorage.getItem("ammSetupIncomplete") === "1") {
-    document.getElementById("boot-veil").style.display = "none";
-  }
+  // v5.0: guarded — if a browser blocks site data, localStorage throws; without
+  // this try/catch the whole boot chain rejected and the dashboard froze.
+  try {
+    if (localStorage.getItem("ammOnboarded") === "1"
+        || localStorage.getItem("ammSetupIncomplete") === "1") {
+      document.getElementById("boot-veil").style.display = "none";
+    }
+  } catch (e) {}
 </script>
 
 <!-- Inline icon set (feather-style, stroke = currentColor). Self-contained:
@@ -1153,6 +1165,17 @@
           </div>
           <div id="skip-list" class="terms"></div>
         </div>
+        <div class="card">
+          <h2>Job sources <span class="pill">optional</span></h2>
+          <div class="muted-sm">Beyond hiring.cafe, pull jobs straight from company career boards — public, official feeds, no login, more reliable. Enter the board slug from a company's careers URL (comma-separated). Leave blank to use hiring.cafe only.</div>
+          <div class="src-row"><label for="src-greenhouse">Greenhouse <span class="muted-sm">boards.greenhouse.io/<b>slug</b></span></label>
+            <input type="text" id="src-greenhouse" placeholder="e.g. stripe, gitlab" autocomplete="off" spellcheck="false" /></div>
+          <div class="src-row"><label for="src-lever">Lever <span class="muted-sm">jobs.lever.co/<b>slug</b></span></label>
+            <input type="text" id="src-lever" placeholder="e.g. netflix" autocomplete="off" spellcheck="false" /></div>
+          <div class="src-row"><label for="src-ashby">Ashby <span class="muted-sm">jobs.ashbyhq.com/<b>slug</b></span></label>
+            <input type="text" id="src-ashby" placeholder="e.g. ramp, openai" autocomplete="off" spellcheck="false" /></div>
+          <div class="note" id="src-note"></div>
+        </div>
       </section>
 
       <!-- =================== View: Resume =================== -->
@@ -1379,6 +1402,13 @@
             <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
           <div class="set-row"><label>Job recency</label>
             <select id="set-recency"><option value="any">Any time</option><option value="today">Posted today</option><option value="3days">Last 3 days</option><option value="week">This week</option><option value="month">This month</option></select></div>
+          <div class="set-row"><label id="set-workplace-label">Workplace type</label>
+            <span class="wp-group" role="group" aria-labelledby="set-workplace-label" id="set-workplace">
+              <label class="wp-opt"><input type="checkbox" value="Remote" /> Remote</label>
+              <label class="wp-opt"><input type="checkbox" value="Hybrid" /> Hybrid</label>
+              <label class="wp-opt"><input type="checkbox" value="On-Site" /> On-Site</label>
+            </span></div>
+          <div class="set-row"><label for="set-location">Location <span class="muted-sm">on-site/hybrid</span></label><input type="text" id="set-location" placeholder="City, State, or Country" autocomplete="off" /></div>
           <div class="note" id="set-note"></div>
           <div class="hint">Changes save instantly. The search-style toggle lives on the Resume page, next to the suggestions it shapes.</div>
         </div>
@@ -1417,6 +1447,14 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
+
+// v5.0: safe localStorage — some browsers/enterprise policies ("block all site
+// data") make localStorage throw. An unguarded read in the boot chain used to
+// reject boot() and freeze the whole dashboard (poll loop never started). All
+// storage access goes through these so a blocked store degrades, never crashes.
+const lsGet = (k) => { try { return localStorage.getItem(k); } catch (e) { return null; } };
+const lsSet = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+const lsDel = (k) => { try { localStorage.removeItem(k); } catch (e) {} };
 
 function humanDuration(seconds) {
   if (seconds == null || !isFinite(seconds) || seconds < 1) return "<1s";
@@ -1496,7 +1534,7 @@ document.getElementById("nav").addEventListener("click", (e) => {
   navTo(a.dataset.view);
   if (a.dataset.view === "trends") loadTrends(); // v4.6: lazy-load history
 });
-window.addEventListener("hashchange", () => setView(currentView()));
+window.addEventListener("hashchange", () => { const v = currentView(); setView(v); if (v === "trends") loadTrends(); });
 setView(currentView());
 
 // `/` focuses the job search from anywhere (except while typing).
@@ -1745,10 +1783,8 @@ function render(s) {
     $("fb-text").textContent =
       `Last scrape failed${ls.at ? " · " + ls.at.slice(0, 16).replace("T", " ") : ""} — ${ls.error || "unknown error"}`;
     $("fail-banner").classList.remove("hidden");
-    if (window.__failNotified !== window.__failKey) {   // v4.6: notify once per new failure
-      window.__failNotified = window.__failKey;
-      notifyDesktop("AMM — scrape failed", (ls.error || "The scrape did not complete") + ". Your assistant won't get today's jobs.");
-    }
+    // v5.0: OS toast is owned by the tray (notify.go); this red banner is the
+    // in-page cue. No browser Notification here (see the notifyDesktop removal).
   } else {
     $("fail-banner").classList.add("hidden");
   }
@@ -1763,19 +1799,11 @@ $("fb-retry").addEventListener("click", () => {
   $("scrape-btn").click();
 });
 
-// v4.6: desktop notification when the dashboard is open (even in a background
-// tab). The always-on tray toast (Go wrapper) covers the app-closed case; this
-// covers "tab open but not focused". Suppressed while the tab is focused — the
-// in-page banner/toast already says it. Permission is asked on the first
-// Scrape click (a user gesture, below).
-function notifyDesktop(title, body) {
-  try {
-    if (!("Notification" in window) || Notification.permission !== "granted") return;
-    if (!document.hidden && document.hasFocus && document.hasFocus()) return;
-    const n = new Notification(title, { body, icon: "/favicon.png", tag: "amm-batch", renotify: true });
-    n.onclick = () => { window.focus(); n.close(); };
-  } catch (e) {}
-}
+// v5.0: the browser Notification layer was removed. The always-on tray toast
+// (wrapper/notify.go) fires on batch-ready / scrape-failed whether the dashboard
+// is open OR closed, so a second browser OS-toast was a pure duplicate — and it
+// re-fired a stale failure on every launch. In-page banners + toasts still cover
+// "you're looking at the dashboard".
 
 // v3.0.1: a new batch just landed — refresh everything and announce it.
 let scrapeSafetyTimer = null;
@@ -1789,7 +1817,6 @@ function onFreshBatch(lb) {
   $("bb-text").textContent = `Scrape complete — ${what}${lb?.date ? ` for ${lb.date}` : ""}.`;
   $("batch-banner").classList.remove("hidden");
   toast(`Scrape complete — ${what}.`, "good");
-  notifyDesktop("AMM — batch ready", `${what}${lb?.date ? ` for ${lb.date}` : ""}. Send today's list to your assistant.`);
   loadTrends(true); // v4.6: today's snapshot just landed — refresh Trends
 }
 $("bb-dismiss").addEventListener("click", () => $("batch-banner").classList.add("hidden"));
@@ -2067,10 +2094,6 @@ $("scrape-btn").addEventListener("click", async () => {
   const label = labelEl.textContent;
   labelEl.textContent = "Scraping…";
   try {
-    // v4.6: first Scrape click is a good user gesture to ask for desktop-alert
-    // permission (browsers require a gesture). Declining is fine — the tray
-    // toast still fires natively.
-    try { if ("Notification" in window && Notification.permission === "default") Notification.requestPermission(); } catch (e) {}
     const watch = $("watch-scrape").checked;
     const r = await postJSON("/api/scrape", { watch: String(watch) });
     if (r.ok) {
@@ -2112,6 +2135,11 @@ async function loadSettings() {
     $("set-forms").value = s.applicationFormEase;
     $("set-recency").value = s.maxJobAge || "any";
     $("set-mode").value = s.searchMode;
+    // v5.0: workplace type + location.
+    const wt = new Set(s.workplaceTypes || ["Remote"]);
+    $("set-workplace").querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = wt.has(cb.value); });
+    $("set-location").value = s.searchLocation || "";
+    if (typeof renderSources === "function") renderSources(s.sources || {});
     renderTerms(s.queries || []);
     renderSkip(s.skipCompanies || []);
     // v4.0: Smart match config (key is write-only — server returns aiHasKey).
@@ -2182,6 +2210,12 @@ $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.tar
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));
 $("set-recency").addEventListener("change", e => saveSetting("filters.maxJobAge", e.target.value));
+// v5.0: workplace type (array → JSON string; body values must be strings) + location.
+$("set-workplace").addEventListener("change", () => {
+  const picked = [...$("set-workplace").querySelectorAll("input:checked")].map(cb => cb.value);
+  saveSetting("search.workplaceTypes", JSON.stringify(picked.length ? picked : ["Remote"]));
+});
+$("set-location").addEventListener("change", e => saveSetting("search.location", e.target.value.trim()));
 // v2.8: flipping search style saves the mode AND immediately re-suggests from
 // the already-scanned CV (no re-upload) — reusing the resume-suggest chip UI.
 $("set-mode").addEventListener("change", async e => {
@@ -2248,6 +2282,24 @@ async function addSkip() {
   if (r.ok) { renderSkip(r.list); $("skip-input").value = ""; toast(r.added ? `Blocked "${company}".` : `"${company}" was already blocked.`, "good"); }
 }
 $("skip-add-btn").addEventListener("click", addSkip);
+
+// v5.0: ATS job-source boards (comma-separated slugs per provider).
+function renderSources(sources) {
+  sources = sources || {};
+  $("src-greenhouse").value = (sources.greenhouse || []).join(", ");
+  $("src-lever").value = (sources.lever || []).join(", ");
+  $("src-ashby").value = (sources.ashby || []).join(", ");
+}
+["greenhouse", "lever", "ashby"].forEach(ats => {
+  const el = $("src-" + ats);
+  if (!el) return;
+  el.addEventListener("change", () => {
+    const slugs = el.value.split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+    el.value = slugs.join(", ");
+    saveSetting("sources." + ats, JSON.stringify(slugs));
+    $("src-note").textContent = "✓ Saved — run a scrape to pull from these boards.";
+  });
+});
 $("skip-input").addEventListener("keydown", e => { if (e.key === "Enter") addSkip(); });
 
 // v4.6: light/dark theme toggle. The inline script after <body> already set
@@ -2718,7 +2770,7 @@ $("email-disable").addEventListener("click", async () => {
 // The "Email" button in the Jobs toolbar — send the current batch on demand.
 $("email-btn").addEventListener("click", async () => {
   if (!window.__emailConnected) {
-    setView("system");
+    navTo("system"); // v5.0: navTo (not setView) so hash + view stay in sync — the '/' shortcut and reload depend on it
     toast("Set up email first — see the Email card on this page.", "bad");
     return;
   }
@@ -2991,11 +3043,11 @@ function setupNudges() {
   $("top-setup-btn").addEventListener("click", reopenSetup);
   $("top-tour-btn").addEventListener("click", startTour);
 
-  if (localStorage.getItem("ammSetupIncomplete") === "1") {
+  if (lsGet("ammSetupIncomplete") === "1") {
     $("setup-banner").classList.remove("hidden");
   }
-  if (localStorage.getItem("ammTourPending") === "1") {
-    localStorage.removeItem("ammTourPending");
+  if (lsGet("ammTourPending") === "1") {
+    lsDel("ammTourPending");
     setTimeout(startTour, 650);   // let the first render settle
     return;
   }
@@ -3006,8 +3058,8 @@ function setupNudges() {
   // v4.3: open synchronously — the boot veil is still up at this point, and
   // opening in the same microtask chain means the welcome splash is the first
   // thing painted (the old 400ms setTimeout let the bare dashboard flash).
-  if (localStorage.getItem("ammOnboarded") !== "1"
-      && localStorage.getItem("ammSetupIncomplete") !== "1") {
+  if (lsGet("ammOnboarded") !== "1"
+      && lsGet("ammSetupIncomplete") !== "1") {
     if (!window.__hasBatch) {
       reopenSetup();
     } else {
@@ -3015,7 +3067,7 @@ function setupNudges() {
       // on a working machine) — it has batches, so the greeting never opens
       // and nothing else would ever write ammOnboarded. Persist it here so
       // the boot veil's inline fast-hide kicks in from the next launch on.
-      localStorage.setItem("ammOnboarded", "1");
+      lsSet("ammOnboarded", "1");
     }
   }
 }
@@ -3031,7 +3083,9 @@ const TOUR_STEPS = [
 ];
 
 function startTour() {
-  const steps = TOUR_STEPS.filter(s => document.querySelector(s.sel));
+  navTo("jobs"); // v5.0: steps include Jobs-only elements (.stats) — show that view first so the highlight lands on something
+  // Only steps whose target is actually rendered (offsetParent null = display:none) — never draw a phantom ring in the corner.
+  const steps = TOUR_STEPS.filter(s => { const el = document.querySelector(s.sel); return el && el.offsetParent !== null; });
   if (!steps.length) return;
   tourState = { i: 0, steps };
   $("tour-layer").classList.remove("hidden");

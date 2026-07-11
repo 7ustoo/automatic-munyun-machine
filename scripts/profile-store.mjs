@@ -34,7 +34,7 @@ const CFG_EXAMPLE = path.join(ROOT, 'config.example.json');
 const PROFILES_DIR = path.join(ROOT, 'data', 'profiles');
 
 // Fields that live "inside" a profile vs at config top level.
-const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram', 'email', 'display'];
+const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram', 'email', 'display', 'search', 'sources'];
 
 // Per-profile data files (relocated under data/profiles/<slug>/ on migration).
 const PROFILE_DATA_FILES = [
@@ -64,7 +64,24 @@ function atomicWriteConfig(obj) {
 // Idempotent. Safe to call from any script entrypoint.
 export function migrateIfNeeded() {
   const raw = readRawConfig();
-  if (raw.profiles && raw.active_profile) return { migrated: false };
+  if (raw.profiles && raw.active_profile) {
+    // v5.0: reconcile orphaned top-level keys that BECAME profile-scoped in a
+    // later version (e.g. 'search', 'sources'). Earlier migration left them at
+    // top level, where set() writes but read() (active-profile view) can't see
+    // them — so a saved setting silently reverted. Move each into the active
+    // profile iff it isn't already there. One-time, idempotent, defensive.
+    const slug = raw.active_profile;
+    const prof = raw.profiles[slug];
+    if (prof) {
+      const orphans = Object.keys(raw).filter(k => PROFILE_FIELDS.includes(k) && prof[k] === undefined);
+      if (orphans.length) {
+        for (const k of orphans) { prof[k] = raw[k]; delete raw[k]; }
+        atomicWriteConfig(raw);
+        return { migrated: true, reconciled: orphans };
+      }
+    }
+    return { migrated: false };
+  }
 
   // Wrap flat shape into profiles.default.
   const newCfg = {

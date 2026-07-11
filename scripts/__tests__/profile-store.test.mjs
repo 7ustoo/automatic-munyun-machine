@@ -41,7 +41,7 @@ test('listProfiles() returns at least the active profile after migration', () =>
 test('PROFILE_FIELDS is the expected set', () => {
   assert.deepEqual(
     [..._internals.PROFILE_FIELDS].sort(),
-    ['display', 'email', 'filters', 'queries', 'schedule', 'scoring', 'telegram', 'user', 'weather']
+    ['display', 'email', 'filters', 'queries', 'schedule', 'scoring', 'search', 'sources', 'telegram', 'user', 'weather']
   );
 });
 

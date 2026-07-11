@@ -29,22 +29,43 @@ import (
 //   - Host must be loopback (rejects DNS-rebinding to a LAN name)
 //   - X-AMM-Token must equal the token we injected into the served HTML; a
 //     cross-origin page can't read that HTML, so it can't forge the header.
+// loopbackHost reports whether the request's Host header names a loopback
+// address. Blocks DNS-rebinding: a page on attacker.example that resolves to
+// 127.0.0.1 still carries Host: attacker.example, so it fails this check.
+func loopbackHost(r *http.Request) bool {
+	host := r.Host
+	if i := strings.LastIndex(host, ":"); i >= 0 {
+		host = host[:i]
+	}
+	return host == "127.0.0.1" || host == "localhost" || host == "[::1]"
+}
+
 func (d *dashboardServer) guardPost(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			writeJSONError(w, http.StatusMethodNotAllowed, "POST only")
 			return
 		}
-		host := r.Host
-		if i := strings.LastIndex(host, ":"); i >= 0 {
-			host = host[:i]
-		}
-		if host != "127.0.0.1" && host != "localhost" && host != "[::1]" {
+		if !loopbackHost(r) {
 			writeJSONError(w, http.StatusForbidden, "loopback only")
 			return
 		}
 		if r.Header.Get("X-AMM-Token") != d.csrfToken {
 			writeJSONError(w, http.StatusForbidden, "bad or missing token")
+			return
+		}
+		h(w, r)
+	}
+}
+
+// guardGet enforces a loopback Host on read-only (GET) endpoints. No CSRF token
+// is required to read, but the Host check stops a DNS-rebinding page from
+// reading the user's job data, resume keywords, salary target, or VA email
+// (v5.0 — these GET handlers previously had no Host validation).
+func (d *dashboardServer) guardGet(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !loopbackHost(r) {
+			writeJSONError(w, http.StatusForbidden, "loopback only")
 			return
 		}
 		h(w, r)

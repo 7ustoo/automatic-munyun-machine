@@ -1,114 +1,42 @@
 {
   "_comment": "Automatic Munyun Machine \u2014 user config. Copy to config.json (which is gitignored) and edit. Run /update on the bot to pick up changes without restart.",
   "user": {
-    "name": "Justin",
-    "salaryFloorUsd": 90000,
-    "maxYoeAcceptable": 5
+    "name": "",
+    "salaryFloorUsd": 0,
+    "maxYoeAcceptable": 100,
+    "_comment": "Filled in during setup. salaryFloorUsd 0 = no floor; maxYoeAcceptable 100 = effectively no cap (setup asks for real values)."
   },
-  "queries": [
-    {
-      "key": "IAM",
-      "term": "IAM Engineer"
-    },
-    {
-      "key": "CloudIAM",
-      "term": "Cloud IAM Engineer"
-    },
-    {
-      "key": "Identity",
-      "term": "Identity Engineer"
-    },
-    {
-      "key": "CloudSec",
-      "term": "Cloud Security Engineer"
-    },
-    {
-      "key": "Cyber",
-      "term": "Cybersecurity Engineer"
-    },
-    {
-      "key": "InfoSec",
-      "term": "Information Security Engineer"
-    },
-    {
-      "key": "M365",
-      "term": "Microsoft 365 Engineer"
-    },
-    {
-      "key": "M365Admin",
-      "term": "M365 Administrator"
-    },
-    {
-      "key": "Linux",
-      "term": "Linux Engineer"
-    },
-    {
-      "key": "LinuxAdmin",
-      "term": "Linux Administrator"
-    },
-    {
-      "key": "SysAdmin",
-      "term": "Systems Administrator"
-    },
-    {
-      "key": "CloudEng",
-      "term": "Cloud Engineer"
-    },
-    {
-      "key": "SOC",
-      "term": "SOC Analyst"
-    },
-    {
-      "key": "Detection",
-      "term": "Detection Engineer"
-    },
-    {
-      "key": "PAM",
-      "term": "PAM Engineer"
-    }
-  ],
+  "queries": [],
+  "_queriesComment": "Left EMPTY on a fresh install — setup fills these from YOUR resume (role-suggester), so the app is never pre-tailored to someone else's field. Add/remove terms anytime from the dashboard Searches page or the bot's /jobs add. With zero queries the batch is empty until you add some (that is intentional — no jobs beats wrong-field jobs).",
   "search": {
     "mode": "titles",
-    "_comment": "v2.0.3: what /jobs suggest and wizard step 5 propose. titles (default) = full job titles like 'IAM Engineer' \u2014 precise searches. keywords = short domain terms like 'iam', 'm365', 'linux' \u2014 broader nets; the CV-match scorer and matchFloorPercent handle precision. Switch anytime from the bot: /jobs mode titles|keywords. The scraper itself just searches whatever strings are in queries[]."
+    "_comment": "v2.0.3: what /jobs suggest and wizard step 5 propose. titles (default) = full job titles like 'IAM Engineer' \u2014 precise searches. keywords = short domain terms like 'iam', 'm365', 'linux' \u2014 broader nets; the CV-match scorer and matchFloorPercent handle precision. Switch anytime from the bot: /jobs mode titles|keywords. The scraper itself just searches whatever strings are in queries[].",
+    "workplaceTypes": [
+      "Remote"
+    ],
+    "_workplaceTypesValues": "v5.0: which workplace arrangements to search. Any of: Remote, Hybrid, On-Site. Default ['Remote'] (unchanged from earlier versions). Pick from dashboard Settings; e.g. ['On-Site','Hybrid'] for local jobs, or all three for everything.",
+    "location": "",
+    "_locationComment": "v5.0: optional location (city, state, or country) applied to your search \u2014 most useful with On-Site/Hybrid. Empty = no location constraint (nationwide/global)."
+  },
+  "sources": {
+    "_comment": "v5.0: pull jobs straight from company ATS job boards (public, official feeds) IN ADDITION to hiring.cafe \u2014 no login, no scraping, more reliable. OFF until you list companies. Each entry is the board token from a company's careers URL: greenhouse boards.greenhouse.io/<token>, lever jobs.lever.co/<token>, ashby jobs.ashbyhq.com/<token>. Add them from the dashboard Searches page.",
+    "greenhouse": [],
+    "lever": [],
+    "ashby": [],
+    "remoteConfigUrl": "",
+    "_remoteConfigUrlComment": "v5.0: optional URL to a JSON file (e.g. a GitHub raw link) that can add source companies / adapter tweaks remotely, so a site change is a same-day fix without an app update. Empty = off. Fetched read-only, cached, and merged over local sources."
   },
   "filters": {
-    "filterClearance": true,
+    "filterClearance": false,
+    "_filterClearanceComment": "Default off (v5.0) — when on, drops jobs requiring a security clearance OR US citizenship. That is the right filter only for some users, so a fresh install includes everything and you opt in from Settings.",
     "applicationFormEase": "all",
     "_applicationFormEaseValues": "all (default) | simple (only Simple Apps - no account creation) | long (only Time Consuming Apps)",
     "maxJobAge": "any",
     "_maxJobAgeValues": "v2.5: how recent a job must be, filtered on the posted-age shown on each hiring.cafe card. today | 3days | week | month | any (default, no age filter). Also accepts a raw number of days. Set from the dashboard's Recency dropdown.",
-    "skipCompanies": [
-      "Alpha FMC",
-      "ECS",
-      "Experis",
-      "Verinext",
-      "First Citizens",
-      "AMD"
-    ],
-    "dropTitlePatterns": [
-      "Manager",
-      "Principal",
-      "Director",
-      "Head of",
-      "VP",
-      "Vice President",
-      "Chief",
-      "Solutions Engineer",
-      "Sales Engineer",
-      "Forward Deployed",
-      "Technical Account",
-      "Customer Success",
-      "Solutions Architect",
-      "Pre-Sales",
-      "Sales Solution",
-      "Help Desk",
-      "Desktop Support",
-      "Service Desk",
-      "Frontend",
-      "UI Engineer",
-      "Recruiter",
-      "Marketing"
-    ]
+    "skipCompanies": [],
+    "_skipCompaniesComment": "Companies to never show — add your own from the dashboard Searches page or the bot's /skip. Empty by default (v5.0).",
+    "dropTitlePatterns": [],
+    "_dropTitlePatternsComment": "Case-insensitive title substrings to drop before scoring (e.g. add 'Manager' if you only want individual-contributor roles, or 'Intern'). Empty by default (v5.0) so no job class is silently hidden; tune from the dashboard Searches page."
   },
   "scoring": {
     "titleWeight": 10,
@@ -149,11 +77,12 @@
     "_comment": "v2.0.1: which browser the scraper drives. auto (default) = installed Google Chrome, then Microsoft Edge, then Playwright's downloaded Chromium. Force with channel: chrome | msedge, or point executablePath at any Chromium-family binary (Brave, distro chromium). AMM always uses its own profile in data/browser-profile - your personal browsing is never touched."
   },
   "weather": {
-    "city": "Miami",
-    "lat": 25.7617,
-    "lon": -80.1918,
+    "city": "",
+    "lat": 0,
+    "lon": 0,
     "tempUnit": "fahrenheit",
-    "timezone": "America/New_York"
+    "timezone": "",
+    "_comment": "v5.0: optional 'good morning' weather line. Empty city = weather skipped. Setup geocodes your city and sets lat/lon/timezone; tempUnit is fahrenheit | celsius."
   },
   "schedule": {
     "time": "07:00",

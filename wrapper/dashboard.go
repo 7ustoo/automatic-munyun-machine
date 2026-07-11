@@ -81,18 +81,21 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/", d.handleIndex)
 	mux.HandleFunc("/favicon.png", d.handleFavicon) // v2.2: AMM icon in the app window
 	mux.HandleFunc("/favicon.ico", d.handleFavicon)
-	mux.HandleFunc("/api/status", d.handleStatus)
-	mux.HandleFunc("/api/batch", d.handleBatch)       // GET: full ranked batch (all jobs + matched)
-	mux.HandleFunc("/api/history", d.handleHistory)   // GET: daily snapshots → Trends + leaderboard (v4.6)
-	mux.HandleFunc("/api/settings", d.handleSettings) // GET: editable knobs + search terms
-	mux.HandleFunc("/api/export", d.handleExport)   // GET ?format=txt|csv: number·title·apply-link export (v2.4)
-	mux.HandleFunc("/api/jobs-txt", d.handleExport) // legacy alias (pre-v2.4 bookmark) → txt export
+	// v5.0: read-only GETs are wrapped in guardGet (loopback-Host check) so a
+	// DNS-rebinding page can't read the user's job data / resume keywords / VA
+	// email. No CSRF token needed to read; the Host check is the gate.
+	mux.HandleFunc("/api/status", d.guardGet(d.handleStatus))
+	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))       // GET: full ranked batch (all jobs + matched)
+	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory))   // GET: daily snapshots → Trends + leaderboard (v4.6)
+	mux.HandleFunc("/api/settings", d.guardGet(d.handleSettings)) // GET: editable knobs + search terms
+	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))   // GET ?format=txt|csv: number·title·apply-link export (v2.4)
+	mux.HandleFunc("/api/jobs-txt", d.guardGet(d.handleExport)) // legacy alias (pre-v2.4 bookmark) → txt export
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
 	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))       // v4.0
-	mux.HandleFunc("/api/config/backups", d.handleConfigBackups)            // v4.0 (read-only)
+	mux.HandleFunc("/api/config/backups", d.guardGet(d.handleConfigBackups)) // v4.0 (read-only)
 	mux.HandleFunc("/api/config/restore", d.guardPost(d.handleConfigRestore)) // v4.0
 	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
 	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
@@ -115,13 +118,13 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/email/send", d.guardPost(d.handleEmailSend))
 	mux.HandleFunc("/api/email/disable", d.guardPost(d.handleEmailDisable))
 	// v2.5: resume rescan + self-update.
-	mux.HandleFunc("/api/update/check", d.handleUpdateCheck) // GET: current vs latest
+	mux.HandleFunc("/api/update/check", d.guardGet(d.handleUpdateCheck)) // GET: current vs latest
 	mux.HandleFunc("/api/resume/upload", d.guardPost(d.handleResumeUpload))
 	mux.HandleFunc("/api/resume/apply", d.guardPost(d.handleResumeApply))
 	mux.HandleFunc("/api/update/apply", d.guardPost(d.handleUpdateApply))
 	// v2.6: profile CRUD from the dashboard. list is read-only (GET);
 	// add/rename/delete/switch mutate config.json + data dirs (POST + CSRF).
-	mux.HandleFunc("/api/profile/list", d.handleProfileList)
+	mux.HandleFunc("/api/profile/list", d.guardGet(d.handleProfileList))
 	mux.HandleFunc("/api/profile/add", d.guardPost(d.handleProfileAdd))
 	mux.HandleFunc("/api/profile/rename", d.guardPost(d.handleProfileRename))
 	mux.HandleFunc("/api/profile/delete", d.guardPost(d.handleProfileDelete))

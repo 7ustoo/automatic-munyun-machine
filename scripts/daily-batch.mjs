@@ -36,6 +36,7 @@ import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './e
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
+import { fetchAllSources } from './sources/index.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
 // message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
@@ -221,9 +222,15 @@ async function getWeather() {
 
 // ---------- chrome ----------
 // Queries come from config.json. Falls back to a sensible default if missing.
+// v5.0: no configured queries → EMPTY (an honest empty batch), never a fallback
+// to someone else's field. Setup fills queries from the user's own resume.
 const QUERIES = (CFG.queries && CFG.queries.length)
   ? CFG.queries.map(q => [q.key, q.term])
-  : [['IAM', 'IAM Engineer'], ['CloudSec', 'Cloud Security Engineer'], ['Cyber', 'Cybersecurity Engineer']];
+  : [];
+// v5.0: key→term lookup so a job's `q` (and the dashboard source pill /
+// leaderboard) shows the human search TERM, not the mashed internal key
+// (e.g. 'SeniorSecurityEngine').
+const KEY_TO_TERM = Object.fromEntries(QUERIES.map(([k, t]) => [k, t]));
 
 const EXTRACT_FN = `(() => {
   // Reject candidate titles that are actually metadata bleed (e.g. the line
@@ -335,8 +342,28 @@ async function checkBrowsable(page) {
 // sessions (the reason v1.0.x removed it — back then the scrape ran unauth),
 // so we send it ONLY when this run has verified an authenticated session;
 // sending it signed-out is a silent no-op but would misrepresent the mode.
-export function buildSearchState(term, { formEaseFilter = null, accountDedup = false } = {}) {
-  const s = { searchQuery: term, workplaceTypes: ['Remote'] };
+// v5.0: friendly labels → hiring.cafe's workplaceTypes enum. "Remote" is
+// verified; Hybrid/Onsite follow hiring.cafe's convention. Centralized so it's
+// a one-line fix if their enum differs — and the default (Remote) is unchanged,
+// so nothing existing breaks. Empty/garbage → ['Remote'].
+const WORKPLACE_MAP = { 'remote': 'Remote', 'hybrid': 'Hybrid', 'on-site': 'Onsite', 'onsite': 'Onsite', 'on site': 'Onsite', 'in-office': 'Onsite', 'in office': 'Onsite' };
+export function normalizeWorkplaceTypes(arr) {
+  const out = [];
+  for (const w of (Array.isArray(arr) ? arr : [])) {
+    const v = WORKPLACE_MAP[String(w).toLowerCase().trim()];
+    if (v && !out.includes(v)) out.push(v);
+  }
+  return out.length ? out : ['Remote'];
+}
+export function buildSearchState(term, { formEaseFilter = null, accountDedup = false, workplaceTypes = ['Remote'], location = '' } = {}) {
+  const wt = normalizeWorkplaceTypes(workplaceTypes);
+  // Location biases the free-text query (safe — can't break the request shape),
+  // and only when the user wants non-remote jobs (a location on a remote search
+  // just shrinks results). hiring.cafe does full-text matching over the query.
+  const loc = String(location || '').trim();
+  const wantsLocal = wt.some(w => w !== 'Remote');
+  const searchQuery = (loc && wantsLocal) ? `${term} ${loc}` : term;
+  const s = { searchQuery, workplaceTypes: wt };
   if (accountDedup) s.hideJobTypes = ['Saved', 'Applied', 'Viewed'];
   if (formEaseFilter) s.applicationFormEase = formEaseFilter;
   return s;
@@ -425,7 +452,7 @@ async function _scrapeWith(ctx) {
   let runningFreshEstimate = 0;
 
   for (const [key, query] of QUERIES) {
-    const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed });
+    const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
     const seenInQuery = new Set();
@@ -579,6 +606,10 @@ function clusterMultiplier(term) {
 }
 
 const SCORING = CFG.scoring || {};
+// v5.0: ATS source boards (Greenhouse/Lever/Ashby). Inert unless the user lists
+// companies (or a remote config URL) — so existing installs are unaffected.
+const SOURCES = CFG.sources || {};
+const SOURCES_CONFIGURED = ['greenhouse', 'lever', 'ashby'].some(k => Array.isArray(SOURCES[k]) && SOURCES[k].length) || !!(SOURCES.remoteConfigUrl && String(SOURCES.remoteConfigUrl).trim());
 // v4.5: user-selectable batch size (50/100/150/200). Clamped so a hand-edited
 // config can't make the resolve pass visit an unbounded number of job pages.
 const DELIVER_COUNT = clampBatchSize(SCORING.targetJobsPerBatch);
@@ -623,20 +654,32 @@ function writeScrapeStatus(ok, extra = {}) {
 // v1.0 E3 — was previously /\$(\d{2,3})\s*[kK](?!\w)/g which accidentally
 // worked for many ranges by extracting digits, but failed on em-dashes
 // (Windows console encoding) and never parsed comma-separated thousands.
+// v5.0: currency-aware-ish salary parsing. Handles USD/EUR/GBP (and C$/A$)
+// written as "$120k", full-form with comma OR dot thousands ("$120,000",
+// "€60.000", "55,000 GBP"), and HOURLY rates ("$45/hr", "45 per hour") which
+// are annualized at 2080 h/yr. The number is taken as-is (no FX conversion) —
+// documented, and the salary floor defaults to 0 so cross-currency compares
+// don't bite unless the user sets a floor. Returns an array of $K values.
 export function parseSalaryK(text) {
   const out = [];
-  // Pattern A: $XXXk style. Captures number + optional K. Supports en/em dashes between two patterns.
-  const reA = /(?:USD\s*|\$|€|£)?\s*(\d{2,4}(?:[.,]\d{3})?)\s*[kK](?!\w)/g;
-  let m;
-  while ((m = reA.exec(text)) !== null) {
-    const n = parseFloat(m[1].replace(/,/g, ''));
-    if (!isNaN(n) && n >= 30 && n <= 999) out.push(Math.round(n));
+  if (!text) return out;
+  const add = (k) => { if (Number.isFinite(k) && k >= 20 && k <= 999) out.push(Math.round(k)); };
+  // A) "$120k" / "€75K" / "120k" — a number with a K suffix (a lone comma/dot
+  //    here is a decimal separator, e.g. EU "120,5k").
+  for (const m of text.matchAll(/(?:USD|EUR|GBP|C\$|A\$|\$|€|£)?\s*(\d{2,4}(?:[.,]\d{1,2})?)\s*[kK]\b/g)) {
+    add(parseFloat(m[1].replace(',', '.')));
   }
-  // Pattern B: $120,000 style (no K suffix). Convert to K.
-  const reB = /\$\s*(\d{2,3}),(\d{3})(?!\d)/g;
-  while ((m = reB.exec(text)) !== null) {
-    const n = parseFloat(m[1] + m[2]) / 1000;
-    if (!isNaN(n) && n >= 30 && n <= 999) out.push(Math.round(n));
+  // B) Full-form with a thousands separator: "$120,000", "£55,000", "€60.000",
+  //    "120,000 USD". Convert to K.
+  for (const m of text.matchAll(/(?:USD|EUR|GBP|C\$|A\$|\$|€|£)\s?(\d{2,3})[.,](\d{3})(?!\d)/g)) {
+    add(parseInt(m[1] + m[2], 10) / 1000);
+  }
+  for (const m of text.matchAll(/(\d{2,3})[.,](\d{3})\s?(?:USD|EUR|GBP|dollars|euros|pounds)\b/gi)) {
+    add(parseInt(m[1] + m[2], 10) / 1000);
+  }
+  // C) Hourly → annualize at 2080 h/yr. "$45/hr", "45 per hour", "£30 an hour".
+  for (const m of text.matchAll(/(?:USD|EUR|GBP|\$|€|£)?\s?(\d{1,3}(?:\.\d{1,2})?)\s?(?:\/\s?(?:hr|hour)\b|per\s+hour\b|an\s+hour\b|hourly\b)/gi)) {
+    add(parseFloat(m[1]) * 2080 / 1000);
   }
   return out;
 }
@@ -677,8 +720,15 @@ export function termAllowedInText(term, text) {
 // when the CV has detected primary clusters; fail-open otherwise.
 export const OFF_FAMILY_RX = /\b(marketing|sales(?:\s+(?:rep|representative|associate))?|account (?:executive|manager)|business development|recruiter|talent acquisition|human resources|customer (?:success|service|support)|paralegal|attorney|accountant|bookkeeper|nurse|physician|dental|driver|warehouse|forklift|barista|cashier|retail associate|property manager|real estate agent)\b/i;
 export const FAMILY_PENALTY = 0.35;
+// v5.0: the off-family list (OFF_FAMILY_RX) is tech-centric — it names non-tech
+// fields as "off-family". So the penalty may ONLY fire when the user's OWN
+// vertical is tech; otherwise a nurse / sales / finance user would get their own
+// target roles penalized ×0.35. Non-tech users (or an unreadable CV) never get
+// the penalty. Keys match cv-keywords.json's original tech clusters.
+export const TECH_CLUSTER_KEYS = new Set(['iam', 'cloudsec', 'm365', 'devops', 'softwareEng', 'data', 'soc', 'networking', 'design', 'mobile', 'product']);
 function familyPenalty(title) {
-  if (!CV_PRIMARY_CLUSTERS.length || !title || !OFF_FAMILY_RX.test(title)) return 1;
+  const primaryIsTech = CV_PRIMARY_CLUSTERS.some(c => TECH_CLUSTER_KEYS.has(c));
+  if (!primaryIsTech || !title || !OFF_FAMILY_RX.test(title)) return 1;
   for (const t of CLUSTER_TERMS) {
     if (t.length > 2 && termRegex(t).test(title)) return 1;
   }
@@ -793,16 +843,22 @@ export function missingTerms(text, max = 6) {
 // AND ones where the title is generic but the body says "active Secret required".
 const CLEARANCE_RX = /\b(top[\s-]*secret|ts\/sci|\bsecret\s+clearance\b|public[\s-]*trust|polygraph|sf-?86|dod[\s-]*clearance|government[\s-]*clearance|federal[\s-]*clearance|active[\s-]+(security|secret|government)[\s-]+clearance|clearance(?:\s+is)?\s+required|cleared[\s-]+(?:personnel|professional)|able\s+to\s+obtain[^.]{0,40}clearance|must\s+be\s+a\s+u\.?s\.?\s+citizen|us\s+citizenship\s+required)\b/i;
 
-function filterAndDedupe(byQuery) {
+function filterAndDedupe(byQuery, extraCards = []) {
   const all = []; const seen = new Set();
   for (const [q, rows] of Object.entries(byQuery)) {
     for (const r of rows) {
       if (seen.has(r.href)) continue;
-      seen.add(r.href); r.q = q; all.push(r);
+      seen.add(r.href); r.q = KEY_TO_TERM[q] || q; all.push(r);
     }
   }
-  const filterClearance = CFG.filters?.filterClearance !== false; // default true
-  const maxYoe = CFG.user?.maxYoeAcceptable ?? 5;
+  // v5.0: ATS source jobs (pre-normalized, pre-resolved) join the same pool and
+  // pass through the exact same drop rules below. Their `q` is the source name.
+  for (const r of extraCards) {
+    if (!r || seen.has(r.href)) continue;
+    seen.add(r.href); r.q = r.q || r.source || 'ats'; all.push(r);
+  }
+  const filterClearance = CFG.filters?.filterClearance === true; // v5.0: default OFF (opt-in)
+  const maxYoe = CFG.user?.maxYoeAcceptable ?? 100; // v5.0: default effectively no cap
   // v2.5: recency filter. filters.maxJobAge is a preset key (today|3days|
   // week|month|any) or a raw day count; recencyMaxDays → max age in days
   // (null = keep everything). Jobs whose card age we can't read are kept.
@@ -967,7 +1023,12 @@ async function resolveOnePage(page, viewjobUrl) {
 
 async function resolveAll(rows) {
   if (!rows.length) return [];
-  log(`Launching browser for direct-URL resolution (${rows.length} jobs)…`);
+  // v5.0: ATS jobs (from source adapters) already carry their JD + apply URL,
+  // so they skip Playwright entirely. If EVERY shortlisted job is from an ATS,
+  // don't even launch a browser.
+  const preResolve = (r) => ({ directUrl: r.directUrl || r.href, jdText: r.jdText || '' });
+  if (rows.every(r => r.__ats)) return rows.map(preResolve);
+  log(`Launching browser for direct-URL resolution (${rows.filter(r => !r.__ats).length} hiring.cafe jobs)…`);
   const ctx = await launchBrowser();
   try {
     const PAR = 5; // 5 concurrent pages — balances speed vs bot-detection risk
@@ -982,7 +1043,9 @@ async function resolveAll(rows) {
       while (true) {
         const idx = i++;
         if (idx >= rows.length) break;
-        out[idx] = await resolveOnePage(p, rows[idx].href);
+        const r = rows[idx];
+        if (r.__ats) { out[idx] = preResolve(r); if (out[idx].directUrl) resolved++; continue; }
+        out[idx] = await resolveOnePage(p, r.href);
         if (out[idx]?.directUrl) resolved++;
       }
     }));
@@ -1259,7 +1322,13 @@ if (IS_CLI) (async () => {
       }
       throw e;
     }
-    const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery);
+    // v5.0: pull configured ATS boards (best-effort, never throws) and merge
+    // them into the same filter+score pipeline as the hiring.cafe cards.
+    const atsCards = SOURCES_CONFIGURED
+      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
+      : [];
+    if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
+    const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery, atsCards);
     log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance}, droppedStale=${droppedStale})`);
     const applied = loadAppliedHrefs();
     const blockedSeen = loadBlockedSeen(); // decayed: jobs > freshness window are no longer blocked
@@ -1303,6 +1372,7 @@ if (IS_CLI) (async () => {
       const r = shortlist[i];
       r.__direct = resolved[i]?.directUrl || '';
       const jd = resolved[i]?.jdText || '';
+      r.__jd = jd; // v5.0: keep the JD on the row so pass-3 AI rerank survives the sort below
       if (!JD_RESCORE || jd.length < 400) continue;
       const s2 = scoreJob({ title: r.title, cardText: jd });
       r.jdPct = jdScoreToPercent(s2.score);
@@ -1319,9 +1389,12 @@ if (IS_CLI) (async () => {
     if (AI_CFG.enabled && AI_CFG.apiKey) {
       try {
         shortlist.sort(compareJobs);
+        // v5.0 fix: use r.__jd (stashed pre-sort) — resolved[] is aligned to the
+        // PRE-sort order, so resolved[shortlist.indexOf(r)] fed each job another
+        // job's description once the sort reordered the shortlist.
         const candidates = shortlist.slice(0, 40).map((r, i) => ({
           n: i, title: r.title, company: r.company,
-          text: ((resolved[shortlist.indexOf(r)]?.jdText) || r.cardText || '').slice(0, 900)
+          text: (r.__jd || r.cardText || '').slice(0, 900)
         }));
         const cvSummary = {
           titles: CV_TITLES.slice(0, 8), certs: CV_CERTS.slice(0, 8),
