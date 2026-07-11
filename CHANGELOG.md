@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [4.4.2] — 2026-07-11
+
 ### Changed
 
 - Automatic Telegram and email `.txt` attachments now use the same compact `apply-links(date).txt` format as `/export`: number, job title, and direct apply link only. The detailed `jobs(date).txt` remains available locally.
