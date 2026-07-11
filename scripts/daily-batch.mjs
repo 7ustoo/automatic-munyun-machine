@@ -14,7 +14,7 @@
  *   5. Resolves each viewjob URL to its direct ATS URL via 5-page browser
  *      pool (Cloudflare blocks plain Node fetch; browser nav works).
  *   6. Pulls weather from open-meteo (lat/lon/city are user-configurable).
- *   7. Sends chunked HTML messages + jobs(<DATE>).txt attachment + inline
+ *   7. Sends chunked HTML messages + apply-links(<DATE>).txt attachment + inline
  *      callback CTA to Telegram. Persists seen-jobs only after delivery.
  *
  * Prereq: persistent Chromium profile (created on first run / login-once
@@ -33,6 +33,7 @@ import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
 import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
+import { loadExport } from './export-batch.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
 // message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
@@ -1128,6 +1129,17 @@ function writeBatchTxt(top, directUrls, weather, stats) {
   return file;
 }
 
+// The detailed jobs(date).txt remains the local, searchable archive. The file
+// delivered to Telegram/email is intentionally the compact apply-links export:
+// number, job title, and direct apply link only.
+function writeApplyLinksTxt() {
+  const exported = loadExport('txt');
+  if (!exported.ok) throw new Error(exported.error || 'Could not build apply-links export.');
+  const file = path.join(PP.dir, exported.filename);
+  atomicWriteText(file, exported.content);
+  return file;
+}
+
 function writeBatchTsv(top, directUrls, funnel) {
   fs.mkdirSync(PP.dir, { recursive: true });
   const tsv = top.map((r, i) => {
@@ -1352,26 +1364,32 @@ if (IS_CLI) (async () => {
       log('Telegram off — batch ready in the dashboard (last-batch.json) + jobs txt on disk.');
     }
 
-    // Always write the downloadable .txt (it's the disk record + /export
-    // source); only attach it to Telegram when enabled.
+    // Keep the detailed disk archive, but deliver the compact apply-links
+    // file requested for handoff: number, title, and direct apply URL only.
     const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
-    let txtPath = null;
+    let deliveryTxtPath = null;
     try {
-      txtPath = writeBatchTxt(top, directUrls, weather, txtStats);
+      const archiveTxtPath = writeBatchTxt(top, directUrls, weather, txtStats);
+      log(`Wrote detailed batch archive: ${path.basename(archiveTxtPath)}`);
+    } catch (e) {
+      log(`Detailed batch archive write failed (non-fatal): ${e.message}`);
+    }
+    try {
+      deliveryTxtPath = writeApplyLinksTxt();
       if (TELEGRAM_ON) {
-        await tgDocument(txtPath, `📄 jobs(${DATE}).txt — full batch · search-friendly · pull anytime with /export`);
-        log(`Sent batch .txt: ${path.basename(txtPath)}`);
+        await tgDocument(deliveryTxtPath, `📄 apply-links(${DATE}).txt — ${top.length} jobs · number · title · apply link`);
+        log(`Sent apply-links .txt: ${path.basename(deliveryTxtPath)}`);
       } else {
-        log(`Wrote batch .txt: ${path.basename(txtPath)}`);
+        log(`Wrote delivery export: ${path.basename(deliveryTxtPath)}`);
       }
     } catch (e) {
-      log(`Batch .txt write/attach failed (non-fatal): ${e.message}`);
+      log(`Apply-links .txt write/attach failed (non-fatal): ${e.message}`);
     }
 
     // v4.3: optionally email the batch .txt to a VA/recipient. Independent,
     // non-fatal try — a Telegram or email failure must never abort the run or
     // stop the seen-jobs persistence below.
-    if (txtPath && EMAIL_ON && CFG.email?.enabled && CFG.email?.autoSend && String(CFG.email?.to || '').trim()) {
+    if (deliveryTxtPath && EMAIL_ON && CFG.email?.enabled && CFG.email?.autoSend && String(CFG.email?.to || '').trim()) {
       try {
         const to = String(CFG.email.to).trim();
         await sendConfiguredEmail({
@@ -1379,8 +1397,8 @@ if (IS_CLI) (async () => {
           to,
           from: CFG.email.from || env.SMTP_USER,
           subject: renderSubject(CFG.email.subject, DATE),
-          text: `Attached: jobs(${DATE}).txt — today's ranked job batch from Automatic Munyun Machine.`,
-          attachments: [{ filename: path.basename(txtPath), path: txtPath }],
+          text: `Attached: apply-links(${DATE}).txt — today's job titles and direct apply links from Automatic Munyun Machine.`,
+          attachments: [{ filename: path.basename(deliveryTxtPath), path: deliveryTxtPath }],
         });
         log(`Emailed batch .txt to ${to}`);
       } catch (e) {

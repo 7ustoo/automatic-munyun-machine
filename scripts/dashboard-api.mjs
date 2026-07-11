@@ -39,7 +39,7 @@ import {
 } from './profile-store.mjs';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
-import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
+import { withFileLock, atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
 import {
@@ -559,20 +559,19 @@ function profileSwitch(slug) {
 }
 
 // ---- email-to-VA (v4.3) ----
-// Pick the .txt to attach. Prefer the rich jobs(DATE).txt the scraper wrote
-// (title, company, match %, matched terms, apply link); fall back to
-// rebuilding the minimal apply-links list from last-batch.json.
+// Pick the compact apply-links .txt for every email path. The detailed
+// jobs(DATE).txt remains a local archive, not the handoff attachment.
 function resolveBatchAttachment() {
   let date = null;
   try { date = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')).date; } catch {}
   if (date) {
-    const rich = path.join(profilePaths().dir, `jobs(${date}).txt`);
-    if (fs.existsSync(rich)) return { path: rich, filename: `jobs(${date}).txt`, date };
+    const compact = path.join(profilePaths().dir, `apply-links(${date}).txt`);
+    if (fs.existsSync(compact)) return { path: compact, filename: `apply-links(${date}).txt`, date };
   }
   const ex = loadExport('txt');
   if (!ex.ok) return null;
   const tmp = path.join(profilePaths().dir, ex.filename);
-  try { fs.writeFileSync(tmp, ex.content); } catch { return null; }
+  try { atomicWriteText(tmp, ex.content); } catch { return null; }
   return { path: tmp, filename: ex.filename, date, count: ex.count };
 }
 
