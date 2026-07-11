@@ -8,6 +8,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [5.0.0] — 2026-07-11
+
+> **AMM is for everyone now — not just one security engineer.** v5.0 removes every default that was tailored to the original owner, teaches the resume parser 8 non-tech fields, lets you search on-site/hybrid jobs (not just remote), pulls jobs straight from company ATS boards, and fixes 20 bugs the review turned up. A nurse, a sales rep, or an accountant can now install AMM and get relevant jobs from their very first scrape.
+
+### Added
+
+- **Works for any profession, not just tech.** The resume parser learned 8 non-tech domains — **Healthcare & Nursing, Sales, Finance & Accounting, Marketing, Education, Human Resources, Administrative, and Skilled Trades** — with ~200 new titles/skills/certs and matching search-term suggestions. A registered nurse's resume now parses to a `healthcare` primary cluster and suggests *Registered Nurse / Nurse Practitioner / ICU Nurse* (not *IAM Engineer*). The tech-centric "off-family" scoring penalty now applies **only when the user's own field is tech**, so a sales rep's sales roles are never demoted.
+- **Workplace type + location search.** Remote was hardcoded — you can now search **Remote / Hybrid / On-Site** (Settings → Workplace type) and set a **location** for local jobs. Default stays Remote-only, so nothing changes unless you opt in.
+- **Job sources — pull straight from company ATS boards.** New adapters for **Greenhouse, Lever, and Ashby** fetch jobs directly from companies' own public, official career-board feeds (no login, no scraping, more reliable than any single aggregator). Add company slugs on the Searches page. Off until you list companies — additive to hiring.cafe, never a replacement. Includes an optional **remotely-updatable source config** URL so a board change can be fixed same-day without an app update. (`scripts/sources/*`, 8 unit tests.)
+- **DNS-rebinding hardening.** Read-only dashboard endpoints (`/api/status`, `/api/batch`, `/api/settings`, …) now enforce a loopback-Host check (`guardGet`), so a malicious web page can't read your job data, resume keywords, or VA email even if it guesses the port.
+
+### Changed
+
+- **Fresh installs ship blank, not owner-shaped.** Removed the owner's personal company blocklist (AMD/ECS/…), personal title-drop list (Manager/Director/Marketing/Frontend/…), the 15 hardcoded IAM search terms, and the Miami/Fahrenheit/name/$90k defaults from `config.example.json`. A new install now derives its searches from **your** resume; with no resume it stays empty and prompts you to add terms (never someone else's field). Gov-clearance filtering now defaults **off** (opt-in).
+- **Salary parsing goes international + hourly.** `parseSalaryK` now handles £/€ (K-suffix and full-form, comma **and** dot thousands, currency suffixes) and **hourly rates** (annualized at 2080 h/yr) — so a London £55k role or a $45/hr contract parses instead of showing no salary.
+
+### Fixed
+
+- **AI rerank fed each job the wrong description.** After the shortlist sort, the opt-in Claude rerank paired every candidate with a *different* job's JD (an index-alignment bug). Now the JD travels with its job.
+- **Search-style toggle silently reverted.** `search.mode` (titles vs keywords) was written to a config location `read()` never looked at, so flipping it did nothing; `search`/`sources` are now profile-scoped and a one-time migration relocates orphaned keys.
+- **Dashboard could freeze on launch.** An unguarded `localStorage` read in the boot chain threw (and killed the 5s poll loop) when a browser blocks site data — every storage access is now guarded.
+- **Trends page rendered blank** when reached via the address bar / back button (hashchange never loaded it).
+- **Tour** drew a phantom highlight in the corner when started from a non-Jobs page; it now shows the Jobs view first and skips hidden steps.
+- **Duplicate & stale desktop notifications.** The browser notification duplicated the always-on tray toast (and re-fired a stale failure on every launch) — the redundant browser layer was removed; the tray owns OS toasts.
+- **Email button** desynced hash and view (breaking the `/` shortcut); it now uses `navTo`.
+- **Search leaderboard** showed the mangled internal query key (`SeniorSecurityEngine`) instead of the real search term.
+- Batch-history search leaderboard now keys on the human search term; the source pill on each job matches.
+
+### Notes
+
+- **Deferred (not in this release):** OS-keychain storage for secrets (native code across three OSes, deferred to a focused security pass) and full UI localization/i18n (awaiting a target language). Code signing and multi-client mode were explicitly out of scope.
+- `CLAUDE.md`'s dependency note now lists Greenhouse/Lever/Ashby public JSON feeds as optional, user-enabled job sources.
+
 ## [4.6.0] — 2026-07-11
 
 > **See how the hunt is going, tune it from the dashboard, and hear about every batch.** Salary on every job card, a light theme, blocked companies without touching Telegram, desktop notifications even when the app is closed, and a new Trends page that finally remembers yesterday.

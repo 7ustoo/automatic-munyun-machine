@@ -58,13 +58,14 @@ test('queries: strings become {key, term} pairs', () => {
   assert.equal(q[1].key, 'IAM');
 });
 
-test('queries: empty array falls back to example defaults (never a no-op scrape)', () => {
-  // If the user skipped resume upload / suggestion chips, we ship the
-  // example's default 15 IAM/cloud terms rather than an empty query list.
+test('queries: empty stays empty — v5.0 never backfills someone else\'s field', () => {
+  // v5.0: config.example ships with NO queries and buildInitConfig backfills
+  // from it, so a user who skipped resume/suggestions gets an EMPTY query list
+  // (the dashboard then prompts "add search terms") — never the old IAM/cloud
+  // defaults that made every fresh install look like a security engineer's.
   const cfg = buildInitConfig({}, EXAMPLE);
-  assert.ok(cfg.profiles.default.queries.length > 0,
-    'empty user queries should backfill from example.queries');
-  assert.equal(cfg.profiles.default.queries.length, EXAMPLE.queries.length);
+  assert.equal(cfg.profiles.default.queries.length, 0);
+  assert.equal(EXAMPLE.queries.length, 0, 'config.example.json must ship with no queries');
 });
 
 test('queries: blank strings are dropped', () => {

@@ -76,6 +76,15 @@ function settingsGet() {
       showSalary: cfg.display?.showSalary !== false, // v4.6: default on
       scheduleTime: cfg.schedule?.time || '07:00',
       searchMode: cfg.search?.mode === 'keywords' ? 'keywords' : 'titles',
+      // v5.0: workplace-type + location search, and ATS source boards.
+      workplaceTypes: (Array.isArray(cfg.search?.workplaceTypes) && cfg.search.workplaceTypes.length) ? cfg.search.workplaceTypes : ['Remote'],
+      searchLocation: cfg.search?.location || '',
+      sources: {
+        greenhouse: cfg.sources?.greenhouse || [],
+        lever: cfg.sources?.lever || [],
+        ashby: cfg.sources?.ashby || [],
+        remoteConfigUrl: cfg.sources?.remoteConfigUrl || ''
+      },
       maxJobAge: cfg.filters?.maxJobAge || 'any',
       queries: (cfg.queries || []).map(q => q.term),
       // v4.0: Smart match (AI) — the key itself is NEVER returned, only
@@ -115,6 +124,8 @@ function settingsSet(dotPath, jsonValue) {
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.applicationFormEase', 'filters.maxJobAge',
     'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'search.mode',
+    'search.workplaceTypes', 'search.location', // v5.0
+    'sources.greenhouse', 'sources.lever', 'sources.ashby', 'sources.remoteConfigUrl', // v5.0
     'display.showSalary',
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
@@ -148,6 +159,21 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'filters.maxJobAge' && !['today', '3days', 'week', 'month', 'any'].includes(value)) value = 'any';
   if (dotPath === 'search.mode') value = value === 'keywords' ? 'keywords' : 'titles';
   if (dotPath === 'schedule.time' && !/^\d{1,2}:\d{2}$/.test(String(value))) return out({ ok: false, error: 'time must be HH:MM' });
+  // v5.0: workplace types — keep only valid friendly labels; never empty.
+  if (dotPath === 'search.workplaceTypes') {
+    const ok = ['Remote', 'Hybrid', 'On-Site'];
+    value = (Array.isArray(value) ? value : []).filter(w => ok.includes(w));
+    if (!value.length) value = ['Remote'];
+  }
+  if (dotPath === 'search.location') value = String(value || '').trim().slice(0, 80);
+  // v5.0: ATS source token lists — sanitize each board slug (letters/digits/hyphen).
+  if (dotPath === 'sources.greenhouse' || dotPath === 'sources.lever' || dotPath === 'sources.ashby') {
+    value = (Array.isArray(value) ? value : []).map(t => String(t || '').trim()).filter(t => /^[a-z0-9][a-z0-9-]{0,59}$/i.test(t)).slice(0, 100);
+  }
+  if (dotPath === 'sources.remoteConfigUrl') {
+    value = String(value || '').trim();
+    if (value && !/^https:\/\/[^\s]+$/i.test(value)) return out({ ok: false, error: 'remote config URL must start with https://' });
+  }
   cfgRW.set(dotPath, value);
   out({ ok: true, path: dotPath, value });
 }

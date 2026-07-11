@@ -78,6 +78,56 @@ const CLUSTERS = [
     signals: ['NIST 800-53', 'ISO 27001', 'HIPAA', 'PCI-DSS', 'SOC 2', 'FedRAMP', 'HITRUST', 'SOX', 'GRC', 'Audit'],
     suggestions: ['GRC Analyst', 'Compliance Analyst', 'Security Compliance Engineer', 'Risk Analyst', 'IT Auditor'],
     keywords: ['grc', 'compliance', 'audit', 'risk']
+  },
+  // v5.0: non-tech domains — AMM is for everyone, not just IT. Signals below are
+  // terms the resume parser extracts (they live in cv-keywords.json's arrays).
+  {
+    name: 'Healthcare & Nursing',
+    signals: ['Registered Nurse', 'BLS', 'ACLS', 'Epic', 'Patient Care', 'Medication Administration', 'CNA', 'Phlebotomy', 'Vital Signs', 'BSN', 'RN'],
+    suggestions: ['Registered Nurse', 'Nurse Practitioner', 'ICU Nurse', 'ER Nurse', 'Charge Nurse', 'Case Manager', 'Clinical Coordinator'],
+    keywords: ['nurse', 'registered nurse', 'patient care', 'healthcare']
+  },
+  {
+    name: 'Sales & Business Development',
+    signals: ['Salesforce', 'Cold Calling', 'Lead Generation', 'Pipeline Management', 'B2B Sales', 'Prospecting', 'Account Management', 'SaaS Sales', 'Quota Attainment'],
+    suggestions: ['Account Executive', 'Sales Manager', 'Business Development Manager', 'Account Manager', 'Sales Representative', 'Regional Sales Manager'],
+    keywords: ['sales', 'account executive', 'business development']
+  },
+  {
+    name: 'Finance & Accounting',
+    signals: ['QuickBooks', 'GAAP', 'Financial Reporting', 'Account Reconciliation', 'General Ledger', 'CPA', 'Accounts Payable', 'Budgeting', 'Financial Modeling'],
+    suggestions: ['Accountant', 'Financial Analyst', 'Staff Accountant', 'Controller', 'Senior Accountant', 'Bookkeeper'],
+    keywords: ['accountant', 'financial analyst', 'accounting']
+  },
+  {
+    name: 'Marketing & Communications',
+    signals: ['SEO', 'Google Analytics', 'Google Ads', 'Content Marketing', 'Social Media Marketing', 'Email Marketing', 'Marketing Automation', 'PPC', 'Copywriting'],
+    suggestions: ['Marketing Manager', 'Digital Marketing Manager', 'Content Marketing Manager', 'Social Media Manager', 'SEO Specialist', 'Marketing Coordinator'],
+    keywords: ['marketing', 'digital marketing', 'seo']
+  },
+  {
+    name: 'Education & Teaching',
+    signals: ['Lesson Planning', 'Curriculum Development', 'Classroom Management', 'Google Classroom', 'IEP', 'Differentiated Instruction', 'Teaching Certification', 'TESOL'],
+    suggestions: ['Teacher', 'Elementary Teacher', 'High School Teacher', 'Instructional Designer', 'Special Education Teacher', 'Substitute Teacher'],
+    keywords: ['teacher', 'teaching', 'education']
+  },
+  {
+    name: 'Human Resources',
+    signals: ['Workday HCM', 'BambooHR', 'Recruiting', 'Onboarding', 'Employee Relations', 'HRIS', 'Talent Acquisition', 'PHR', 'SHRM-CP', 'Benefits Administration'],
+    suggestions: ['HR Manager', 'HR Generalist', 'Recruiter', 'Talent Acquisition Specialist', 'HR Business Partner', 'HR Coordinator'],
+    keywords: ['human resources', 'hr', 'recruiter']
+  },
+  {
+    name: 'Administrative & Office',
+    signals: ['Microsoft Office', 'Calendar Management', 'Data Entry', 'Travel Coordination', 'Office Management', 'Expense Reports', 'Meeting Scheduling'],
+    suggestions: ['Administrative Assistant', 'Executive Assistant', 'Office Manager', 'Administrative Coordinator', 'Office Administrator'],
+    keywords: ['administrative assistant', 'executive assistant', 'office manager']
+  },
+  {
+    name: 'Skilled Trades & Operations',
+    signals: ['Preventive Maintenance', 'Blueprint Reading', 'HVAC Repair', 'Electrical Wiring', 'OSHA Safety', 'Forklift Operation', 'MIG Welding', 'OSHA 30', 'EPA 608'],
+    suggestions: ['Maintenance Technician', 'HVAC Technician', 'Electrician', 'Facilities Technician', 'Field Service Technician', 'Diesel Mechanic'],
+    keywords: ['maintenance technician', 'hvac', 'electrician']
   }
 ];
 

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Automatic Munyun Machine (AMM) — a local-first Windows tool that scrapes hiring.cafe daily, ranks 100 jobs against the user's CV, and pushes them to Telegram. Pure Node.js + Playwright; no server, no cloud, no third-party APIs beyond hiring.cafe / open-meteo / Telegram / Gmail SMTP (v4.3, optional — the user connects their own Gmail to email batches to a VA; the one non-trivial runtime dep is `nodemailer`, zero-dep and vendored). Targets non-technical end users installed via a one-liner; setup is wizard-driven.
+Automatic Munyun Machine (AMM) — a local-first Windows tool that scrapes hiring.cafe daily, ranks up to 200 jobs against the user's CV, and pushes them to Telegram. Pure Node.js + Playwright; no server, no cloud, no third-party APIs beyond hiring.cafe / open-meteo / Telegram / Gmail SMTP (v4.3, optional — the user connects their own Gmail to email batches to a VA; the one non-trivial runtime dep is `nodemailer`, zero-dep and vendored) / the public Greenhouse·Lever·Ashby job-board JSON feeds (v5.0, optional — additive "job sources", off until the user lists companies; plain `fetch`, no dep). v5.0 also made AMM profession-agnostic: the resume parser and role-suggester cover non-tech fields (healthcare, sales, finance, marketing, education, HR, admin, trades), and `config.example.json` ships with no owner-specific defaults. Targets non-technical end users installed via a one-liner; setup is wizard-driven.
 
 `README.md` is the user-facing surface. `CONTEXT.md` is the running state-of-the-project doc — read it before making structural changes, and update it after any commit that adds a command, file, or schema field.
 
