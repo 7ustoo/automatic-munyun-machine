@@ -1,313 +1,276 @@
-# Automatic Munyun Machine (AMM)
+# Automatic Munyun Machine
 
-> Every weekday morning, 100 jobs sorted by how well they match your CV — in a clean desktop dashboard, with one-click apply. Optionally pushed to your phone over Telegram too. Runs on Windows, macOS, and Linux.
+> Your resume in. Your best job matches out.
 
-## What it does
+**AMM** is a local-first desktop app that finds jobs, ranks them against your resume, and gives you a focused batch of **50–200 matches**. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
 
-- **Daily 100-job batch.** Scrapes hiring.cafe across as many search queries as you configure (default ships with 16; add more with the dashboard or `/jobs add`).
-- **CV-aware ranking.** Parses your resume, scores each job by keyword overlap, sorts top→bottom by match %.
-- **Filters out the noise.** Drops manager/principal/director/sales-engineer titles, government clearance roles, jobs above your YOE limit, companies you've blacklisted.
-- **Desktop dashboard (primary).** A local control surface in your browser — see the ranked batch, open jobs to apply, and click **Scrape now** for a fresh batch. Opened from the system-tray icon, which also shows real-time health (green/yellow/red).
-- **Telegram (optional, since v2.1).** Want batches on your phone too? Turn Telegram on right from the dashboard — paste a bot token, connect your chat, done. Skip it and AMM is a pure desktop app; no bot token needed. When on, you also get `/scrape`, `/save N`, `/applied N`, `/reauth`, `/pause` from your phone.
-- **Export your apply links as .txt, .csv, or Excel .xlsx.** One click in the dashboard (or `/export` on Telegram) downloads the latest batch as a clean list — number, job title, apply link. The automatic Telegram and email attachments use that same compact `apply-links(YYYY-MM-DD).txt` format. The `.xlsx` workbook has real clickable hyperlinks; the detailed `jobs(YYYY-MM-DD).txt` remains a local archive.
-- **Email the batch to a helper (v4.4).** Hand off applying to someone else — a virtual assistant, say. Connect Gmail from System → **Email** using Google's browser consent screen; AMM requests send-only permission and cannot read or delete mail. Click **Email** next to Export or turn on **Auto-send** for every morning. Gmail App Password SMTP remains available under Advanced setup. Authorization stays on this computer.
-- **Full control over what you search (v2.5).** From the dashboard: filter jobs by recency (posted today / last 3 days / this week / this month / any), rescan a new resume to re-tune your CV match and get fresh search-term suggestions, and edit every filter (YOE, salary floor, match floor, clearance, application forms, search terms) live.
-- **Automatic updates (v2.5).** The dashboard tells you when a new version is out and updates itself in one click — silent download, in-place install, and relaunch. No more re-downloading the installer by hand.
-- **Local-first.** Everything runs on your machine. Nothing leaves your computer except (if you enable it) the Telegram messages.
+**Free · Private · Windows, macOS, and Linux · Built for any profession**
+
+[Install](#install) · [How it works](#how-it-works) · [Features](#features) · [Privacy](#privacy) · [Troubleshooting](#troubleshooting)
+
+---
+
+## What AMM does
+
+1. **Reads your resume** and identifies relevant titles, skills, certifications, and experience.
+2. **Finds jobs** on hiring.cafe and optional Greenhouse, Lever, and Ashby company boards.
+3. **Filters the noise** using your location, workplace preference, experience limit, blocked companies, recency, and other settings.
+4. **Ranks each job** against your resume using the listing and full job description.
+5. **Delivers a daily shortlist** in the desktop dashboard, with optional Telegram and email handoff.
+
+AMM supports technical and non-technical careers, including healthcare, sales, finance, marketing, education, HR, administration, skilled trades, and more.
+
+## Why use it?
+
+- **Stop repeating the same searches.** AMM runs them on your schedule.
+- **See the strongest matches first.** Every job includes a match score and explanation.
+- **Apply faster.** AMM resolves direct employer application links.
+- **Keep control.** Choose 50, 100, 150, or 200 jobs per batch and tune every search or filter.
+- **Keep your data local.** Your resume, history, settings, and browser session stay on your computer.
+
+## Features
+
+### One dashboard for the whole search
+
+- Ranked jobs with search, sorting, match filters, salary, and source details
+- **Apply**, **Save**, **Applied**, and **Why this matched** actions
+- Resume rescan and automatic search-term suggestions
+- Remote, hybrid, and on-site searches with optional location
+- Blocked companies, job age, experience, salary, clearance, and application-form controls
+- Multiple profiles, each with its own resume, searches, settings, and history
+- Trends and a search-term leaderboard to show which searches produce the best matches
+- Light and dark themes, desktop notifications, exports, and one-click manual scrapes
+
+### More than one job source
+
+AMM searches hiring.cafe and can also read public job-board feeds directly from companies using:
+
+- Greenhouse
+- Lever
+- Ashby
+
+Company-board sources are optional and disabled until you add them.
+
+### Optional delivery
+
+The desktop dashboard is the primary app. Extra delivery channels are optional:
+
+- **Telegram:** receive batches and run commands from your phone
+- **Email:** send the apply-link list to yourself or a helper through Gmail
+- **Export:** download `.txt`, `.csv`, or `.xlsx` files with direct apply links
+
+### Explainable matching
+
+AMM first scores the job card, then fetches and scores the full description. It checks role-family fit, handles ambiguous terms, and uses salary only as a tie-breaker. You can inspect the score journey and missing terms for every job.
+
+An optional bring-your-own Anthropic key can add a final Claude rerank. It is off by default.
+
+---
 
 ## Install
 
-### Option 1 — Native installer (recommended for non-developers)
+### Native installer — recommended
 
-Grab the platform-appropriate artifact from the [latest GitHub release](https://github.com/7ustoo/automatic-munyun-machine/releases/latest):
+Download the correct file from the [latest GitHub release](https://github.com/7ustoo/automatic-munyun-machine/releases/latest):
 
-| Platform | Artifact | Verify |
-|---|---|---|
-| Windows | `amm-setup-vX.Y.Z.exe` | Right-click → Properties → Digital Signatures (signed via Microsoft Trusted Signing when available) |
-| macOS | `amm-vX.Y.Z.dmg` | `spctl --assess --type install <amm.dmg>` (notarized via Apple Developer ID when available) |
-| Linux (Debian/Ubuntu) | `amm_X.Y.Z_all.deb` | `dpkg-sig --verify` against `keys/amm-release.gpg` |
-| Linux (any distro) | `amm-vX.Y.Z-x86_64.AppImage` | `gpg --verify amm-vX.Y.Z-x86_64.AppImage.sig amm-vX.Y.Z-x86_64.AppImage` |
+| Platform | Download |
+|---|---|
+| Windows | `amm-setup-vX.Y.Z.exe` |
+| macOS | `amm-vX.Y.Z.dmg` |
+| Debian / Ubuntu | `amm_X.Y.Z_all.deb` |
+| Other Linux | `amm-vX.Y.Z-x86_64.AppImage` |
 
-Download, double-click (or `sudo dpkg -i amm_X.Y.Z_all.deb` on Linux), follow the wizard.
+Open the installer and follow the in-app setup.
 
-> If signing keys aren't configured for a release, artifacts ship unsigned. Windows SmartScreen says "Unknown Publisher" → *More info* → *Run anyway*. macOS Gatekeeper says "unverified developer" → right-click → Open. Functionality is identical.
+> Release artifacts may be unsigned when platform signing credentials are unavailable. Verify that the download came from this repository's Releases page.
 
-### Option 2 — One-line install
+### One-line install
 
-**Windows (PowerShell):**
+Windows PowerShell:
+
 ```powershell
 iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.ps1 | iex
 ```
 
-**macOS / Linux (bash):**
+macOS or Linux:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/install.sh | bash
 ```
 
-Both:
-1. Install Node.js + Git (via winget / brew / apt / dnf) if missing
-2. Clone the repo to the platform-appropriate dir (`%LOCALAPPDATA%\automatic-munyun-machine\` on Windows, `~/Library/Application Support/automatic-munyun-machine/` on macOS, `~/.local/share/automatic-munyun-machine/` on Linux)
-3. Install npm deps. Since v2.0.1 AMM drives your installed Chrome/Edge (with its own private profile) — the ~150 MB Playwright Chromium download only happens if you have neither.
-4. Launch the interactive setup wizard
+### Manual install
 
-### Option 3 — Manual install
+Requires Node.js 18+ and Git:
 
 ```bash
 git clone https://github.com/7ustoo/automatic-munyun-machine.git
 cd automatic-munyun-machine
 npm install
-npx playwright install chromium   # only needed if you have neither Chrome nor Edge installed
-node scripts/setup-wizard.mjs
+npm run setup
 ```
 
-## Setup wizard — ~3 minutes
+AMM uses an installed Chrome or Edge browser when available. It downloads Playwright Chromium only when neither is present.
 
-1. **Telegram phone notifications (optional).** Default is **no** — AMM is desktop-first, so you can skip the @BotFather token entirely and use the dashboard. Say yes only if you also want batches pushed to your phone (you can also turn it on later from the dashboard's Telegram panel).
-2. **Chat ID.** *(only if you opted into Telegram)* Send any message to your bot, wizard auto-detects your chat ID.
-3. **hiring.cafe login.** Browser opens, you sign in with Google once. Session persists.
-4. **Resume.** Three options:
-   - **Pick from disk** *(default)* — opens a Windows file picker dialog. Click your PDF / DOCX / MD resume.
-   - **Upload via Telegram later** — skip the wizard step, send `/resume` to the bot once setup finishes and attach your CV.
-   - **Type the path manually** — fallback for headless installs or weird environments.
-5. **Auto-suggested search terms.** Pick a search style — full job titles ("IAM Engineer", precise) or short keywords ("iam", "m365", "linux" — broader nets, the CV-match ranking does the filtering) — then the wizard reads your CV and proposes 10-12 terms. Accept all, pick a subset, or keep defaults. Switch styles anytime with `/jobs mode`. (Skipped if you uploaded later — defaults apply until you run `/jobs suggest` post-upload.)
-6. **Years of experience.** Max YOE you'd accept on a job listing.
-7. **Salary floor.** Used for ranking (bonus above floor, penalty below).
-8. **Clearance filter.** Toggle on/off — drop or include gov clearance jobs.
-9. **Your city.** Auto-geocoded for the morning weather report.
-10. **Schedule + finalize.** Pick time + days. Wizard registers the scheduler, starts AMM (the tray app), and confirms it's running. Open the dashboard from the tray menu and click **Scrape now** for your first batch. (If you connected Telegram, you also get a ✅ ping there.)
+---
 
-## The app
+## First-time setup
 
-Double-click the **Automatic Munyun Machine** icon and it opens as a real app window — the dashboard, with the AMM logo in the title bar. (If it's already running in the background, clicking the icon brings the window up; it auto-starts quietly at login so a window doesn't pop on every boot.) You can also reopen it any time from the tray icon's **Open dashboard**.
+The dashboard walks you through:
 
-It's a local page (`127.0.0.1`, your machine only) where you:
+1. Uploading your resume and confirming suggested searches
+2. Setting basic experience, salary, filter, and schedule preferences
+3. Preparing the hiring.cafe browser session and optionally signing in
+4. Optionally connecting Telegram
+5. Saving the schedule and running your first batch
 
-- see today's ranked batch and apply, save, mark-applied, or see *why* each job matched,
-- click **Scrape now** to pull a fresh batch on demand, or **Download .txt** to save the full batch,
-- tune your settings and search terms,
-- turn **Telegram** on or off — the panel walks you through pasting a bot token, connecting your chat, and enabling phone notifications, with a one-click Disable later.
+Fresh installs start with no profession-specific searches or company filters. Your searches are built from your resume, so AMM does not assume your career field.
 
-It's the primary way to use AMM; Telegram is an optional notification channel layered on top.
+After setup, use **Settings** for workplace type, location, batch size, and advanced filters. Gmail and company-board sources can be connected from the main dashboard.
 
-After setup, the bot runs in the background and delivers a batch every weekday morning. Every wizard answer is later editable from your phone via Telegram commands.
+## How it works
 
-## Telegram commands
+```text
+Schedule or “Scrape now”
+          │
+          ▼
+ hiring.cafe + optional company boards
+          │
+          ▼
+ filter → deduplicate → score full descriptions
+          │
+          ▼
+ local dashboard and batch history
+          │
+          ├── optional Telegram
+          ├── optional email
+          └── TXT / CSV / XLSX export
+```
 
-### Core actions
+The native Go wrapper runs the local dashboard and supervises background work. Node.js and Playwright handle job collection, resume parsing, scoring, and delivery. The dashboard binds to `127.0.0.1`, not your local network or the public internet.
+
+When signed into hiring.cafe, AMM asks the account to hide saved, applied, and viewed jobs. When signed out, AMM uses its local seen-job history.
+
+---
+
+## Useful commands
+
+Most users can do everything from the dashboard.
+
+### Development and manual runs
+
+```bash
+npm run setup          # CLI setup fallback
+npm run daily          # run a batch now
+npm run login          # refresh hiring.cafe sign-in
+npm run parse-resume -- "/path/to/resume.pdf"
+npm test               # Node and Go regression suites
+npm run check          # fast syntax checks
+```
+
+### Telegram essentials
+
 | Command | Action |
 |---|---|
-| `/scrape`, `/daily`, `gm`, `morning` | Run a fresh batch now (1-2 min). Run as often as you want. |
-| `/save N` | Bookmark job #N on hiring.cafe |
-| `/applied N` | Mark applied (also logs to applications.md) |
-| `/why N` | Explain why job #N got its match % |
-| `/export` | Apply-links list from the latest batch (`apply-links(date).txt`): number · job title · apply link |
-| `/export csv` | Same three columns as a plain-text `.csv` sheet (links are text — CSV can't carry hyperlinks) |
-| `/export xlsx` | Same three columns as an Excel `.xlsx` workbook with **clickable** apply links |
+| `/scrape` | Run a fresh batch |
+| `/save N` | Save job number N |
+| `/applied N` | Mark job number N as applied |
+| `/why N` | Explain its match score |
+| `/export` | Export direct apply links |
+| `/settings` | Show current settings |
+| `/jobs` | List or manage search terms |
+| `/resume` | Upload a new resume |
+| `/status` | Check app health |
+| `/help` | Show all available commands |
 
-### Settings — edit from your phone (NEW in v0.3)
-| Command | Action |
-|---|---|
-| `/settings` | Show current config in one message |
-| `/resume` | Upload a new resume (PDF/DOCX/MD); bot re-parses skills |
-| `/jobs` | List current search titles |
-| `/jobs add "term"` | Add a search term (a job title or a keyword) |
-| `/jobs remove "term"` | Remove a search term |
-| `/jobs suggest` | Bot reads your CV and proposes new search terms |
-| `/jobs mode titles\|keywords` | What `/jobs suggest` proposes: full job titles ("IAM Engineer") or short keywords ("iam", "m365", "linux") |
-| `/yoe N` | Set max years of experience |
-| `/salary N` | Set salary floor in $K (e.g. `/salary 120`) |
-| `/batchsize N` | Jobs per batch — `50`, `100`, `150`, or `200` (default `100`) |
-| `/clearance on/off` | Toggle gov clearance filter |
-| `/forms all\|simple\|long` | Application form filter — `all` (default), `simple` (Easy Apply, no account needed), `long` (multi-step apps only) |
-| `/skip <company>` | Never show this company again |
-| `/unskip <company>` | Reverse it |
-| `/city <name>` | Change weather city (auto-geocoded) |
-| `/schedule HH:MM` | Change daily push time |
-
-### Maintenance
-| Command | Action |
-|---|---|
-| `/auth` | Verify hiring.cafe login |
-| `/reauth` | Trigger re-login on your computer |
-| `/pause` | Stop the daily 7am push |
-| `/resume-bot` | Re-enable the daily 7am push |
-| `/forget all` | Wipe the local seen-jobs memory (signed-in installs: your hiring.cafe account may still hide viewed/applied jobs) |
-| `/forget last` | Un-memorize the most recent batch from the local memory |
-| `/cancel` | Cancel a multi-step interaction |
-| `/weather` | Just the weather |
-| `/version` | Show running version + latest on GitHub |
-| `/update` | Pull latest from GitHub + restart bot |
-| `/update skip` | Don't notify about the current latest version |
-| `/update check` | Re-check GitHub for a newer version |
-| `/update notes` | Show release notes for the latest version |
-| `/test`, `/ping` | Bot health check |
-| `/help` | Show this list |
-
-## The dashboard (redesigned in v3.0)
-
-Double-clicking the AMM icon opens the dashboard — the app's primary surface, redesigned in v3.0 as a full application with sidebar navigation:
-
-- **Jobs** — the whole ranked batch with stat tiles (batch size, average match, strong matches), live search (press `/`), match-strength filters, sorting by rank/match/title/company/YOE, per-job match meters, parsed salary (v4.6, toggleable), the source query that found each job, and one-click **Apply / Why / Save / Applied** actions. Export the apply links as `.txt`, `.csv`, or `.xlsx` from the toolbar — or **Email** the batch to a helper (once you've connected Gmail on the System page).
-- **Searches** — add, remove, or clear the terms AMM searches every morning, plus a **Blocked companies** list (v4.6) — jobs from those companies are dropped before scoring.
-- **Resume** — rescan a new resume, flip between title-style and keyword-style suggestions, and apply them as your search list.
-- **Profiles** — add / switch / rename / delete personas, each with its own resume, searches, and history.
-- **Trends** (v4.6) — jobs delivered + average match per day, and a **Search leaderboard** ranking your search terms by the match quality of the jobs they bring, so you know which searches to keep and which to cut.
-- **System** — bot health (alive / stale / dead, uptime, heartbeat), the optional Telegram connection with its full in-app setup flow, and a manual update check.
-- **Settings** — YOE, salary floor, match floor, jobs per batch (50/100/150/200), salary display, scrape time, and all job filters; every change saves instantly.
-
-The dashboard also has a **light theme** (v4.6 — sun/moon toggle in the top bar, follows your OS by default), and AMM raises a **desktop notification** when a batch lands or a scrape fails — from the tray app even when the dashboard window is closed.
-
-First-run setup is a five-step panel in the same window (resume → basics → job-feed warmup → optional Telegram → finish). The dashboard binds to `127.0.0.1` on an OS-assigned port — it is **not reachable from the LAN or the internet** — and auto-refreshes health every 5 seconds. State-changing actions are CSRF-protected with a per-process token.
-
-## Customize
-
-All settings live in `config.json` (created from `config.example.json` by the wizard). Edit at any time and the next run picks up changes:
-
-- **Search queries** — what hiring.cafe searches the bot runs
-- **Filters** — companies to skip, title patterns to drop, clearance toggle
-- **Scoring weights** — how much titles/certs/skills/compliance count
-- **Weather** — your city's lat/lon
-- **Schedule** — time + days
-
-## Data files
-
-| File | Purpose |
-|---|---|
-| `.env` | Telegram credentials (gitignored) |
-| `config.json` | User config (gitignored) |
-| `data/cv-parsed.json` | Parsed resume keywords (gitignored) |
-| `data/cv.md` | Markdown copy of resume (gitignored) |
-| `data/seen-jobs.json` | Local memory of jobs already surfaced — the fallback when signed out; signed-in installs dedup via your hiring.cafe account (v4.3, gitignored) |
-| `data/applications.md` | Application log (gitignored) |
-| `data/browser-profile/` | Playwright Chromium profile with hiring.cafe session (gitignored) |
-| `data/auth-state.json` | Last successful auth timestamp |
-| `data/today-batch-{date}.tsv` | Each day's batch as TSV (machine-readable) |
-| `data/jobs({date}).txt` | Detailed local archive with scores, companies, matched terms, and links. |
-| `data/apply-links({date}).txt` | Compact number · title · direct-link handoff sent through Telegram and email. |
-| `data/daily-batch-{date}.log` | Per-run log |
-| `data/telegram-bot.log` | Bot poll log |
-
-Everything sensitive is gitignored — your token, session cookies, resume, application history all stay local.
+---
 
 ## Privacy
 
-- **Nothing is uploaded.** The only outbound traffic: hiring.cafe (job listings), open-meteo (weather, no API key needed), Telegram (your bot token + chat). Nothing else.
-- **No telemetry.** AMM does not collect, send, or aggregate any usage data.
-- **No third-party APIs.** No OpenAI, no Anthropic, no embedding services. Pure local keyword scoring.
+AMM has **no telemetry** and does not run a hosted backend.
+
+Stored locally:
+
+- Resume and parsed keywords
+- Settings and profiles
+- Browser session
+- Job batches, seen-job history, and application history
+- Telegram, Gmail, or optional AI credentials
+
+Network access happens only when needed for enabled features:
+
+- hiring.cafe and configured company job boards
+- open-meteo for optional weather
+- Telegram or Gmail when connected
+- GitHub for update checks
+- Anthropic only when optional AI reranking is enabled
+
+Sensitive and generated files are excluded from Git through `.gitignore`, including `.env`, `config.json`, and `data/`.
 
 ## Cost
 
-**$0 / month.** Telegram is free. open-meteo is free. Playwright is free. Hiring.cafe scraping uses your own bandwidth.
+Core AMM usage is free. hiring.cafe, public company-board feeds, Telegram, open-meteo, and local scoring do not require a paid AMM service.
 
-## Architecture
-
-```
-                  ┌─────────────────┐
-                  │  config.json    │  ← user-editable
-                  │  cv-parsed.json │
-                  └─────────────────┘
-                          │
-                          ▼
-   ┌─────────────────────────────────────────┐
-   │     scripts/daily-batch.mjs              │
-   │     (Playwright + scoring + Telegram)    │
-   └─────────────────────────────────────────┘
-        ▲                          │
-        │                          ▼
-   ┌──────────┐            ┌────────────────┐
-   │ Task     │            │ Telegram API   │
-   │ Scheduler│            └────────────────┘
-   │ 7am      │
-   └──────────┘            ┌────────────────┐
-                           │ telegram-bot   │ ← polls for /daily,
-                           │     .mjs       │   /save, /applied,
-                           └────────────────┘   /reauth, etc.
-                                  ▲
-                                  │
-                              Your phone
-```
-
-Three independent processes, all reading/writing one shared filesystem. No server, no cloud, no external state.
+Optional Claude reranking uses your own Anthropic API key and may incur Anthropic charges.
 
 ## Requirements
 
-- Windows 10 / 11, macOS 14+ (Sonoma), or any reasonably modern Linux (Ubuntu 22.04+, Fedora 40+, etc.)
-- ~150 MB disk (v2.0.1 uses your installed Chrome/Edge; ~500 MB only if neither exists and Playwright's Chromium gets downloaded)
-- Always-on machine for the 7am push (or use `/daily` on demand)
-- A Telegram account
-- A hiring.cafe account (free; sign in via Google)
+- Windows 10/11, macOS 14+, or a modern Linux distribution
+- Node.js 18+ for script/manual installs; native packages can bundle the runtime
+- Chrome, Edge, or space for Playwright Chromium
+- An internet connection while collecting jobs
+- A machine that is awake at the scheduled time
 
-## Roadmap
+Telegram, Gmail, and a hiring.cafe account are optional. Signing into hiring.cafe is recommended for better deduplication.
 
-- ✅ **v0.2–v0.5** — Setup wizard, 30+ bot commands, smart resume parsing, downloadable `.txt` batch, native file picker, `/update` + `/version`, transient-outage resilience.
-- ✅ **v1.0** — Multi-profile support, inline callback buttons + HMAC sig replay defense, phrase-proximity + role-cluster scoring, out-of-process watchdog, Inno Setup installer, Cloudflare-bypass scraping (no hiring.cafe auth required), pagination + target-driven cross-query early stop.
-- ✅ **v1.1** — **Cross-platform.** macOS (launchd) + Linux (systemd) ports, unified `install.sh`, native file pickers (osascript / zenity / kdialog), `os-paths.mjs` abstraction layer, atomic IO via `proper-lockfile`, `.dmg` / `.deb` / `.AppImage` builders, GitHub Actions CI matrix, code signing scripts. Plus 9 HIGH bug fixes from the v1.0 code review and 41 new unit tests (24 → 65 total).
-- ✅ **v1.2** — **AMM as a real app.** Small Go tray-wrapper binary (~3.6 MB stripped) shows up as `AMM.exe` / `AMM.app` / `amm-tray` in Task Manager + Start menu + Apps & Features. Owns a system-tray icon with heartbeat-driven color (green/yellow/red) and a right-click menu (Status/Pause/Scrape/Telegram/Logs/Restart/Quit). Supervises the node bot as a child process with the same 3-strikes/hour respawn throttle as the watchdog.
-- ✅ **v2.0** *(current)* — **Audit remediation.** Fixed `/update` (silently ran a scrape instead — broken since v0.5), `Security+`/`C++` resume terms never scoring, a PowerShell 5.1 encoding bug that broke task registration, setup declaring success without checking the bot started, concurrent-scrape collisions, update failures leaving broken installs (now rolls back), and second-bot-instance 409s looking like a dead bot. Plus visible installer progress, log rotation, and 11 new regression tests.
-- **Next** — Scam-listing detection + salary database. Plugin architecture for additional job sources (RemoteOK, YC, Greenhouse, Lever, Ashby).
-- **Later** — Embeddings-based ranking + optional LLM rerank (BYO Anthropic key), opt-in salary database, browser extension.
-
-(Tauri desktop GUI was permanently cut in v1.0 — Telegram-first stays the thesis.)
-
-## License
-
-MIT — do whatever you want with it.
-
-## Contributing
-
-Pull requests welcome. Likely-needed contributions:
-- Selectors for new ATS providers in `daily-batch.mjs`
-- Additional keyword domains in `scripts/cv-keywords.json` (data eng, software, design)
-- macOS / Linux distro testing — the v1.1 ports are functionally complete but each new distro/version surfaces small things (especially around launchd plist quirks and systemd user-unit linger semantics)
-
-For a deliberate live Gmail verification, place a Google Desktop OAuth credential at `scripts/google-oauth-client.json` (the file is gitignored), add your account as an OAuth test user, then run `npm run test:gmail-live -- --to you@example.com`. This opens the real consent flow and sends one clearly labeled test message through the Gmail API.
+---
 
 ## Troubleshooting
 
-### Wizard crashed with `spawn powershell ENOENT`
-Your `PATH` is missing `C:\Windows\System32`. Fixed in v0.4.1, but if you're on an older install or it still happens: run `setup-tasks.ps1` directly with the absolute path. In `cmd.exe`:
+### No jobs appear
 
+Make sure you added search terms or company-board sources. Fresh v5 installs intentionally begin without someone else's searches. Then check the latest `data/daily-batch-*.log`.
+
+### hiring.cafe is signed out or blocked
+
+Open **System → hiring.cafe → Sign in**, or run:
+
+```bash
+npm run login
 ```
-C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -ExecutionPolicy Bypass -File "%LOCALAPPDATA%\automatic-munyun-machine\scripts\setup-tasks.ps1"
+
+### Telegram does not respond
+
+Confirm Telegram is enabled in **System**, validate the bot token and chat, then restart AMM from the tray menu.
+
+### The resume picker does not open
+
+Enter the file path manually or use the dashboard upload. Headless sessions may not support a native file picker.
+
+### Need more help?
+
+Check the [open issues](https://github.com/7ustoo/automatic-munyun-machine/issues) or create one with your OS, AMM version, and the relevant log excerpt. Remove personal details and tokens before posting logs.
+
+---
+
+## Contributing
+
+Contributions are welcome. Useful areas include:
+
+- Job-source adapters under `scripts/sources/`
+- Resume vocabulary in `scripts/cv-keywords.json`
+- Cross-platform installer and scheduler testing
+- hiring.cafe selector updates
+
+Before opening a pull request:
+
+```bash
+npm run check
+npm test
+npm run test:ui
 ```
 
-Then start the bot manually:
-```
-schtasks /run /tn munyun-bot
-```
+See [CHANGELOG.md](CHANGELOG.md) for release history and [CONTEXT.md](CONTEXT.md) for the current architecture.
 
-### Bot doesn't reply on Telegram
-1. Verify it's running: `schtasks /query /tn munyun-bot` (look for State: Running).
-2. Restart: `schtasks /run /tn munyun-bot`.
-3. Check the log: `%LOCALAPPDATA%\automatic-munyun-machine\data\telegram-bot.log` (the last few lines tell you what crashed).
-4. Verify your token + chat ID in `.env` are correct — try sending a manual message via:
-   ```
-   node scripts\telegram-send.mjs "test"
-   ```
+## License
 
-### `/scrape` says "session expired"
-Run `/reauth` from your phone — the bot pops a Chromium window on your laptop, you sign in with Google, close the window. Session is saved automatically.
-
-### 0 jobs scraped or DOM-related crash
-hiring.cafe likely changed their HTML structure. Check `data/daily-batch-{date}.log` for the specific error and open an issue with the log attached.
-
-### Wrong jobs in the batch
-Edit your queries / filters from your phone — `/jobs add "Title"`, `/jobs remove "Title"`, `/skip <company>`, `/yoe N`, `/salary N`, `/clearance on/off`. Or edit `config.json` directly and re-run `/scrape`.
-
-### Want to pause or uninstall
-Three symmetric paths — pick whichever matches how you installed:
-
-**From Telegram** *(easiest, works regardless of install method)*:
-- Send `/uninstall` to the bot. Tap `[⚠️ Pause only]` to keep your data, or `[☠️ Wipe everything]` to clear it. Bot stops itself, unregisters all four scheduled tasks, optionally wipes `data/` + `config.json` + `.env`. Install dir is left for you to delete by hand if you want the code gone too.
-
-**From Add/Remove Programs** *(if you used the `.exe` installer)*:
-- Settings → Apps → Automatic Munyun Machine → Uninstall. Runs `uninstall.mjs --mode=wipe` automatically and removes the install dir.
-
-**From PowerShell** *(if you used the one-liner)*:
-```powershell
-iwr -useb https://raw.githubusercontent.com/7ustoo/automatic-munyun-machine/main/scripts/uninstall.ps1 | iex
-```
-Pick `1` for pause or `2` for wipe.
-
-### File picker doesn't open during the resume step
-You're either on a stripped Windows install without `System.Windows.Forms`, or running from a no-GUI session (e.g. SSH). The wizard auto-falls-back to typed-path input — paste the full path to your resume. Or pick option 2 ("upload via Telegram later") and send `/resume` to the bot once setup finishes.
+[MIT](LICENSE)

@@ -9,6 +9,9 @@ config.json
 cv.md
 cv.pdf
 *.docx
+# Chromium/Electron app-window profiles contain cookies, caches, and Safe
+# Browsing databases. Keep the explicit rule even though data/ is also ignored.
+data/app-window/
 data/
 !data/.gitkeep
 

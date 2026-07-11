@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Automatic Munyun Machine (AMM) — a local-first Windows tool that scrapes hiring.cafe daily, ranks up to 200 jobs against the user's CV, and pushes them to Telegram. Pure Node.js + Playwright; no server, no cloud, no third-party APIs beyond hiring.cafe / open-meteo / Telegram / Gmail SMTP (v4.3, optional — the user connects their own Gmail to email batches to a VA; the one non-trivial runtime dep is `nodemailer`, zero-dep and vendored) / the public Greenhouse·Lever·Ashby job-board JSON feeds (v5.0, optional — additive "job sources", off until the user lists companies; plain `fetch`, no dep). v5.0 also made AMM profession-agnostic: the resume parser and role-suggester cover non-tech fields (healthcare, sales, finance, marketing, education, HR, admin, trades), and `config.example.json` ships with no owner-specific defaults. Targets non-technical end users installed via a one-liner; setup is wizard-driven.
+Automatic Munyun Machine (AMM) — a local-first desktop job-search assistant for Windows, macOS, and Linux. It collects jobs from hiring.cafe and optional Greenhouse, Lever, and Ashby public feeds, ranks 50–200 jobs against the user's resume, and presents them in a local dashboard. Telegram, Gmail delivery, and Claude reranking are optional. The Node.js + Playwright runtime is wrapped by a small Go tray/dashboard app; there is no hosted AMM backend. v5.0 is profession-agnostic and ships without owner-specific defaults.
 
 `README.md` is the user-facing surface. `CONTEXT.md` is the running state-of-the-project doc — read it before making structural changes, and update it after any commit that adds a command, file, or schema field.
 
@@ -15,17 +15,17 @@ npm install
 npx playwright install chromium       # one-time; pulls Chromium into the user profile
 
 npm run setup       # dev/CI escape hatch — interactive 10-step CLI wizard. v2.7: end users are onboarded from the dashboard's setup panel (rendered when needsSetup=true); this CLI is not surfaced to end users anywhere anymore.
-npm run daily       # one-shot scrape + Telegram push (also: node scripts/daily-batch.mjs)
+npm run daily       # one-shot scrape + local batch; optional delivery
 npm run bot         # long-running Telegram poller
 npm run login       # opens Chromium so user signs into hiring.cafe (persists session)
 npm run parse-resume <path>   # re-parse CV → data/cv-parsed.json
-npm test            # unit suite via scripts/run-tests.mjs (~160 node + 4 Go tests)
+npm test            # Node regression suite + Go wrapper tests
 npm run check       # fast syntax check (scripts/check-syntax.mjs)
 npm run test:ui     # dashboard UI harness (dev/dashboard-harness/run-all.mjs)
 npm run build:wrapper   # rebuild the Go wrapper (also: cd wrapper && make build)
 ```
 
-A `node:test` suite (no third-party framework — pure Node ≥18 built-in runner) runs through `scripts/run-tests.mjs`: ~20 files under `scripts/__tests__/` (v4-scoring, term-match, salary, role-cluster, profile-store, callback-router HMAC, watchdog, xlsx, job-recency, dashboard-static contract, …) plus Go tests (`go test ./...`) for the wrapper. There is no linter — changes are still validated by running `npm run daily` end-to-end and watching the Telegram output, plus tailing `data/daily-batch-{date}.log` and `data/telegram-bot.log`.
+A `node:test` suite (no third-party framework — pure Node ≥18 built-in runner) runs through `scripts/run-tests.mjs`, followed by Go tests (`go test ./...`) for the wrapper. Dashboard contract and browser harnesses provide additional coverage. Live integration changes still require a deliberate `npm run daily` and review of `data/daily-batch-{date}.log`.
 
 Restart the bot after editing `telegram-bot.mjs`:
 ```powershell
@@ -55,7 +55,7 @@ The wrapper code lives in `wrapper/` (its own Go module, build with `cd wrapper 
 
 **v2.1 — desktop-first, Telegram optional.** The wrapper's localhost dashboard (`wrapper/dashboard.go` + `dashboard.html`) is the primary surface: it serves the ranked batch from `last-batch.json` and has state-changing POST endpoints (`/api/scrape`, `/api/telegram/{validate,detect,save,disable}`) guarded by a per-process CSRF token (`wrapper/dashboard_actions.go`). Telegram is now optional — "is it on" = a token in `.env`, defined once in `scripts/telegram-config.mjs#telegramConfigured` and mirrored in the wrapper's `telegramEnabled`. The supervisor runs the bot poller **only while Telegram is enabled** and idles otherwise (`isSetUp` = config.json exists, decoupled from Telegram). `daily-batch.mjs` no-ops its Telegram sends when off but always writes `last-batch.json` + `jobs(date).txt`. Telegram setup from the GUI flows through `scripts/telegram-setup.mjs` (the wrapper execs it and relays its JSON — never reimplement Telegram in Go). Dashboard action endpoints are backed by `scripts/dashboard-api.mjs`, which the wrapper execs and whose JSON it relays (same pattern) — the Go layer stays a thin shell. v4 added a scrape FAILED banner (`data/scrape-status.json`), a hiring.cafe sign-in status card (`data/hcafe-auth.json`), and config snapshots/restore (`data/backups/`).
 
-1. **`scripts/daily-batch.mjs`** — the scraper. Launches a persistent-profile Playwright Chromium, runs each `config.queries[]` term against hiring.cafe, scores results against `data/cv-parsed.json`, resolves direct ATS apply URLs, and pushes the top 100 to Telegram (chunked messages + a `jobs(YYYY-MM-DD).txt` attachment). Triggered by Task Scheduler `munyun-daily-batch` weekdays at 07:00, by `/scrape` from the bot, or manually via `npm run daily`. Writes `data/last-batch.json` so `/why N` can explain a score after the fact.
+1. **`scripts/daily-batch.mjs`** — the collector and scorer. Searches configured hiring.cafe terms plus optional company-board sources, scores full descriptions against the active resume, resolves direct apply URLs, writes the configured 50–200-job local batch, and optionally delivers it through Telegram/email. Triggered by the platform scheduler, dashboard, bot, or `npm run daily`.
 
 2. **`scripts/telegram-bot.mjs`** — the long-running poller. `getUpdates` every ~3s, dispatches ~30 commands (see README's command tables). Stateful only via `data/bot-offset.json` (poll cursor) + a small in-memory `runningJob` lock. Most settings commands route through `scripts/config-rw.mjs` for atomic writes; commands that mutate scheduling/login spawn helper scripts. Started at logon by Task Scheduler `munyun-bot` via `scripts/start-bot.cmd`.
 

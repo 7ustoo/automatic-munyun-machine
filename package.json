@@ -1,7 +1,7 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "5.0.1",
-  "description": "Daily job batch (50–200, your pick) ranked by CV match, pushed to Telegram. Local-first, free, runs on Windows + macOS + Linux.",
+  "version": "5.2.0",
+  "description": "Local-first desktop job search: 50–200 daily matches ranked against your resume.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",
   "bin": {
@@ -23,12 +23,14 @@
   },
   "keywords": [
     "job-search",
+    "desktop-app",
+    "resume-matching",
     "telegram-bot",
     "playwright",
     "automation",
-    "iam",
-    "cybersecurity",
-    "cloud-security",
+    "greenhouse",
+    "lever",
+    "ashby",
     "hiring-cafe",
     "career-tools"
   ],

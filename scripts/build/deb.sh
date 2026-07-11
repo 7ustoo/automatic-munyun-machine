@@ -70,7 +70,7 @@ mkdir -p "$STAGE/usr/share/applications"
 cat > "$STAGE/usr/share/applications/automatic-munyun-machine.desktop" <<'EOF'
 [Desktop Entry]
 Name=Automatic Munyun Machine
-Comment=Daily 100-job Telegram batch ranked by CV match
+Comment=Daily job matches ranked against your resume
 Exec=/opt/automatic-munyun-machine/wrapper/dist/amm-tray
 Icon=automatic-munyun-machine
 Terminal=false
@@ -90,11 +90,11 @@ Depends: nodejs (>= 18), git, ca-certificates
 Recommends: zenity | kdialog
 Maintainer: Justin Williams <noreply@example.com>
 Homepage: https://github.com/7ustoo/automatic-munyun-machine
-Description: Daily 100-job Telegram batch ranked by CV match
- Automatic Munyun Machine scrapes hiring.cafe daily, ranks the top 100
- jobs against your CV, and pushes them to Telegram. Local-first, free,
- no cloud, no third-party APIs beyond hiring.cafe / open-meteo /
- Telegram. Run 'amm setup' after install to configure.
+Description: Local-first desktop job matching
+ Automatic Munyun Machine collects jobs from hiring.cafe and optional
+ company boards, ranks 50-200 matches against your resume, and presents
+ them in a local dashboard. Telegram and email delivery are optional.
+ Run 'amm setup' after install to configure.
 EOF
 
 # postinst — runs npm install + playwright install (no wizard; user runs `amm setup` interactively)

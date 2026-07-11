@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [5.2.0] — 2026-07-11
+
+### Changed
+
+- Rewrote the README around the current desktop-first v5 experience: configurable 50–200-job batches, profession-agnostic resume matching, optional company-board sources, Telegram/email as opt-in delivery, accurate privacy details, and a shorter setup/troubleshooting path.
+- Aligned package-lock and local wrapper/installer fallback versions with 5.2.0, refreshed contributor context, modernized installer/package descriptions, and explicitly ignored local app-window browser data.
+
 ## [5.0.1] — 2026-07-11
 
 ### Fixed
@@ -875,7 +882,44 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.2.0...HEAD
+[5.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.1...v5.2.0
+[5.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.0...v5.0.1
+[5.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.6.0...v5.0.0
+[4.6.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.5.0...v4.6.0
+[4.5.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.4.2...v4.5.0
+[4.4.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.4.1...v4.4.2
+[4.4.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.4.0...v4.4.1
+[4.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.3.0...v4.4.0
+[4.3.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.2.1...v4.3.0
+[4.2.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.2.0...v4.2.1
+[4.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.1.0...v4.2.0
+[4.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.0.0...v4.1.0
+[4.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v3.0.2...v4.0.0
+[3.0.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v3.0.1...v3.0.2
+[3.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v3.0.0...v3.0.1
+[3.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.9.0...v3.0.0
+[2.9.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.8.0...v2.9.0
+[2.8.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.7.0...v2.8.0
+[2.7.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.6.0...v2.7.0
+[2.6.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.4.1...v2.5.0
+[2.4.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.4.0...v2.4.1
+[2.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.3.0...v2.4.0
+[2.3.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.2.0...v2.3.0
+[2.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.1.0...v2.2.0
+[2.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.0.4...v2.1.0
+[2.0.4]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.0.3...v2.0.4
+[2.0.3]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.0.2...v2.0.3
+[2.0.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v2.0.0...v2.0.1
+[2.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.3.0...v2.0.0
+[1.3.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.2.3...v1.3.0
+[1.2.3]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.2.2...v1.2.3
+[1.2.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.2.1...v1.2.2
+[1.2.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.2.0...v1.2.1
+[1.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.5.0...v1.0.0
 [0.5.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.4.1...v0.5.0
 [0.4.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v0.4.0...v0.4.1

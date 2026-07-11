@@ -484,7 +484,8 @@ export function buildInitConfig(input, defaults = {}) {
 
   // Convert the client's plain string[] queries into the {key, term} shape
   // config-rw expects. Same key-derivation as jobsAdd(). If the user left it
-  // empty, keep the example's defaults so the first scrape isn't a no-op.
+  // empty, preserve the shipping default (also empty in v5.0) so a fresh
+  // install never inherits searches tailored to another profession.
   const inputQueries = Array.isArray(src.queries) ? src.queries : [];
   const queries = inputQueries.length
     ? inputQueries
