@@ -34,6 +34,7 @@ import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
 import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
 import { loadExport } from './export-batch.mjs';
+import { clampBatchSize } from './batch-size.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
 // message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
@@ -411,7 +412,7 @@ async function _scrapeWith(ctx) {
   // pagination, we compute the running fresh-after-dedup count. If it
   // exceeds the target with some headroom for floor losses, we stop
   // scraping additional queries — saves time on heavy-supply days.
-  const TARGET_JOBS = SCORING.targetJobsPerBatch ?? 100;
+  const TARGET_JOBS = DELIVER_COUNT;
   // v2.3: by default search EVERY configured keyword, fully paginated — don't
   // skip later keywords just because the early ones filled the target. Set
   // scoring.searchAllQueries:false to restore the old "stop once we have
@@ -577,6 +578,9 @@ function clusterMultiplier(term) {
 }
 
 const SCORING = CFG.scoring || {};
+// v4.5: user-selectable batch size (50/100/150/200). Clamped so a hand-edited
+// config can't make the resolve pass visit an unbounded number of job pages.
+const DELIVER_COUNT = clampBatchSize(SCORING.targetJobsPerBatch);
 const W_TITLE       = SCORING.titleWeight       ?? 10;
 const W_CERT        = SCORING.certWeight        ?? 5;
 const W_SKILL       = SCORING.skillWeight       ?? 3;
@@ -1268,7 +1272,10 @@ if (IS_CLI) (async () => {
     // v4.0: shortlist WIDER than the final batch — the full-description
     // rescore below re-ranks, so borderline card-scores get a second chance.
     const JD_RESCORE = SCORING.jdRescore !== false; // default on
-    const shortlist = aboveFloor.slice(0, JD_RESCORE ? 130 : 100);
+    // Over-fetch a fixed +30 headroom when JD-rescoring so borderline card
+    // scores can be re-ranked into the final top-N (at DELIVER_COUNT=100 this
+    // is 130, matching pre-v4.5 behavior). Bounds extra page resolves.
+    const shortlist = aboveFloor.slice(0, JD_RESCORE ? DELIVER_COUNT + 30 : DELIVER_COUNT);
     log(`card-scored: top=${shortlist[0]?.matchPct ?? 0}% (floor=${MATCH_FLOOR_PCT}%, dropped ${droppedBelowFloor} below) — resolving ${shortlist.length} job pages…`);
     const resolved = await resolveAll(shortlist);
     log(`resolved=${resolved.filter(r => r?.directUrl).length}/${shortlist.length} apply URLs`);
@@ -1324,7 +1331,7 @@ if (IS_CLI) (async () => {
     }
 
     shortlist.sort(compareJobs);
-    const top = shortlist.slice(0, 100);
+    const top = shortlist.slice(0, DELIVER_COUNT);
     const directUrls = top.map(r => r.__direct || null);
     log(`final: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%`);
     const funnel = {
@@ -1335,6 +1342,9 @@ if (IS_CLI) (async () => {
       scored: fresh.length,
       droppedBelowFloor,
       matchFloorPercent: MATCH_FLOOR_PCT,
+      // v4.5: the user's chosen batch size — `sent` may be lower when supply
+      // (fresh jobs above the floor) runs out before reaching it.
+      targetJobsPerBatch: DELIVER_COUNT,
       sent: top.length,
       topPct: top[0]?.matchPct ?? 0,
       medianPct: top[Math.floor(top.length / 2)]?.matchPct ?? 0,

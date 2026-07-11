@@ -42,6 +42,7 @@ import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock, atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
+import { clampBatchSize } from './batch-size.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
   verifyLogin, sendEmail, sendConfiguredEmail, disconnectEmail,
@@ -70,6 +71,7 @@ function settingsGet() {
       filterClearance: cfg.filters?.filterClearance !== false,
       applicationFormEase: cfg.filters?.applicationFormEase || 'all',
       matchFloorPercent: cfg.scoring?.matchFloorPercent ?? 25,
+      targetJobsPerBatch: clampBatchSize(cfg.scoring?.targetJobsPerBatch),
       scheduleTime: cfg.schedule?.time || '07:00',
       searchMode: cfg.search?.mode === 'keywords' ? 'keywords' : 'titles',
       maxJobAge: cfg.filters?.maxJobAge || 'any',
@@ -110,13 +112,14 @@ function settingsSet(dotPath, jsonValue) {
   const allowed = new Set([
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.applicationFormEase', 'filters.maxJobAge',
-    'scoring.matchFloorPercent', 'schedule.time', 'search.mode',
+    'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'search.mode',
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
     'email.autoSend', 'email.subject', 'email.to'
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
+  if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.subject') { value = String(value || '').trim().slice(0, 120) || 'Job batch — {DATE}'; }

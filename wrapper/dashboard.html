@@ -1282,6 +1282,8 @@
           <div class="set-row"><label>Max years of experience</label><input type="text" id="set-yoe" class="num" /></div>
           <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
           <div class="set-row"><label>Match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
+          <div class="set-row"><label>Jobs per batch</label>
+            <select id="set-batch-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option><option value="200">200</option></select></div>
           <div class="set-row"><label>Daily scrape time</label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
           <div class="set-row"><label>Drop gov-clearance jobs</label>
             <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
@@ -1987,6 +1989,7 @@ async function loadSettings() {
     $("set-yoe").value = s.maxYoeAcceptable;
     $("set-salary").value = s.salaryFloorUsd;
     $("set-floor").value = s.matchFloorPercent;
+    $("set-batch-size").value = String(s.targetJobsPerBatch || 100);
     $("set-time").value = s.scheduleTime;
     $("set-clearance").value = String(s.filterClearance);
     $("set-forms").value = s.applicationFormEase;
@@ -2055,6 +2058,7 @@ async function saveSetting(path, value) {
 $("set-yoe").addEventListener("change", e => saveSetting("user.maxYoeAcceptable", e.target.value));
 $("set-salary").addEventListener("change", e => saveSetting("user.salaryFloorUsd", e.target.value));
 $("set-floor").addEventListener("change", e => saveSetting("scoring.matchFloorPercent", e.target.value));
+$("set-batch-size").addEventListener("change", e => saveSetting("scoring.targetJobsPerBatch", e.target.value));
 $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.target.value));
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));

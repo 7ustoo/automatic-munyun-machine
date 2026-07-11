@@ -122,7 +122,7 @@
     "maxPagesPerQuery": 50,
     "_maxPagesPerQueryComment": "Hiring.cafe shows ~40 cards per page. Bot clicks Next up to this many times per query. Effective ceiling \u2014 per-query early-stop on '0 new cards' usually terminates much sooner.",
     "targetJobsPerBatch": 100,
-    "_targetJobsPerBatchComment": "How many ranked jobs make the final batch (top-N after scoring).",
+    "_targetJobsPerBatchComment": "How many ranked jobs make the final batch (top-N after scoring). Dashboard Settings offers 50/100/150/200; other values snap to the nearest of those. Larger batches resolve more apply-URL pages (slower) and, when signed in, mark more jobs Viewed on your hiring.cafe account.",
     "searchAllQueries": true,
     "_searchAllQueriesComment": "v2.3: true (default) = search EVERY keyword, fully paginated to maxPagesPerQuery, so jobs under later keywords are never missed. false = old behavior: stop scraping more keywords once ~1.5x targetJobsPerBatch candidates are found (faster, but can skip keywords).",
     "seenJobsFreshnessDays": 60,
