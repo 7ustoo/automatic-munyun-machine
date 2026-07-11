@@ -1,4 +1,4 @@
-# Automatic Munyun Machine (AMM)
+<img width="1536" height="1024" alt="image" src="https://github.com/user-attachments/assets/5f0014df-1a84-4b4f-a214-0d34ff174789" />
 
 > Every weekday morning, 100 jobs sorted by how well they match your CV — in a clean desktop dashboard, with one-click apply. Optionally pushed to your phone over Telegram too. Runs on Windows, macOS, and Linux.
 
