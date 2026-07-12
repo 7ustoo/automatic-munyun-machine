@@ -2,11 +2,10 @@ package main
 
 // v1.3: local-only HTTP dashboard.
 //
-// A tiny status page bound to 127.0.0.1 on an OS-assigned port. The tray
-// menu has a "Open dashboard" item that opens the URL in the user's
-// default browser. The dashboard reads the same JSON files the tray
-// + watchdog already read (heartbeat.json, last-batch.json, config.json)
-// and presents them as a single-page view.
+// A local app page bound to 127.0.0.1 on an OS-assigned port. The tray's
+// "Open dashboard" action opens it in the platform window host (WebView2 on
+// Windows, Chromium app mode elsewhere). The dashboard reads the same JSON
+// files the tray + watchdog already read and presents them as a single page.
 //
 // Security model: localhost-only bind. There are no state-changing
 // endpoints in MVP — pure read-only status surface. Anything action-y
@@ -88,18 +87,18 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))       // GET: full ranked batch (all jobs + matched)
 	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory))   // GET: daily snapshots → Trends + leaderboard (v4.6)
 	mux.HandleFunc("/api/settings", d.guardGet(d.handleSettings)) // GET: editable knobs + search terms
-	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))   // GET ?format=txt|csv: number·title·apply-link export (v2.4)
-	mux.HandleFunc("/api/jobs-txt", d.guardGet(d.handleExport)) // legacy alias (pre-v2.4 bookmark) → txt export
+	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))     // GET ?format=txt|csv: number·title·apply-link export (v2.4)
+	mux.HandleFunc("/api/jobs-txt", d.guardGet(d.handleExport))   // legacy alias (pre-v2.4 bookmark) → txt export
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
-	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))       // v4.0
-	mux.HandleFunc("/api/config/backups", d.guardGet(d.handleConfigBackups)) // v4.0 (read-only)
+	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))         // v4.0
+	mux.HandleFunc("/api/config/backups", d.guardGet(d.handleConfigBackups))  // v4.0 (read-only)
 	mux.HandleFunc("/api/config/restore", d.guardPost(d.handleConfigRestore)) // v4.0
 	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
 	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
-	mux.HandleFunc("/api/jobs/clear", d.guardPost(d.handleJobsClear)) // v2.8: clear all terms
+	mux.HandleFunc("/api/jobs/clear", d.guardPost(d.handleJobsClear))   // v2.8: clear all terms
 	mux.HandleFunc("/api/skip/add", d.guardPost(d.handleSkipAdd))       // v4.6: block a company
 	mux.HandleFunc("/api/skip/remove", d.guardPost(d.handleSkipRemove)) // v4.6: unblock a company
 	mux.HandleFunc("/api/jobs/mode", d.guardPost(d.handleJobsMode))
@@ -119,6 +118,7 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/email/disable", d.guardPost(d.handleEmailDisable))
 	// v2.5: resume rescan + self-update.
 	mux.HandleFunc("/api/update/check", d.guardGet(d.handleUpdateCheck)) // GET: current vs latest
+	mux.HandleFunc("/api/window/open", d.guardPost(d.handleWindowOpen))
 	mux.HandleFunc("/api/resume/upload", d.guardPost(d.handleResumeUpload))
 	mux.HandleFunc("/api/resume/apply", d.guardPost(d.handleResumeApply))
 	mux.HandleFunc("/api/update/apply", d.guardPost(d.handleUpdateApply))
@@ -157,6 +157,9 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	portFile := filepath.Join(installDir, "data", "dashboard-port.txt")
 	if err := os.MkdirAll(filepath.Dir(portFile), 0o755); err == nil {
 		_ = os.WriteFile(portFile, []byte(fmt.Sprintf("%d\n", port)), 0o644)
+		if err := os.WriteFile(dashboardWindowTokenPath(installDir), []byte(d.csrfToken), 0o600); err != nil {
+			log.Printf("dashboard: write window handoff token: %v", err)
+		}
 	}
 
 	log.Printf("dashboard: listening on http://127.0.0.1:%d", port)
@@ -193,6 +196,7 @@ func (d *dashboardServer) Shutdown() {
 	// doesn't probe a dead port. (Crash exits leave it behind — the probe in
 	// openAppWindowForRunningInstance handles that case.)
 	_ = os.Remove(filepath.Join(d.installDir, "data", "dashboard-port.txt"))
+	_ = os.Remove(dashboardWindowTokenPath(d.installDir))
 }
 
 func (d *dashboardServer) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -348,12 +352,12 @@ type statusResponse struct {
 }
 
 type scrapeStatusInfo struct {
-	OK      bool   `json:"ok"`
-	At      string `json:"at"`
-	Error   string `json:"error,omitempty"`
-	Kind    string `json:"kind,omitempty"`
-	Profile string `json:"profile,omitempty"`
-	JobCount int   `json:"jobCount,omitempty"`
+	OK       bool   `json:"ok"`
+	At       string `json:"at"`
+	Error    string `json:"error,omitempty"`
+	Kind     string `json:"kind,omitempty"`
+	Profile  string `json:"profile,omitempty"`
+	JobCount int    `json:"jobCount,omitempty"`
 }
 
 // readScrapeStatusInto loads data/scrape-status.json (missing/malformed →

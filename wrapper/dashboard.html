@@ -1633,6 +1633,17 @@ async function postJSON(path, body) {
   return data;
 }
 
+// v6.0: the Windows WebView2 host exposes this narrow bridge so links that
+// leave AMM open in the user's default browser. Normal browser-hosted and
+// macOS/Linux dashboards keep using window.open.
+function openExternalURL(url, target = "_blank", features = "noopener") {
+  if (typeof window.ammOpenExternal === "function") {
+    window.ammOpenExternal(url).catch(() => {});
+    return null;
+  }
+  return window.open(url, target, features);
+}
+
 // ---- Status poll (every 5s) ----
 // v3.0.2: update handoff. While an update is being applied, losing the
 // wrapper is EXPECTED (the installer kills it to swap binaries) — so instead
@@ -2660,15 +2671,17 @@ $("email-oauth-connect").addEventListener("click", async () => {
   const subject = $("email-oauth-subject").value.trim() || "Job batch — {DATE}";
   const autoSend = $("email-oauth-autosend").checked ? "true" : "false";
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return note("email-oauth-note", "Enter a valid recipient email.", false);
-  const popup = window.open("about:blank", "amm-google-oauth", "width=560,height=720");
+  const nativeWindow = typeof window.ammOpenExternal === "function";
+  const popup = nativeWindow ? null : window.open("about:blank", "amm-google-oauth", "width=560,height=720");
   note("email-oauth-note", "Opening Google…", true);
   const r = await postJSON("/api/email/oauth/start", { to, subject, autoSend });
   if (!r.ok) {
     if (popup) popup.close();
     return note("email-oauth-note", "✗ " + (r.error || "Google connection is unavailable"), false);
   }
-  if (popup) popup.location = r.authUrl;
-  else window.open(r.authUrl, "_blank", "noopener");
+  if (nativeWindow) openExternalURL(r.authUrl);
+  else if (popup) popup.location = r.authUrl;
+  else openExternalURL(r.authUrl);
   note("email-oauth-note", "Finish approving AMM in Google. This page will update automatically.", true);
   const deadline = Date.now() + 120000;
   const poll = setInterval(async () => {
@@ -2983,7 +2996,7 @@ async function checkForUpdate(manual) {
 $("update-check-btn").addEventListener("click", () => checkForUpdate(true));
 $("ub-update").addEventListener("click", async () => {
   const r = __updateInfo || {};
-  if (!r.canAutoUpdate) { if (r.releaseUrl) window.open(r.releaseUrl, "_blank", "noopener"); return; }
+  if (!r.canAutoUpdate) { if (r.releaseUrl) openExternalURL(r.releaseUrl); return; }
   const btn = $("ub-update");
   btn.disabled = true; btn.textContent = "Updating…";
   $("update-banner").classList.add("updating");
@@ -2993,7 +3006,7 @@ $("ub-update").addEventListener("click", async () => {
     if (!res.ok) {
       btn.disabled = false; btn.textContent = "Update now";
       $("update-banner").classList.remove("updating");
-      if (res.releaseUrl) { toast("Automatic update unavailable — opening the releases page.", "bad"); window.open(res.releaseUrl, "_blank", "noopener"); }
+      if (res.releaseUrl) { toast("Automatic update unavailable — opening the releases page.", "bad"); openExternalURL(res.releaseUrl); }
       else toast(res.error || "Update failed to start.", "bad");
       return;
     }

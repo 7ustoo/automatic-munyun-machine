@@ -5,6 +5,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"syscall"
 )
 
@@ -16,6 +17,14 @@ func applyChildHideWindow(cmd *exec.Cmd) {
 	// doesn't fan out to the child via the same controlling terminal —
 	// we send it explicitly via terminateProcess() instead.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+}
+
+func openTarget(target string) error {
+	opener := "xdg-open"
+	if runtime.GOOS == "darwin" {
+		opener = "open"
+	}
+	return exec.Command(opener, target).Start()
 }
 
 // terminateProcess sends SIGTERM so the node bot's signal handlers fire

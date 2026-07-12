@@ -1,17 +1,17 @@
 package main
 
-// v2.2: open the dashboard as a real, standalone application window instead
-// of a browser tab. We launch the user's installed Chrome/Edge in "app mode"
-// (--app=<url>): a chromeless window with no tabs, no address bar, its own
-// taskbar entry and (via the page's favicon) the AMM icon. To the user it is
-// an application — double-click the icon, the window comes up with the
-// dashboard. Under the hood it's the system's Chromium engine (the same one
-// the scraper already uses), so there's nothing extra to bundle or install.
+// v6.0: dashboard-window orchestration.
 //
-// A dedicated --user-data-dir keeps it a clean isolated window (no mixing
-// with the user's normal browser tabs / extensions / sessions). If neither
-// Chrome nor Edge is found we fall back to the default browser so the
-// dashboard is still reachable.
+// On Windows, openAppWindow launches a lightweight child mode of AMM.exe that
+// owns a native Win32/WebView2 window. The taskbar therefore sees AMM.exe —
+// not chrome.exe — and pinning/relaunching uses AMM's own identity. Keeping
+// the window in a child process also preserves the tray's main-thread event
+// loop and the existing update handoff (closeAppWindows kills the child).
+//
+// macOS/Linux retain the proven Chromium app-mode host for now. Windows also
+// falls back to that path from the primary process if the native child cannot
+// report readiness. A dedicated data directory keeps either engine isolated
+// from the user's normal browser profile.
 
 import (
 	"log"
@@ -21,18 +21,21 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 )
 
-// v3.0.2: PIDs of app windows THIS wrapper spawned. The window is a separate
-// Chrome process (own --user-data-dir, so no rendezvous with the user's
-// browser) that outlives the wrapper — the update flow closes it explicitly
-// so a dead pre-update window doesn't linger next to the relaunched one.
+// PIDs of app-window processes THIS wrapper spawned. On Windows these are
+// AMM.exe --window-host children; on other platforms/fallback they are browser
+// app-mode processes. The update flow closes them explicitly so a dead
+// pre-update window cannot linger next to the relaunched one.
 var appWindowPIDs struct {
 	mu   sync.Mutex
 	pids []int
 }
+
+var appWindowOpenMu sync.Mutex
 
 func recordAppWindowPID(pid int) {
 	appWindowPIDs.mu.Lock()
@@ -40,24 +43,33 @@ func recordAppWindowPID(pid int) {
 	appWindowPIDs.mu.Unlock()
 }
 
+func trackAppWindowProcess(process *os.Process) {
+	recordAppWindowPID(process.Pid)
+	go func() {
+		_, _ = process.Wait()
+		appWindowPIDs.mu.Lock()
+		for i, pid := range appWindowPIDs.pids {
+			if pid == process.Pid {
+				appWindowPIDs.pids = append(appWindowPIDs.pids[:i], appWindowPIDs.pids[i+1:]...)
+				break
+			}
+		}
+		appWindowPIDs.mu.Unlock()
+	}()
+}
+
 // closeAppWindows force-closes every app window this process spawned.
-// Best-effort: a PID may already be gone (user closed the window), and
-// windows opened by a second-instance handoff belong to a different (dead)
-// process — those are covered by the page's own window.close() during the
-// update handoff.
+// Tracked children are reaped and removed as soon as they exit, keeping stale
+// PIDs out of this list. A process-tree kill also closes a browser fallback
+// launched by a native host child.
 func closeAppWindows() {
 	appWindowPIDs.mu.Lock()
 	pids := append([]int(nil), appWindowPIDs.pids...)
 	appWindowPIDs.pids = nil
 	appWindowPIDs.mu.Unlock()
 	for _, pid := range pids {
-		p, err := os.FindProcess(pid)
-		if err != nil {
-			continue
-		}
-		if killErr := p.Kill(); killErr == nil {
-			log.Printf("appwindow: closed app window (pid %d) for update handoff", pid)
-		}
+		killProcessTree(pid)
+		log.Printf("appwindow: closed app window tree (pid %d)", pid)
 	}
 }
 
@@ -105,14 +117,37 @@ func resolveChromium() string {
 	return ""
 }
 
-// openAppWindow opens url as a standalone app-mode window. Returns true if it
-// launched a real app window, false if it fell back to the default browser.
+// openAppWindow opens url as a standalone application window. Windows first
+// launches AMM's native WebView2 host. Other platforms use Chromium app mode.
+// Returns false only when both the dedicated host and browser fallback fail.
 func openAppWindow(installDir, url string) bool {
+	appWindowOpenMu.Lock()
+	defer appWindowOpenMu.Unlock()
+	if launchNativeWindowHost(installDir, url) {
+		log.Printf("appwindow: opened native AMM window host")
+		return true
+	}
+	return openChromiumAppWindow(installDir, url)
+}
+
+// openChromiumAppWindow is the cross-platform compatibility fallback. It is
+// deliberately separate from openAppWindow so --window-host can fall back
+// without recursively spawning another AMM.exe child.
+func openChromiumAppWindow(installDir, url string) bool {
+	cmd, ok := startChromiumAppWindow(installDir, url)
+	if !ok {
+		return false
+	}
+	trackAppWindowProcess(cmd.Process)
+	return true
+}
+
+func startChromiumAppWindow(installDir, url string) (*exec.Cmd, bool) {
 	browser := resolveChromium()
 	if browser == "" {
 		log.Printf("appwindow: no Chrome/Edge found — opening dashboard in the default browser")
 		_ = openURL(url)
-		return false
+		return nil, false
 	}
 	profileDir := filepath.Join(installDir, "data", "app-window")
 	_ = os.MkdirAll(profileDir, 0o755)
@@ -122,12 +157,10 @@ func openAppWindow(installDir, url string) bool {
 	if err := cmd.Start(); err != nil {
 		log.Printf("appwindow: failed to launch app window (%v) — falling back to default browser", err)
 		_ = openURL(url)
-		return false
+		return nil, false
 	}
-	recordAppWindowPID(cmd.Process.Pid) // v3.0.2: so the update flow can close it
-	_ = cmd.Process.Release()
 	log.Printf("appwindow: opened app window via %s", filepath.Base(browser))
-	return true
+	return cmd, true
 }
 
 // appWindowArgs builds the Chromium app-mode flags: a chromeless window
@@ -178,6 +211,10 @@ func waitForDashboardReady(baseURL string, attempts int, delay time.Duration) bo
 	return false
 }
 
+func dashboardWindowTokenPath(installDir string) string {
+	return filepath.Join(installDir, "data", "dashboard-window-token.txt")
+}
+
 // openAppWindowForRunningInstance hands a double-click off to the AMM that
 // is already running: read its port from data/dashboard-port.txt, PROBE the
 // dashboard to confirm that instance is actually serving, then open the app
@@ -217,5 +254,30 @@ func openAppWindowForRunningInstance(installDir string) bool {
 		log.Printf("appwindow: running instance answered %d on %s — treating as unhealthy", resp.StatusCode, url)
 		return false
 	}
-	return openAppWindow(installDir, url)
+	token, err := os.ReadFile(dashboardWindowTokenPath(installDir))
+	if err != nil || strings.TrimSpace(string(token)) == "" {
+		log.Printf("appwindow: window handoff token unavailable: %v", err)
+		return false
+	}
+	return requestAppWindowOpen(url, strings.TrimSpace(string(token)))
+}
+
+func requestAppWindowOpen(baseURL, token string) bool {
+	req, err := http.NewRequest(http.MethodPost, baseURL+"/api/window/open", nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("X-AMM-Token", token)
+	client := &http.Client{Timeout: 20 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("appwindow: primary window handoff failed: %v", err)
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("appwindow: primary window handoff answered %d", resp.StatusCode)
+		return false
+	}
+	return true
 }

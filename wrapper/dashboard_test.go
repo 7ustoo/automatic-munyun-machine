@@ -102,7 +102,7 @@ func TestBuildStatus_StaleHeartbeat(t *testing.T) {
 	hbTs := testNow.Add(-7 * time.Minute).Format(time.RFC3339Nano)
 	hb := map[string]any{
 		"ts": hbTs, "pid": 1234, "version": "1.3.0",
-		"startedAt": testNow.Add(-1 * time.Hour).Format(time.RFC3339Nano),
+		"startedAt":  testNow.Add(-1 * time.Hour).Format(time.RFC3339Nano),
 		"lastPollOk": true, "consecutiveFailures": 0,
 	}
 	b, _ := json.Marshal(hb)
@@ -124,7 +124,7 @@ func TestBuildStatus_DeadHeartbeat(t *testing.T) {
 	hbTs := testNow.Add(-30 * time.Minute).Format(time.RFC3339Nano)
 	hb := map[string]any{
 		"ts": hbTs, "pid": 1234, "version": "1.3.0",
-		"startedAt": testNow.Add(-1 * time.Hour).Format(time.RFC3339Nano),
+		"startedAt":  testNow.Add(-1 * time.Hour).Format(time.RFC3339Nano),
 		"lastPollOk": false, "consecutiveFailures": 5,
 	}
 	b, _ := json.Marshal(hb)

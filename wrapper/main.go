@@ -46,15 +46,15 @@ import (
 // at compile time and silently ignore -X. Without this, every release built
 // since the wrapper landed would have shipped with whatever string happened
 // to be on this line.
-var AMMVersion = "5.2.0"
+var AMMVersion = "6.0.0"
 
 // CLI flags. The wrapper is usually invoked with no args from Task Scheduler /
 // launchd / systemd; the flags exist for manual debugging.
 var (
-	flagBotPath   = flag.String("bot-path", "", "Path to scripts/telegram-bot.mjs (default: auto-detect relative to wrapper binary)")
+	flagBotPath    = flag.String("bot-path", "", "Path to scripts/telegram-bot.mjs (default: auto-detect relative to wrapper binary)")
 	flagInstallDir = flag.String("install-dir", "", "AMM install directory (default: parent of wrapper binary's dir)")
-	flagNoSpawn   = flag.Bool("no-spawn", false, "Don't spawn the node bot — useful for testing tray UI in isolation")
-	flagVersion   = flag.Bool("version", false, "Print version and exit")
+	flagNoSpawn    = flag.Bool("no-spawn", false, "Don't spawn the node bot — useful for testing tray UI in isolation")
+	flagVersion    = flag.Bool("version", false, "Print version and exit")
 	// v2.2: the desktop shortcut launches with no flag → the dashboard opens
 	// as an app window. The login auto-start task passes --background → it
 	// starts quietly in the tray without stealing a window every boot.
@@ -65,6 +65,12 @@ var (
 	// in the tray with no window (the reported bug). This flag makes launch wait
 	// for the dashboard to actually serve before opening the window.
 	flagAfterUpdate = flag.Bool("after-update", false, "Relaunched by the auto-updater: wait for the dashboard to be ready, then open its window")
+	// v6.0: internal child mode used by openAppWindow on Windows. It owns the
+	// native WebView2 window and exits when that window closes. Keeping it out
+	// of the primary process avoids competing with systray's main-thread loop.
+	flagWindowHost  = flag.Bool("window-host", false, "Internal: host the native dashboard window")
+	flagWindowURL   = flag.String("window-url", "", "Internal: loopback dashboard URL for --window-host")
+	flagWindowReady = flag.String("window-ready-file", "", "Internal: native window startup handshake path")
 )
 
 func main() {
@@ -73,6 +79,21 @@ func main() {
 	if *flagVersion {
 		fmt.Printf("AMM tray wrapper v%s (%s/%s)\n", AMMVersion, runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
+	}
+
+	// Native window children deliberately bypass logging setup, the
+	// single-instance lock, dashboard startup, supervisor, and tray. The
+	// child reports readiness only after WebView2 has initialized; the
+	// primary process owns browser fallback if this child fails or times out.
+	if *flagWindowHost {
+		installDir, err := resolveInstallDir(*flagInstallDir)
+		if err != nil || *flagWindowURL == "" || *flagWindowReady == "" {
+			os.Exit(2)
+		}
+		if !runNativeWindowHost(installDir, *flagWindowURL, *flagWindowReady) {
+			os.Exit(3)
+		}
+		return
 	}
 
 	// Resolve install dir + bot path. Single-instance check + log setup

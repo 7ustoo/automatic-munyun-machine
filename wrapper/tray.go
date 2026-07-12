@@ -23,7 +23,7 @@ type trayState struct {
 	// Menu items — captured on init so the heartbeat poller can update labels.
 	miSetup     *systray.MenuItem // v1.2: visible only when needsSetup; click → wizard
 	miStatus    *systray.MenuItem
-	miDashboard *systray.MenuItem // v1.3: opens http://127.0.0.1:<port> in browser
+	miDashboard *systray.MenuItem // opens the local dashboard app window
 	miScrape    *systray.MenuItem
 	miPause     *systray.MenuItem
 	miTelegram  *systray.MenuItem
@@ -101,7 +101,7 @@ func onTrayReady(sup *supervisor, dash *dashboardServer, installDir, botPath str
 	// server is up — startDashboard() may have failed (port exhaustion,
 	// firewall, etc.) and in that case the action would be a no-op.
 	if dash != nil {
-		state.miDashboard = systray.AddMenuItem("Open dashboard", "Opens the AMM status page in your browser")
+		state.miDashboard = systray.AddMenuItem("Open dashboard", "Opens the AMM dashboard window")
 	}
 
 	systray.AddSeparator()
@@ -147,6 +147,7 @@ func onTrayReady(sup *supervisor, dash *dashboardServer, installDir, botPath str
 // cleanly.
 func onTrayExit(sup *supervisor, dash *dashboardServer) {
 	log.Printf("tray: exiting — signaling supervisor")
+	closeAppWindows()
 	sup.Quit()
 	if dash != nil {
 		dash.Shutdown()
@@ -207,6 +208,7 @@ func (s *trayState) handleClicks() {
 //   - update tooltip
 //   - spawn the supervisor (which starts the node bot)
 //   - exit needsSetup mode
+//
 // After that, normal heartbeat tracking takes over.
 func (s *trayState) pollHeartbeat() {
 	ticker := time.NewTicker(heartbeatPollInterval)
