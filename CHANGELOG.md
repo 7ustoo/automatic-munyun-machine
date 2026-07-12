@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- Added an **Open All** action to the Jobs dashboard that confirms the batch size, then opens every job's direct application link in the default browser.
+
 ## [6.0.0] — 2026-07-12
 
 ### Added

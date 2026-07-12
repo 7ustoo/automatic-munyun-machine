@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -68,5 +69,45 @@ func TestParseBatchJobs_LimitAndNilMatched(t *testing.T) {
 	// Missing "matched" must serialize as [] not null (so the page's Why code is safe).
 	if all[0].Matched == nil {
 		t.Errorf("nil matched should be normalized to empty slice")
+	}
+}
+
+func TestOpenBatchJobs_PrefersDirectURLAndSkipsUnsafeLinks(t *testing.T) {
+	jobs := []batchJob{
+		{DirectURL: "https://jobs.example.com/apply/1", ViewURL: "https://hiring.cafe/viewjob/1"},
+		{ViewURL: "https://hiring.cafe/viewjob/2"},
+		{DirectURL: "javascript:alert(1)", ViewURL: "https://hiring.cafe/viewjob/3"},
+		{DirectURL: "javascript:alert(1)"},
+		{},
+	}
+	var got []string
+	opened, skipped, failed := openBatchJobs(jobs, func(raw string) error {
+		got = append(got, raw)
+		return nil
+	})
+	if opened != 3 || skipped != 2 || failed != 0 {
+		t.Fatalf("openBatchJobs counts = opened %d, skipped %d, failed %d", opened, skipped, failed)
+	}
+	want := []string{"https://jobs.example.com/apply/1", "https://hiring.cafe/viewjob/2", "https://hiring.cafe/viewjob/3"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+		t.Fatalf("opened URLs = %v; want %v", got, want)
+	}
+}
+
+func TestOpenBatchJobs_ContinuesAfterOpenFailure(t *testing.T) {
+	jobs := []batchJob{
+		{DirectURL: "https://jobs.example.com/apply/1"},
+		{DirectURL: "https://jobs.example.com/apply/2"},
+	}
+	calls := 0
+	opened, skipped, failed := openBatchJobs(jobs, func(string) error {
+		calls++
+		if calls == 1 {
+			return errors.New("browser unavailable")
+		}
+		return nil
+	})
+	if calls != 2 || opened != 1 || skipped != 0 || failed != 1 {
+		t.Fatalf("got calls %d, opened %d, skipped %d, failed %d", calls, opened, skipped, failed)
 	}
 }

@@ -34,7 +34,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 
 - Native Windows app window with AMM's own taskbar icon and pinning identity
 - Ranked jobs with search, sorting, match filters, salary, and source details
-- **Apply**, **Save**, **Applied**, and **Why this matched** actions
+- **Apply**, **Open All**, **Save**, **Applied**, and **Why this matched** actions
 - Resume rescan and automatic search-term suggestions
 - Remote, hybrid, and on-site searches with optional location
 - Blocked companies, job age, experience, salary, clearance, and application-form controls

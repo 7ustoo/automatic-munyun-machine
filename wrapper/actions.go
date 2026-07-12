@@ -3,11 +3,13 @@ package main
 import (
 	"bufio"
 	"log"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"unicode"
 
 	"fyne.io/systray"
 )
@@ -222,4 +224,19 @@ func actionOpenFolder(installDir string) {
 // contain untrusted job-board URL characters.
 func openURL(target string) error {
 	return openTarget(target)
+}
+
+// isAllowedExternalURL is the shared boundary for any URL handed from the
+// local dashboard to the system browser. Keep this deliberately narrow: job
+// links and OAuth/release links are HTTP(S), never local files or executable
+// URL schemes.
+func isAllowedExternalURL(raw string) bool {
+	if strings.IndexFunc(raw, unicode.IsControl) >= 0 {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil || u.User != nil || u.Hostname() == "" {
+		return false
+	}
+	return u.Scheme == "http" || u.Scheme == "https"
 }

@@ -15,6 +15,11 @@ page.on('response', r => { if (r.status() >= 400) errors.push(`${r.status()} ${r
 await page.goto('http://127.0.0.1:8765/#jobs', { waitUntil: 'networkidle' });
 await page.waitForSelector('tr.job-row');
 if (await page.locator('tr.job-row').count() < 20) throw new Error('jobs did not render');
+await page.click('#open-all-btn');
+await page.waitForSelector('#modal');
+if (!/^Open all \d+ jobs\?$/.test(await page.locator('#modal h3').textContent())) throw new Error('Open All confirmation did not include the batch size');
+await page.click('#modal-ok');
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Opened 42 jobs'));
 await page.click('button[data-act="why"][data-idx="2"]');
 await page.waitForSelector('tr.why-row[data-why="2"]');
 

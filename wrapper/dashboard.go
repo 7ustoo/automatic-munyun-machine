@@ -92,6 +92,7 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
+	mux.HandleFunc("/api/jobs/open-all", d.guardPost(d.handleJobsOpenAll))
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
 	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))         // v4.0
 	mux.HandleFunc("/api/config/backups", d.guardGet(d.handleConfigBackups))  // v4.0 (read-only)
