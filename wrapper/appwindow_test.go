@@ -173,8 +173,9 @@ func TestRequestAppWindowOpen(t *testing.T) {
 
 func TestDashboardWindowTokenPath(t *testing.T) {
 	got := dashboardWindowTokenPath(`C:\AMM`)
-	if !strings.HasSuffix(got, `data\dashboard-window-token.txt`) {
-		t.Fatalf("unexpected dashboard window token path: %q", got)
+	want := filepath.Join(`C:\AMM`, "data", "dashboard-window-token.txt")
+	if got != want {
+		t.Fatalf("dashboard window token path = %q; want %q", got, want)
 	}
 }
 
