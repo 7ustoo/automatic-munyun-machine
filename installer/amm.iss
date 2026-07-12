@@ -21,11 +21,12 @@
 ; it pointing at the current release branch so local builds still produce
 ; a sensibly-named .exe.
 #ifndef MyAppVersion
-  #define MyAppVersion "5.2.0"
+  #define MyAppVersion "6.0.0"
 #endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
 #define MyAppExeName "AMM.exe"
+#define MyAppUserModelID "AutomaticMunyunMachine.Desktop"
 
 ; Preprocess-time check: the wrapper binary must exist before we package.
 ; This catches the most common build mistake (running `iscc` without first
@@ -87,9 +88,9 @@ Source: "..\*"; DestDir: "{app}"; \
 ; v2.7: dropped the "Setup wizard" Start menu shortcut — first-run setup now
 ; lives in the dashboard, opened by AMM.exe itself. The terminal wizard
 ; (scripts/setup-wizard.mjs) survives as a dev escape hatch via `npm run setup`.
-Name: "{group}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\logo.ico"
+Name: "{group}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\logo.ico"; AppUserModelID: "{#MyAppUserModelID}"
 Name: "{group}\Uninstall"; Filename: "{uninstallexe}"
-Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\logo.ico"; Tasks: desktopicon
+Name: "{userdesktop}\{#MyAppName}"; Filename: "{app}\wrapper\dist\AMM.exe"; IconFilename: "{app}\wrapper\logo.ico"; AppUserModelID: "{#MyAppUserModelID}"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional tasks:"; Flags: unchecked
@@ -112,6 +113,34 @@ end;
 function NeedsChromium(): Boolean;
 begin
   Result := not SystemBrowserPresent();
+end;
+
+// v6.0: AMM's native Windows dashboard uses the Evergreen WebView2 Runtime.
+// Microsoft documents these exact registry locations and product GUID for
+// per-machine/per-user detection. A non-empty version other than 0.0.0.0
+// means the shared runtime is available. If it is missing, the packaged
+// Microsoft bootstrapper installs the architecture-appropriate runtime.
+function WebView2VersionValid(Version: String): Boolean;
+begin
+  Result := (Version <> '') and (Version <> '0.0.0.0');
+end;
+
+function WebView2RuntimePresent(): Boolean;
+var
+  Version: String;
+  ClientKey: String;
+begin
+  ClientKey := 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+  Result :=
+    (RegQueryStringValue(HKCU, ClientKey, 'pv', Version) and WebView2VersionValid(Version)) or
+    (RegQueryStringValue(HKLM64, ClientKey, 'pv', Version) and WebView2VersionValid(Version)) or
+    (RegQueryStringValue(HKLM32, ClientKey, 'pv', Version) and WebView2VersionValid(Version));
+end;
+
+function NeedsWebView2(): Boolean;
+begin
+  Result := (not WebView2RuntimePresent()) and
+    FileExists(ExpandConstant('{app}\runtime\MicrosoftEdgeWebView2Setup.exe'));
 end;
 
 // v2.0.4: an install is "configured" when .env survives from a previous
@@ -143,6 +172,17 @@ begin
 end;
 
 [Run]
+; v6.0: provision Microsoft's shared Evergreen WebView2 Runtime only on the
+; small set of Windows 10/11 machines where it is missing. The bootstrapper
+; is Authenticode-verified in release.yml before being packaged. If runtime
+; installation is blocked, AMM retains its Chrome/Edge app-mode fallback.
+Filename: "{app}\runtime\MicrosoftEdgeWebView2Setup.exe"; \
+  Parameters: "/silent /install"; \
+  WorkingDir: "{app}"; \
+  StatusMsg: "Installing the Microsoft WebView2 Runtime for AMM's native window…"; \
+  Check: NeedsWebView2; \
+  Flags: runhidden waituntilterminated
+
 ; Post-install. v2.0.1: npm install is GONE — node_modules ships inside the
 ; installer payload (see [Files]). Chromium download only runs when no
 ; system Chrome/Edge exists, and runs VISIBLE so its progress bar shows

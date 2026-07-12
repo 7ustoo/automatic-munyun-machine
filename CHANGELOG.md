@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [6.0.0] — 2026-07-12
+
+### Added
+
+- **Native Windows dashboard window.** `AMM.exe` now hosts the existing local dashboard in Microsoft WebView2, giving Automatic Munyun Machine its own taskbar identity, icon, and pinnable shortcut instead of grouping the dashboard under Chrome. External apply, OAuth, and release links continue to open in the user's default browser.
+- The Windows installer detects the Evergreen WebView2 Runtime and silently runs Microsoft's Authenticode-verified bootstrapper only when the shared runtime is missing.
+
+### Changed
+
+- Windows dashboard windows use a dedicated local WebView2 profile under `data/native-window/`. Chrome/Edge app mode remains a compatibility fallback, while macOS and Linux retain their existing browser-hosted dashboard behavior.
+
 ## [5.2.0] — 2026-07-11
 
 ### Changed
@@ -882,7 +893,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.2.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.0.0...HEAD
+[6.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.2.0...v6.0.0
 [5.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.1...v5.2.0
 [5.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.0...v5.0.1
 [5.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v4.6.0...v5.0.0

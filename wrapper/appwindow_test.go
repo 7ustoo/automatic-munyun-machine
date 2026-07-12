@@ -150,6 +150,34 @@ func TestWaitForDashboardReady_NoListener(t *testing.T) {
 	}
 }
 
+func TestRequestAppWindowOpen(t *testing.T) {
+	const token = "local-handoff-token"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/window/open" {
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if got := r.Header.Get("X-AMM-Token"); got != token {
+			t.Errorf("handoff token = %q; want %q", got, token)
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	if !requestAppWindowOpen(srv.URL, token) {
+		t.Fatal("valid primary-process window handoff failed")
+	}
+}
+
+func TestDashboardWindowTokenPath(t *testing.T) {
+	got := dashboardWindowTokenPath(`C:\AMM`)
+	if !strings.HasSuffix(got, `data\dashboard-window-token.txt`) {
+		t.Fatalf("unexpected dashboard window token path: %q", got)
+	}
+}
+
 // --- v3.0.2: update-handoff window close ---
 
 // TestCloseAppWindows spawns a real long-running child, records its PID the
@@ -165,17 +193,16 @@ func TestCloseAppWindows(t *testing.T) {
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("could not start child: %v", err)
 	}
-	recordAppWindowPID(cmd.Process.Pid)
+	pid := cmd.Process.Pid
+	trackAppWindowProcess(cmd.Process)
 
 	closeAppWindows()
 
-	// Reap and confirm it died well before its natural 30s lifetime.
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	select {
-	case <-done:
-		// killed — expected
-	case <-time.After(5 * time.Second):
+	deadline := time.Now().Add(5 * time.Second)
+	for isProcessAlive(pid) && time.Now().Before(deadline) {
+		time.Sleep(20 * time.Millisecond)
+	}
+	if isProcessAlive(pid) {
 		_ = cmd.Process.Kill()
 		t.Fatalf("child survived closeAppWindows")
 	}
@@ -188,8 +215,31 @@ func TestCloseAppWindows(t *testing.T) {
 	}
 }
 
-// TestCloseAppWindows_GonePID must be a no-op for an already-dead PID.
-func TestCloseAppWindows_GonePID(t *testing.T) {
-	recordAppWindowPID(999999999)
-	closeAppWindows() // must not panic or hang
+func TestTrackAppWindowProcess_RemovesExitedChild(t *testing.T) {
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command(filepath.Join(os.Getenv("SystemRoot"), "System32", "cmd.exe"), "/c", "exit", "0")
+	} else {
+		cmd = exec.Command("sh", "-c", "true")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	pid := cmd.Process.Pid
+	trackAppWindowProcess(cmd.Process)
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		appWindowPIDs.mu.Lock()
+		found := false
+		for _, tracked := range appWindowPIDs.pids {
+			found = found || tracked == pid
+		}
+		appWindowPIDs.mu.Unlock()
+		if !found {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("exited app-window pid %d remained tracked", pid)
 }

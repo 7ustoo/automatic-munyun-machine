@@ -29,6 +29,7 @@ import (
 //   - Host must be loopback (rejects DNS-rebinding to a LAN name)
 //   - X-AMM-Token must equal the token we injected into the served HTML; a
 //     cross-origin page can't read that HTML, so it can't forge the header.
+//
 // loopbackHost reports whether the request's Host header names a loopback
 // address. Blocks DNS-rebinding: a page on attacker.example that resolves to
 // 127.0.0.1 still carries Host: attacker.example, so it fails this check.
@@ -81,6 +82,18 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeJSONError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]any{"ok": false, "error": msg})
+}
+
+// handleWindowOpen lets a foreground second AMM.exe ask the primary process
+// to create/activate the dashboard window. Routing through the primary keeps
+// child ownership and quit/update cleanup in one process. guardPost requires
+// the per-process token stored in data for this local executable handoff.
+func (d *dashboardServer) handleWindowOpen(w http.ResponseWriter, r *http.Request) {
+	if !openAppWindow(d.installDir, d.URL()) {
+		writeJSONError(w, http.StatusInternalServerError, "could not open dashboard window")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 // readBody decodes a small JSON request body into a string map. Caps the read

@@ -20,7 +20,9 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - uses: actions/setup-go@v5
-        with: { go-version: '1.21' }
+        with:
+          go-version-file: wrapper/go.mod
+          cache-dependency-path: wrapper/go.sum
       - run: npm ci
 
       - name: Bundle Google desktop OAuth client (when configured)
@@ -30,6 +32,9 @@ jobs:
         shell: bash
         run: if [ -n "$GOOGLE_OAUTH_CLIENT_ID" ]; then node -e "require('fs').writeFileSync('scripts/google-oauth-client.json', JSON.stringify({clientId:process.env.GOOGLE_OAUTH_CLIENT_ID,clientSecret:process.env.GOOGLE_OAUTH_CLIENT_SECRET||''}))"; else echo "Google OAuth client not configured; App Password fallback remains available"; fi
       - run: npm test
+      - name: Run Go wrapper tests
+        working-directory: wrapper
+        run: go test ./...
 
       - name: Build AMM.exe (tray wrapper)
         shell: bash
@@ -75,6 +80,28 @@ jobs:
           Copy-Item (Join-Path "node-extract\node-v$ver-win-x64" "node.exe") "runtime\node.exe"
           Remove-Item $zip, SHASUMS256.txt, node-extract -Recurse -Force
           Write-Host "Bundled runtime: $(& 'runtime\node.exe' --version)"
+
+      # v6.0: the native Windows dashboard uses Microsoft's Evergreen
+      # WebView2 Runtime. Windows 11 and most Windows 10 devices already have
+      # it; the installer registry-checks first and runs this tiny bootstrapper
+      # only when needed. Verify Microsoft's Authenticode signature before the
+      # executable is allowed into our installer payload.
+      - name: Bundle Microsoft WebView2 Evergreen bootstrapper
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $dest = 'runtime\MicrosoftEdgeWebView2Setup.exe'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $dest
+          $sig = Get-AuthenticodeSignature $dest
+          if ($sig.Status -ne 'Valid') {
+            Write-Error "WebView2 bootstrapper signature is not valid: $($sig.Status)"
+            exit 1
+          }
+          if ($sig.SignerCertificate.Subject -notmatch 'Microsoft') {
+            Write-Error "Unexpected WebView2 signer: $($sig.SignerCertificate.Subject)"
+            exit 1
+          }
+          Write-Host "Verified WebView2 bootstrapper signer: $($sig.SignerCertificate.Subject)"
 
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
@@ -123,7 +150,9 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - uses: actions/setup-go@v5
-        with: { go-version: '1.21' }
+        with:
+          go-version-file: wrapper/go.mod
+          cache-dependency-path: wrapper/go.sum
       - run: npm ci
 
       - name: Bundle Google desktop OAuth client (when configured)
@@ -133,6 +162,9 @@ jobs:
         shell: bash
         run: if [ -n "$GOOGLE_OAUTH_CLIENT_ID" ]; then node -e "require('fs').writeFileSync('scripts/google-oauth-client.json', JSON.stringify({clientId:process.env.GOOGLE_OAUTH_CLIENT_ID,clientSecret:process.env.GOOGLE_OAUTH_CLIENT_SECRET||''}))"; else echo "Google OAuth client not configured; App Password fallback remains available"; fi
       - run: npm test
+      - name: Run Go wrapper tests
+        working-directory: wrapper
+        run: go test ./...
 
       - name: Build AMM-darwin-* (tray wrapper, arm64 + amd64)
         working-directory: wrapper
@@ -167,7 +199,9 @@ jobs:
       - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - uses: actions/setup-go@v5
-        with: { go-version: '1.21' }
+        with:
+          go-version-file: wrapper/go.mod
+          cache-dependency-path: wrapper/go.sum
       - run: npm ci
 
       - name: Bundle Google desktop OAuth client (when configured)
@@ -187,6 +221,10 @@ jobs:
           # runs if GPG_PRIVATE_KEY secret is set anyway.
           sudo apt-get install -y dpkg-dev fakeroot \
             gcc libgtk-3-dev libayatana-appindicator3-dev
+
+      - name: Run Go wrapper tests
+        working-directory: wrapper
+        run: go test ./...
 
       - name: Build amm-tray (tray wrapper)
         working-directory: wrapper

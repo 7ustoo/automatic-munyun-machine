@@ -35,9 +35,8 @@ func actionRunSetup(sup *supervisor, dash *dashboardServer, installDir string) {
 	_ = sup // silence unused; kept for API symmetry
 }
 
-// actionOpenDashboard opens the localhost dashboard URL in the user's
-// default browser. v1.3. The wrapper bound the port at startup; we just
-// open http://127.0.0.1:<port>.
+// actionOpenDashboard opens the localhost dashboard in the platform app
+// window. The wrapper already bound the loopback port at startup.
 func actionOpenDashboard(dash *dashboardServer, installDir string) {
 	if dash == nil || dash.Port() == 0 {
 		log.Printf("action.dashboard: no dashboard server (start failed or not initialized)")
@@ -219,24 +218,8 @@ func actionOpenFolder(installDir string) {
 }
 
 // openURL opens a URL or filesystem path using the platform default opener.
-//   Windows: cmd /c start ""
-//   macOS:   open
-//   Linux:   xdg-open
+// The platform implementation must not involve a command shell: targets can
+// contain untrusted job-board URL characters.
 func openURL(target string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "windows":
-		// `start` is a cmd builtin, must be invoked via cmd /c.
-		// Empty "" as first arg is the window title (avoids "start" treating
-		// the URL as a title if it contains spaces).
-		cmd = exec.Command("cmd", "/c", "start", "", target)
-		applyChildHideWindow(cmd)
-	case "darwin":
-		cmd = exec.Command("open", target)
-	case "linux":
-		cmd = exec.Command("xdg-open", target)
-	default:
-		return nil
-	}
-	return cmd.Start()
+	return openTarget(target)
 }

@@ -3,11 +3,15 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
 	"syscall"
+	"unsafe"
 )
+
+var shellExecuteW = syscall.NewLazyDLL("shell32.dll").NewProc("ShellExecuteW")
 
 // applyChildHideWindow sets SysProcAttr so the spawned node child doesn't
 // flash a console window. Critical for the "looks like a real app" UX —
@@ -19,6 +23,30 @@ func applyChildHideWindow(cmd *exec.Cmd) {
 		HideWindow:    true,
 		CreationFlags: 0x08000000,
 	}
+}
+
+func openTarget(target string) error {
+	operation, err := syscall.UTF16PtrFromString("open")
+	if err != nil {
+		return err
+	}
+	targetPtr, err := syscall.UTF16PtrFromString(target)
+	if err != nil {
+		return err
+	}
+	const swShowNormal = 1
+	result, _, callErr := shellExecuteW.Call(
+		0,
+		uintptr(unsafe.Pointer(operation)),
+		uintptr(unsafe.Pointer(targetPtr)),
+		0,
+		0,
+		swShowNormal,
+	)
+	if result <= 32 {
+		return fmt.Errorf("ShellExecuteW failed (%d): %v", result, callErr)
+	}
+	return nil
 }
 
 // terminateProcess sends a graceful termination signal to the child. On

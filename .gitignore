@@ -12,6 +12,7 @@ cv.pdf
 # Chromium/Electron app-window profiles contain cookies, caches, and Safe
 # Browsing databases. Keep the explicit rule even though data/ is also ignored.
 data/app-window/
+data/native-window/
 data/
 !data/.gitkeep
 

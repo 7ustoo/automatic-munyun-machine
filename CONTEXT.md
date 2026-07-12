@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 5.2.0
-**Active release branch:** `v5.2`
+**Version:** 6.0.0
+**Active release branch:** `v6.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-11
 
@@ -26,7 +26,12 @@ v5.0 removes owner-specific defaults and expands the product beyond remote techn
 - Profile-scoped `search` and `sources` settings migrate from older top-level config locations.
 - Full-description scoring, role-family checks, salary parsing, optional Claude reranking, and score explanations remain in place.
 
-v5.2.0 refreshes release metadata and rewrites the public and contributor documentation around the current desktop-first product.
+v6.0.0 replaces the Chrome-hosted dashboard window on Windows with an
+AMM-owned Win32 window embedding Microsoft WebView2. The wrapper launches a
+window-host child mode so the existing tray main-thread loop remains isolated;
+external links open in the system browser, and Chrome/Edge app mode remains a
+fallback if WebView2 cannot initialize. macOS and Linux retain their existing
+dashboard host.
 
 ## Runtime architecture
 
@@ -36,6 +41,7 @@ OS scheduler / login item
         ▼
 Go wrapper (wrapper/)
   ├─ system tray + native app window
+  │    └─ Windows: AMM.exe child hosting WebView2
   ├─ local dashboard on 127.0.0.1
   ├─ guarded dashboard API
   └─ supervises Telegram poller when Telegram is enabled
@@ -76,7 +82,7 @@ The wrapper is a thin native shell. Business logic stays in JavaScript helpers t
 
 ### Desktop dashboard
 
-The wrapper serves `wrapper/dashboard.html` and API routes from `wrapper/dashboard.go` / `wrapper/dashboard_actions.go`.
+The wrapper serves `wrapper/dashboard.html` and API routes from `wrapper/dashboard.go` / `wrapper/dashboard_actions.go`. On Windows, `AMM.exe --window-host` embeds that loopback page in WebView2 with AMM's own AppUserModelID and icon. The primary process requires a readiness-file handshake before accepting the host, so synchronous or fatal WebView2 initialization failures fall back to Chrome/Edge app mode. Foreground second instances authenticate to the running primary's guarded `/api/window/open` handoff, keeping all window children owned by the tray process for quit/update cleanup. A PID/HWND/URL marker scopes single-window activation to the current installation and dashboard. The WebView2 profile lives under `data/native-window/`; outbound apply, OAuth, and release links are validated and handed to the default browser through `ShellExecuteW`, never a command shell.
 
 Views:
 
@@ -147,6 +153,8 @@ All `config.json` writes must go through `scripts/config-rw.mjs`.
 ### Native wrapper and packaging
 
 - `wrapper/main.go` — wrapper entry point and supervised process
+- `wrapper/native_window_windows.go` — Win32/WebView2 dashboard host and external-link bridge
+- `wrapper/native_window_unix.go` — non-Windows host stubs; Chromium app mode remains in use
 - `wrapper/dashboard.go` — local HTTP routes and dashboard server
 - `wrapper/dashboard_actions.go` — guarded actions
 - `wrapper/dashboard.html` — self-contained dashboard UI
@@ -199,6 +207,7 @@ Live integrations still require deliberate manual checks:
 - Keep the Go wrapper thin; place product logic in JavaScript helpers.
 - Treat `.env`, `config.json`, resumes, browser profiles, and all of `data/` as private.
 - Version is sourced from `package.json`; release builds inject it into the wrapper and installer.
+- Windows shortcuts and the WebView2 host must keep the `AutomaticMunyunMachine.Desktop` AppUserModelID aligned.
 - Work on feature/version branches, never directly on `main`.
 - Update `README.md`, `CHANGELOG.md`, `config.example.json`, and this file when user-facing behavior or schema changes.
 

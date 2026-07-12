@@ -32,6 +32,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 
 ### One dashboard for the whole search
 
+- Native Windows app window with AMM's own taskbar icon and pinning identity
 - Ranked jobs with search, sorting, match filters, salary, and source details
 - **Apply**, **Save**, **Applied**, and **Why this matched** actions
 - Resume rescan and automatic search-term suggestions
@@ -82,6 +83,10 @@ Download the correct file from the [latest GitHub release](https://github.com/7u
 
 Open the installer and follow the in-app setup.
 
+On Windows, AMM uses Microsoft's WebView2 runtime for its native dashboard
+window. Windows 10/11 commonly already includes it; the installer detects and
+provisions the free Evergreen runtime when needed.
+
 > Release artifacts may be unsigned when platform signing credentials are unavailable. Verify that the download came from this repository's Releases page.
 
 ### One-line install
@@ -109,7 +114,7 @@ npm install
 npm run setup
 ```
 
-AMM uses an installed Chrome or Edge browser when available. It downloads Playwright Chromium only when neither is present.
+AMM uses an installed Chrome or Edge browser for job collection when available. It downloads Playwright Chromium only when neither is present. On Windows, that collection browser is separate from AMM's native WebView2 dashboard window.
 
 ---
 
@@ -146,7 +151,7 @@ Schedule or “Scrape now”
           └── TXT / CSV / XLSX export
 ```
 
-The native Go wrapper runs the local dashboard and supervises background work. Node.js and Playwright handle job collection, resume parsing, scoring, and delivery. The dashboard binds to `127.0.0.1`, not your local network or the public internet.
+The native Go wrapper runs the local dashboard and supervises background work. On Windows it embeds that dashboard in an AMM-owned WebView2 window, so the taskbar and pinned shortcut belong to `AMM.exe` instead of Chrome. Node.js and Playwright handle job collection, resume parsing, scoring, and delivery. The dashboard binds to `127.0.0.1`, not your local network or the public internet.
 
 When signed into hiring.cafe, AMM asks the account to hide saved, applied, and viewed jobs. When signed out, AMM uses its local seen-job history.
 
@@ -216,7 +221,8 @@ Optional Claude reranking uses your own Anthropic API key and may incur Anthropi
 
 - Windows 10/11, macOS 14+, or a modern Linux distribution
 - Node.js 18+ for script/manual installs; native packages can bundle the runtime
-- Chrome, Edge, or space for Playwright Chromium
+- Chrome, Edge, or space for Playwright Chromium for job collection
+- Microsoft WebView2 Runtime for the native Windows dashboard (normally present; the Windows installer provisions it when missing)
 - An internet connection while collecting jobs
 - A machine that is awake at the scheduled time
 

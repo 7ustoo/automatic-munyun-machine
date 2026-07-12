@@ -1,16 +1,16 @@
-# AMM tray wrapper (v1.2)
+# AMM native wrapper
 
-Small native Go executable that owns the system-tray icon and supervises
-the node bot as a child. Built once, ships as the user-facing AMM binary
-on all three platforms.
+Native Go executable that owns the system tray, serves the loopback
+dashboard, hosts the desktop window, and supervises the optional Telegram
+bot child. It ships as the user-facing AMM binary on all three platforms.
 
-- Windows: `AMM.exe` (~3.6 MB stripped, `-H windowsgui` so no console window)
+- Windows: `AMM.exe` (`-H windowsgui`) with an embedded WebView2 dashboard
 - macOS: `AMM-darwin-arm64` + `AMM-darwin-amd64` (bundled into `AMM.app` by `scripts/build/mac.sh`)
 - Linux: `amm-tray` (installed to `/opt/automatic-munyun-machine/bin/` by `scripts/build/deb.sh`)
 
 ## Build
 
-Prerequisites: Go ≥ 1.21.
+Use the Go version declared in `go.mod`.
 - Windows: `winget install GoLang.Go`
 - macOS: `brew install go` (Xcode CLT also required for CGO)
 - Linux: `apt install golang gcc libgtk-3-dev libayatana-appindicator3-dev`
@@ -51,6 +51,9 @@ item opens `telegram-bot.log`.
 Task Scheduler / launchd / systemd
    ↓ (at logon)
 AMM.exe (this binary — owns tray, supervises)
+   ├─ loopback dashboard server on 127.0.0.1
+   ├─ Windows: AMM.exe --window-host → WebView2
+   │             └─ Chrome/Edge app-mode fallback
    ├─ goroutine: supervisor (spawn + watch node child, 3-strikes/hr respawn)
    ├─ goroutine: heartbeat poller (every 10s, updates icon color)
    ├─ goroutine: tray menu click handler
@@ -84,18 +87,22 @@ alive (see plan risk #4).
 | File | Purpose |
 |---|---|
 | `main.go` | Entry point, flag parsing, install-dir + bot-path resolution |
+| `appwindow.go` | Cross-platform dashboard-window orchestration and browser fallback |
+| `native_window_windows.go` | Win32/WebView2 host, startup handshake, app identity, and external-link bridge |
+| `native_window_unix.go` | Non-Windows stubs; macOS/Linux retain Chromium app mode |
+| `dashboard.go` / `dashboard_actions.go` | Loopback HTTP dashboard and guarded API |
 | `supervisor.go` | Spawn + watch node child + 3-strikes/hr respawn throttle |
 | `tray.go` | Menu definition, click dispatch, heartbeat poller, icon color |
 | `actions.go` | Implementations of tray menu items (scrape, pause, telegram, logs, folder, restart, quit) |
 | `singleinstance.go` | PID-based single-instance lock at `data/wrapper.lock` |
 | `icons.go` | `//go:embed` of the 4 icon states (×2 formats: ICO for Windows, PNG for Mac/Linux) |
-| `platform_windows.go` | Win32-specific: hide child console, kill semantics |
-| `platform_unix.go` | POSIX-specific: SIGTERM, process group |
+| `platform_windows.go` | Win32 process behavior and shell-safe `ShellExecuteW` opener |
+| `platform_unix.go` | POSIX signals, process groups, and platform opener |
 
 ## Dependencies
 
-Only one third-party Go dep: `fyne.io/systray` (cross-platform tray library
-— Windows + macOS menubar + Linux StatusNotifier). Pulls in
-`github.com/godbus/dbus/v5` and `golang.org/x/sys` transitively.
+- `fyne.io/systray` — Windows tray, macOS menubar, and Linux StatusNotifier
+- `github.com/jchv/go-webview2` — Windows-only native dashboard host
 
-Pure Go, CGO disabled — cross-compiles trivially from any host.
+The Windows WebView2 path is pure Go. macOS/Linux systray builds require
+their native CGO toolchains and are built on matching CI hosts.
