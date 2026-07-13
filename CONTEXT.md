@@ -2,10 +2,10 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 6.0.0
-**Active release branch:** `v6.0`
+**Version:** 6.1.0
+**Active release branch:** `v6.1`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-07-11
+**Last refreshed:** 2026-07-13
 
 ## Product
 
@@ -16,6 +16,12 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v6.1.0 adds an **Open All** action to the Jobs dashboard. After confirming the
+batch size, the guarded local action opens each ranked job's direct application
+URL in the default browser, falling back to its source listing when necessary.
+Invalid links are skipped without weakening the dashboard's loopback and CSRF
+protections.
 
 v5.0 removes owner-specific defaults and expands the product beyond remote technology roles:
 
