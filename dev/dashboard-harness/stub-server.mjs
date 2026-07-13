@@ -91,12 +91,16 @@ const postReplies = {
   "/api/suggest": { ok: true, mode: "titles", suggestions: ["IAM Engineer", "Cloud Security Engineer", "Security Analyst"] },
   "/api/telegram/validate": { ok: true, username: "demo_bot" },
   "/api/email/oauth/start": { ok: true, authUrl: "http://127.0.0.1:8765/oauth/google/callback?stub=1" },
+  "/api/email/send": body => {
+    const format = ["txt", "csv", "xlsx"].includes(body?.format) ? body.format : "txt";
+    return { ok: true, to: "helper@example.com", filename: `apply-links(2026-07-06).${format}` };
+  },
   "/api/profile/add": { ok: true },
 };
 
 function serve(port, needsSetup, opts) {
   const R = routes(needsSetup, opts);
-  createServer((req, res) => {
+  createServer(async (req, res) => {
     const path = req.url.split("?")[0];
     if (path === "/" ) { res.writeHead(200, { "content-type": "text/html" }); res.end(page()); return; }
     if (path === "/oauth/google/callback") {
@@ -111,7 +115,12 @@ function serve(port, needsSetup, opts) {
       res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(body)); return;
     }
     if (req.method === "POST") {
-      const reply = postReplies[path] || { ok: true };
+      let raw = "";
+      for await (const chunk of req) raw += chunk;
+      let requestBody = {};
+      try { requestBody = JSON.parse(raw || "{}"); } catch {}
+      const candidate = postReplies[path] || { ok: true };
+      const reply = typeof candidate === "function" ? candidate(requestBody) : candidate;
       res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(reply)); return;
     }
     res.writeHead(404, { "content-type": "application/json" }); res.end('{"ok":false,"error":"stub 404"}');

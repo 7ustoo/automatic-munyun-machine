@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 6.1.0
-**Active release branch:** `v6.1`
+**Version:** 6.2.0
+**Active release branch:** `v6.2`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-13
 
@@ -16,6 +16,11 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v6.2.0 lets users choose `.txt`, `.csv`, or `.xlsx` for each manual dashboard
+email send. Both the Jobs toolbar and System email card pass the selection
+through the guarded local action and reuse the existing export builders.
+Automatic post-scrape email remains `.txt`.
 
 v6.1.0 adds an **Open All** action to the Jobs dashboard. After confirming the
 batch size, the guarded local action opens each ranked job's direct application
@@ -110,7 +115,7 @@ Telegram is an optional remote control, not a setup requirement.
 
 ### Email
 
-`scripts/email.mjs` selects Gmail OAuth or App Password SMTP. OAuth tokens and SMTP credentials remain local and gitignored. Manual and automatic sends use the same compact apply-links attachment.
+`scripts/email.mjs` selects Gmail OAuth or App Password SMTP. OAuth tokens and SMTP credentials remain local and gitignored. Manual sends can attach `.txt`, `.csv`, or `.xlsx`; automatic post-scrape sends use the compact `.txt` attachment.
 
 ## Configuration
 

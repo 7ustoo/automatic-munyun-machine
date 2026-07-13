@@ -39,7 +39,7 @@ import {
 } from './profile-store.mjs';
 import { parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
-import { withFileLock, atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
+import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize } from './batch-size.mjs';
@@ -608,20 +608,23 @@ function profileSwitch(slug) {
 }
 
 // ---- email-to-VA (v4.3) ----
-// Pick the compact apply-links .txt for every email path. The detailed
-// jobs(DATE).txt remains a local archive, not the handoff attachment.
-function resolveBatchAttachment() {
-  let date = null;
-  try { date = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')).date; } catch {}
-  if (date) {
-    const compact = path.join(profilePaths().dir, `apply-links(${date}).txt`);
-    if (fs.existsSync(compact)) return { path: compact, filename: `apply-links(${date}).txt`, date };
-  }
-  const ex = loadExport('txt');
-  if (!ex.ok) return null;
-  const tmp = path.join(profilePaths().dir, ex.filename);
-  try { atomicWriteText(tmp, ex.content); } catch { return null; }
-  return { path: tmp, filename: ex.filename, date, count: ex.count };
+export function normalizeEmailFormat(format) {
+  return format === 'csv' || format === 'xlsx' ? format : 'txt';
+}
+
+// Turn the existing, tested dashboard export payload into an email attachment.
+// XLSX rides the helper boundary as base64; email providers accept the decoded
+// Buffer directly. TXT/CSV stay strings so their exact encoding/BOM survives.
+export function emailAttachmentFromExport(ex) {
+  if (!ex?.ok) return ex || { ok: false, error: 'No batch yet — run a scrape first.' };
+  const content = ex.format === 'xlsx'
+    ? Buffer.from(ex.contentBase64 || '', 'base64')
+    : ex.content;
+  return { ok: true, format: ex.format, filename: ex.filename, date: ex.date, count: ex.count, content };
+}
+
+function resolveBatchAttachment(format) {
+  return emailAttachmentFromExport(loadExport(normalizeEmailFormat(format)));
 }
 
 // Step 1: confirm the Gmail app password can log in (no message sent).
@@ -697,22 +700,23 @@ async function emailSave(user, pass, to, subject, autoSend) {
   return out({ ok: true, to });
 }
 
-// Manual "Email batch" button: email the current batch .txt right now.
-async function emailSend() {
+// Manual "Email batch" actions: email the current batch in the format chosen
+// for this send. Automatic post-scrape delivery remains the compact TXT.
+async function emailSend(format) {
   const env = readEmailEnv();
   const delivery = emailDeliveryStatus(env);
   if (!delivery.connected) return out({ ok: false, error: 'Email isn’t connected yet — set it up in System → Email.' });
   const cfg = cfgRW.read();
   const to = String(cfg.email?.to || '').trim();
   if (!isEmailAddress(to)) return out({ ok: false, error: 'No recipient set — add one in System → Email.' });
-  const att = resolveBatchAttachment();
-  if (!att) return out({ ok: false, error: 'No batch yet — run a scrape first.' });
+  const att = resolveBatchAttachment(format);
+  if (!att.ok) return out({ ok: false, error: att.error || 'No batch yet — run a scrape first.' });
   const subject = renderSubject(cfg.email?.subject, att.date);
   try {
     await sendConfiguredEmail({
       env, to, from: cfg.email?.from || delivery.email, subject,
       text: `Attached: ${att.filename} — today's ranked job batch from Automatic Munyun Machine.`,
-      attachments: [{ filename: att.filename, path: att.path }]
+      attachments: [{ filename: att.filename, content: att.content }]
     });
     return out({ ok: true, to, filename: att.filename });
   } catch (e) {
@@ -782,7 +786,7 @@ if (isMain) (async () => {
     case 'email-oauth-complete': return emailOAuthComplete(a, b, a3);
     case 'email-validate': return emailValidate(a, b);
     case 'email-save':     return emailSave(a, b, a3, a4, a5);
-    case 'email-send':     return emailSend();
+    case 'email-send':     return emailSend(a);
     case 'email-disable':  return emailDisable();
     default:
       out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|skip-add|skip-remove|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });
