@@ -64,6 +64,11 @@ test('onboarding entry points live in the topbar, not the System view', () => {
 // Export, and the connect flow lives in a System-view card.
 test('email-to-VA button + setup card are present', () => {
   assert.ok(html.includes('id="email-btn"'), 'email-btn (Jobs toolbar) missing');
+  assert.ok(html.includes('id="email-send-format"'), 'manual email format selector missing');
+  for (const format of ['txt', 'csv', 'xlsx']) {
+    assert.ok(html.includes(`data-email-format="${format}"`), `Jobs email menu missing ${format}`);
+  }
+  assert.ok(html.includes('postJSON("/api/email/send", { format })'), 'selected email format must reach the guarded action');
   assert.ok(html.includes('id="email-setup-start"'), 'email-setup-start (System card) missing');
   assert.ok(html.includes('id="email-validate"') && html.includes('id="email-save"'), 'email connect steps missing');
 });
