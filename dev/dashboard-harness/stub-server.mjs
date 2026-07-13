@@ -81,6 +81,7 @@ const routes = (needsSetup, opts = {}) => ({
 const postReplies = {
   "/api/scrape": { ok: true },
   "/api/job/action": { ok: true },
+  "/api/jobs/open-all": { ok: true, opened: 42, skipped: 0, failed: 0 },
   "/api/settings/set": { ok: true },
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
   "/api/jobs/remove": { ok: true, list: queries.slice(0, 3) },

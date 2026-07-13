@@ -15,7 +15,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-	"unicode"
 	"unsafe"
 
 	webview2 "github.com/jchv/go-webview2"
@@ -316,15 +315,4 @@ func isLoopbackDashboardURL(raw string) bool {
 	}
 	n, err := strconv.Atoi(port)
 	return err == nil && n >= 1 && n <= 65535
-}
-
-func isAllowedExternalURL(raw string) bool {
-	if strings.IndexFunc(raw, unicode.IsControl) >= 0 {
-		return false
-	}
-	u, err := url.Parse(raw)
-	if err != nil || u.User != nil || u.Hostname() == "" {
-		return false
-	}
-	return u.Scheme == "http" || u.Scheme == "https"
 }

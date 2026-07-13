@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [6.1.0] — 2026-07-13
+
+### Added
+
+- Added an **Open All** action to the Jobs dashboard that confirms the batch size, then opens every job's direct application link in the default browser.
+
 ## [6.0.0] — 2026-07-12
 
 ### Added
@@ -893,7 +899,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.0.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.1.0...HEAD
+[6.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.0.0...v6.1.0
 [6.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.2.0...v6.0.0
 [5.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.1...v5.2.0
 [5.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.0...v5.0.1

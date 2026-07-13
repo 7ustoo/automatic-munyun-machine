@@ -1135,6 +1135,7 @@
                 <a href="/api/export?format=xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
               </div>
             </details>
+            <button class="sm" id="open-all-btn" title="Open every job in this batch in your default browser"><svg class="ic"><use href="#i-external"/></svg>Open All</button>
             <button class="sm" id="email-btn" title="Email this batch to your recipient (e.g. your VA)"><svg class="ic"><use href="#i-send"/></svg>Email</button>
             <button class="sm icon" id="refresh-btn" title="Refresh the list" aria-label="Refresh the list"><svg class="ic"><use href="#i-refresh"/></svg></button>
           </div>
@@ -2029,6 +2030,33 @@ $("band-seg").addEventListener("click", (e) => {
   renderJobs();
 });
 $("job-sort").addEventListener("change", (e) => { state.sort = e.target.value; renderJobs(); });
+
+$("open-all-btn").addEventListener("click", async () => {
+  const count = state.jobs.length;
+  if (!count) return toast("No jobs are available to open.", "bad");
+  const ok = await confirmModal({
+    title: `Open all ${count} jobs?`,
+    body: `This will open ${count} browser tabs using each job's direct application link. Your browser may take a moment to load them all.`,
+    confirmText: "Open All",
+  });
+  if (!ok) return;
+
+  const btn = $("open-all-btn");
+  btn.disabled = true;
+  const label = btn.innerHTML;
+  btn.textContent = "Opening…";
+  try {
+    const r = await postJSON("/api/jobs/open-all");
+    if (!r.ok) return toast(r.error || "Could not open the job links.", "bad");
+    const misses = (r.skipped || 0) + (r.failed || 0);
+    toast(`Opened ${r.opened} job${r.opened === 1 ? "" : "s"}${misses ? `; ${misses} link${misses === 1 ? " was" : "s were"} unavailable` : ""}.`, misses ? "" : "good");
+  } catch (e) {
+    toast("Could not open the job links: " + e.message, "bad");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = label;
+  }
+});
 
 // Event delegation for the per-job action buttons.
 $("lb-body").addEventListener("click", async (ev) => {

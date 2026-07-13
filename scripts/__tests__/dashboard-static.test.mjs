@@ -67,3 +67,8 @@ test('email-to-VA button + setup card are present', () => {
   assert.ok(html.includes('id="email-setup-start"'), 'email-setup-start (System card) missing');
   assert.ok(html.includes('id="email-validate"') && html.includes('id="email-save"'), 'email connect steps missing');
 });
+
+test('Open All jobs action is present and uses the guarded dashboard endpoint', () => {
+  assert.ok(html.includes('id="open-all-btn"'), 'open-all-btn missing from Jobs toolbar');
+  assert.ok(html.includes('postJSON("/api/jobs/open-all")'), 'Open All must use the guarded local action');
+});

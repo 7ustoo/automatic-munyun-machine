@@ -160,6 +160,53 @@ func (d *dashboardServer) handleJobAction(w http.ResponseWriter, r *http.Request
 	d.relayDashboardAPI(w, 100*time.Second, "job-action", action, b["idx"])
 }
 
+// handleJobsOpenAll opens every job in the active batch in the user's default
+// browser. This lives behind guardPost because opening up to 200 browser tabs
+// is a visible side effect. Invalid or missing URLs are skipped, and URL values
+// are never written to logs.
+func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Request) {
+	batch := readFullBatch(d.installDir)
+	if !batch.Available || len(batch.Jobs) == 0 {
+		writeJSONError(w, http.StatusOK, "No jobs are available to open")
+		return
+	}
+
+	opened, skipped, failed := openBatchJobs(batch.Jobs, openURL)
+	if opened == 0 {
+		if failed > 0 {
+			writeJSONError(w, http.StatusOK, "The default browser could not open the job links")
+			return
+		}
+		writeJSONError(w, http.StatusOK, "No valid job links could be opened")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":      true,
+		"opened":  opened,
+		"skipped": skipped,
+		"failed":  failed,
+	})
+}
+
+func openBatchJobs(jobs []batchJob, opener func(string) error) (opened, skipped, failed int) {
+	for _, job := range jobs {
+		raw := job.DirectURL
+		if !isAllowedExternalURL(raw) {
+			raw = job.ViewURL
+		}
+		if !isAllowedExternalURL(raw) {
+			skipped++
+			continue
+		}
+		if err := opener(raw); err != nil {
+			failed++
+			continue
+		}
+		opened++
+	}
+	return opened, skipped, failed
+}
+
 func (d *dashboardServer) handleSettingsSet(w http.ResponseWriter, r *http.Request) {
 	b := readBody(r)
 	d.relayDashboardAPI(w, 15*time.Second, "settings-set", b["path"], b["value"])
