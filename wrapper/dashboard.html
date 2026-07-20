@@ -82,9 +82,14 @@
                  Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
     font-size: 14px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  /* v7.0 polish: typographic craft — even heading line-breaks, fewer prose
+     orphans. Ignored gracefully by engines that don't support text-wrap. */
+  h1, h2, h3, h4 { text-wrap: balance; }
+  .muted-sm, .hint, .desc, .blurb, .setup-step .desc, .us-sub, .e-sub { text-wrap: pretty; }
   svg.ic { width: 16px; height: 16px; flex: none; vertical-align: -3px;
            fill: none; stroke: currentColor; stroke-width: 2;
            stroke-linecap: round; stroke-linejoin: round; }
@@ -147,7 +152,7 @@
     background: var(--topbar-bg); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
   }
-  #view-title { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .01em; }
+  #view-title { margin: 0; font-size: 18px; font-weight: 720; letter-spacing: -.01em; }
   .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
   .top-help-btn { white-space: nowrap; }
 
@@ -197,7 +202,7 @@
   }
   .card + .card { margin-top: 16px; }
   .card h2 {
-    margin: 0 0 14px; font-size: 12px; font-weight: 650;
+    margin: 0 0 14px; font-size: 12px; font-weight: 700;
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2);
     display: flex; align-items: center; gap: 8px;
   }
@@ -221,14 +226,20 @@
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .tile {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r-lg); padding: 14px 16px; box-shadow: var(--shadow-1);
+    border-radius: var(--r-lg); padding: 16px 18px; box-shadow: var(--shadow-1);
   }
   .tile .t-label {
     font-size: 11px; font-weight: 650; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--text-3); margin-bottom: 6px;
+    text-transform: uppercase; color: var(--text-2); margin-bottom: 7px;
   }
-  .tile .t-value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.15; }
-  .tile .t-sub { font-size: 12px; color: var(--text-3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  /* v7.0 bolder pass: hero KPI numbers carry the "confidence at a glance" read —
+     larger, heavier, tighter. #st-strong (jobs ≥70%) is the focal metric, so it
+     takes the green that already means "strong" in the match meter. */
+  .tile .t-value { font-size: 30px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.12; }
+  #st-strong { color: var(--green); }
+  #st-strong.zero { color: var(--text-3); }   /* zero strong matches isn't good news — don't paint it green */
+  #st-date { font-size: 22px; }               /* a date is secondary context, not a hero count */
+  .tile .t-sub { font-size: 12px; color: var(--text-3); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
   /* ---- Buttons ------------------------------------------------------------ */
   button, .btn {
@@ -328,6 +339,10 @@
   .seg button + button { border-left: 1px solid var(--border-2); }
   .seg button:hover:not(.on) { color: var(--text); background: var(--surface-2); }
   .seg button.on { background: var(--accent-dim); color: var(--accent-2); }
+  /* v7.0 polish: the segmented control clips its children (overflow:hidden),
+     which would hide the global focus-visible ring. Draw it inset instead so
+     keyboard users can see the focused band. */
+  .seg button:focus-visible { outline-offset: -2px; }
   select.slim { width: auto; padding: 5px 9px; font-size: 12.5px; font-weight: 600; color: var(--text-2); background: var(--surface); }
 
   details.menu { position: relative; }
@@ -357,7 +372,7 @@
   }
   th {
     font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--text-3); font-weight: 650;
+    letter-spacing: 0.05em; color: var(--text-2); font-weight: 700;
     position: sticky; top: 0; background: var(--surface); z-index: 2;
   }
   tbody tr { transition: background .1s var(--ease); }
@@ -390,7 +405,7 @@
   td.match { white-space: nowrap; width: 120px; }
   .meter {
     display: inline-block; vertical-align: middle;
-    width: 62px; height: 4px; border-radius: 4px; background: var(--surface-3);
+    width: 64px; height: 5px; border-radius: 4px; background: var(--surface-3);
     margin-right: 9px; overflow: hidden;
   }
   .meter i {
@@ -400,7 +415,7 @@
   .meter i.hi { background: var(--green); }
   .meter i.md { background: var(--yellow); }
   .meter i.lo { background: var(--gray); }
-  .meter-num { font-variant-numeric: tabular-nums; font-weight: 650; }
+  .meter-num { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px; }
 
   tr.applied-row { opacity: .5; }
   tr.applied-row .j-title { text-decoration: line-through; text-decoration-color: var(--text-3); }
@@ -1012,7 +1027,7 @@
         <span class="profile-chip" id="top-profile" title="Active profile — manage on the Profiles page">
           <svg class="ic"><use href="#i-users"/></svg><span id="profile-big">—</span>
         </span>
-        <span class="status-chip"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
+        <span class="status-chip" aria-live="polite"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
         <label class="watch-toggle" title="Show the browser window so you can watch it search hiring.cafe">
           <input type="checkbox" id="watch-scrape" /><svg class="ic"><use href="#i-eye"/></svg><span>Watch</span>
         </label>
@@ -1022,7 +1037,7 @@
     <div id="scrapebar"></div>
 
     <main id="content">
-      <div id="err" class="err" style="display:none"></div>
+      <div id="err" class="err" style="display:none" role="alert"></div>
 
       <!-- v2.5: forced-feel update banner. Appears only when a newer release
            exists; auto-checked on load + every 30 min. One click does the
@@ -1324,9 +1339,12 @@
             <!-- CONNECTED view -->
             <div id="email-on" class="hidden">
               <div class="stat-row"><span class="k">Sends to</span><span class="v" id="email-to-v">—</span></div>
-              <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send a .txt every morning after the scrape</span></label>
+              <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send every morning after the scrape</span></label>
+              <!-- v7.0: ONE format select — it persists as email.format (drives the
+                   morning auto-send + default for manual sends) and is also the
+                   format for the "Send latest batch now" button below. -->
               <div class="row">
-                <select class="slim" id="email-send-format" aria-label="Email attachment format">
+                <select class="slim" id="email-send-format" aria-label="Batch attachment format — saved as your preference">
                   <option value="txt">Plain text (.txt)</option>
                   <option value="csv">Spreadsheet (.csv)</option>
                   <option value="xlsx">Excel workbook (.xlsx)</option>
@@ -1749,12 +1767,16 @@ function render(s) {
   })[botState];
   setDot($("bot-dot"), botState);
   setDot($("header-dot"), botState);
-  $("header-label").textContent = ({
+  // Guard the write: the status chip is an aria-live region, and this runs on
+  // every 5s tick — only touch the DOM on an actual transition so screen
+  // readers don't risk re-announcing an unchanged status.
+  const headerLabel = ({
     alive: "AMM is healthy",
     stale: "Heartbeat is stale",
     dead:  "Bot appears dead",
     unknown: "No heartbeat yet"
   })[botState];
+  if ($("header-label").textContent !== headerLabel) $("header-label").textContent = headerLabel;
 
   $("bot-pid").textContent = s.bot?.pid || "—";
   $("bot-uptime").textContent = s.bot?.uptimeSec
@@ -1896,9 +1918,11 @@ function renderStats() {
     $("st-avg").textContent = avg + "%";
     $("st-avg-sub").textContent = "best: " + top + "%";
     $("st-strong").textContent = strong;
+    $("st-strong").classList.toggle("zero", strong === 0);
   } else {
     $("st-avg").textContent = "—"; $("st-avg-sub").textContent = "";
     $("st-strong").textContent = "—";
+    $("st-strong").classList.add("zero");
   }
   $("st-date").textContent = state.batchMeta.date || "—";
   $("st-date-sub").textContent = state.batchMeta.generatedAt
@@ -1957,7 +1981,12 @@ function whyRowHTML(idx) {
     parts.push(`<div style="margin-top:6px"><b>The job asks for — not on your resume:</b> ${j.missing.map(t =>
       `<span class="kw miss">${escapeHTML(t)}<button class="kwbtn add" data-kwadd="${escapeAttr(t)}" title="Add as a search term">+ search</button><button class="kwbtn" data-kwmute="${escapeAttr(t)}" title="Never count this term in scoring again">mute</button></span>`).join("")}</div>`);
   }
-  if (j.aiReason) parts.push(`<span class="why-ai"><b>Smart match${j.aiPct != null ? " — " + j.aiPct + "/100" : ""}:</b> ${escapeHTML(j.aiReason)}</span>`);
+  if (j.aiReason) {
+    // v7.0: rubric subscores when the rerank returned them (skills/seniority/role).
+    const sub = j.aiSub && [j.aiSub.skills, j.aiSub.seniority, j.aiSub.role].every(Number.isFinite)
+      ? ` <span style="color:var(--text-3)">· skills ${Number(j.aiSub.skills)} · seniority ${Number(j.aiSub.seniority)} · role ${Number(j.aiSub.role)}</span>` : "";
+    parts.push(`<span class="why-ai"><b>Smart match${j.aiPct != null ? " — " + j.aiPct + "/100" : ""}:</b> ${escapeHTML(j.aiReason)}${sub}</span>`);
+  }
   return `<td></td><td colspan="5">${parts.join("")}</td>`;
 }
 
@@ -2688,6 +2717,7 @@ function renderEmail(e) {
   if (connected) {
     $("email-to-v").textContent = e.to || "—";
     $("email-autosend").checked = !!e.autoSend;
+    $("email-send-format").value = e.format || "txt";   // v7.0: persisted attach format
     $("email-on-note").textContent = e.provider === "gmail-oauth"
       ? `Connected securely with Google as ${e.connectedEmail || e.from || "Gmail"}.`
       : "Connected with a Gmail App Password (advanced setup).";
@@ -2800,6 +2830,14 @@ $("email-autosend").addEventListener("change", async e => {
   const r = await postJSON("/api/settings/set", { path: "email.autoSend", value: e.target.checked ? "true" : "false" });
   note("email-on-note", r.ok ? "✓ Saved." : ("✗ " + (r.error || "could not save")), r.ok);
   if (r.ok) setTimeout(() => note("email-on-note", ""), 1500);
+});
+
+// v7.0: the card's format select doubles as the persisted preference
+// (email.format) — it drives the morning auto-send and defaults manual sends.
+$("email-send-format").addEventListener("change", async e => {
+  const r = await postJSON("/api/settings/set", { path: "email.format", value: e.target.value });
+  note("email-on-note", r.ok ? "✓ Saved — batches send as ." + e.target.value + " now." : ("✗ " + (r.error || "could not save")), r.ok);
+  if (r.ok) setTimeout(() => note("email-on-note", ""), 2000);
 });
 
 async function sendEmailBatch(format, btn, noteId = "") {

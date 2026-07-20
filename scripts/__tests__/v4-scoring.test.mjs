@@ -6,7 +6,7 @@ import {
   termAllowedInText, AMBIGUOUS_TERM_CONTEXT, OFF_FAMILY_RX, FAMILY_PENALTY,
   jdScoreToPercent, salaryRank, compareJobs, SALARY_FLOOR_K,
 } from '../daily-batch.mjs';
-import { buildPrompt, DEFAULT_AI_MODEL } from '../ai-rerank.mjs';
+import { buildPrompt, DEFAULT_AI_MODEL, RATINGS_SCHEMA } from '../ai-rerank.mjs';
 
 test('ambiguous guard: Palo Alto the city does NOT count', () => {
   assert.equal(termAllowedInText('Palo Alto', 'Marketing Manager — Palo Alto, CA · $120k'), false);
@@ -68,4 +68,29 @@ test('ai prompt embeds cv summary + jobs and model default is opus 4.8', () => {
   const p = buildPrompt({ skills: ['iam'] }, [{ n: 0, title: 'IAM Engineer', company: 'X', text: 'body' }]);
   assert.ok(p.includes('"iam"') && p.includes('IAM Engineer') && p.includes('fit 0-100'));
   assert.equal(DEFAULT_AI_MODEL, 'claude-opus-4-8');
+});
+
+// v7.0: Smart match reads the real resume + scores a rubric, not just keywords.
+test('ai prompt embeds verbatim resume text when provided (keywords become supplemental)', () => {
+  const p = buildPrompt(
+    { skills: ['iam'], resumeText: 'Ran IAM at BigBank for 5 years; led Okta rollout.' },
+    [{ n: 0, title: 'IAM Engineer', company: 'X', text: 'body' }]
+  );
+  assert.ok(p.includes('BigBank'), 'real resume text is in the prompt');
+  assert.ok(p.includes('supplemental'), 'keywords are marked supplemental');
+  assert.ok(!p.includes('"resumeText"'), 'resumeText is not double-embedded in the keyword JSON');
+  assert.ok(p.includes('- skills:') && p.includes('- seniority:') && p.includes('- role:'), 'rubric subscores are requested');
+});
+
+test('ai prompt without resume text falls back to keyword-summary mode', () => {
+  const p = buildPrompt({ skills: ['iam'] }, [{ n: 0, title: 'IAM Engineer', company: 'X', text: 'body' }]);
+  assert.ok(p.includes('Resume summary (extracted keywords):'));
+});
+
+test('ratings schema requires rubric subscores', () => {
+  const req = RATINGS_SCHEMA.properties.ratings.items.required;
+  for (const k of ['n', 'fit', 'reason', 'skills', 'seniority', 'role']) {
+    assert.ok(req.includes(k), `schema requires ${k}`);
+  }
+  assert.equal(RATINGS_SCHEMA.properties.ratings.items.additionalProperties, false);
 });

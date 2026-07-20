@@ -101,6 +101,7 @@ function settingsGet() {
         from: cfg.email?.from || '',
         subject: cfg.email?.subject || 'Job batch — {DATE}',
         autoSend: !!cfg.email?.autoSend,
+        format: ['txt', 'csv', 'xlsx'].includes(cfg.email?.format) ? cfg.email.format : 'txt', // v7.0
         hasCreds: delivery.connected,
         provider: delivery.provider,
         connectedEmail: delivery.email,
@@ -130,13 +131,18 @@ function settingsSet(dotPath, jsonValue) {
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
-    'email.autoSend', 'email.subject', 'email.to'
+    'email.autoSend', 'email.subject', 'email.to',
+    'email.format' // v7.0: attachment format for the batch email (txt | csv | xlsx)
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
   if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
   if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'email.format') {
+    value = String(value || '').trim().toLowerCase();
+    if (!['txt', 'csv', 'xlsx'].includes(value)) return out({ ok: false, error: 'format must be txt, csv, or xlsx' });
+  }
   if (dotPath === 'email.subject') { value = String(value || '').trim().slice(0, 120) || 'Job batch — {DATE}'; }
   if (dotPath === 'email.to') {
     value = String(value || '').trim();
@@ -701,7 +707,8 @@ async function emailSave(user, pass, to, subject, autoSend) {
 }
 
 // Manual "Email batch" actions: email the current batch in the format chosen
-// for this send. Automatic post-scrape delivery remains the compact TXT.
+// for this send, defaulting to the saved email.format preference. Automatic
+// post-scrape delivery honors the same preference (v7.0).
 async function emailSend(format) {
   const env = readEmailEnv();
   const delivery = emailDeliveryStatus(env);
@@ -709,7 +716,9 @@ async function emailSend(format) {
   const cfg = cfgRW.read();
   const to = String(cfg.email?.to || '').trim();
   if (!isEmailAddress(to)) return out({ ok: false, error: 'No recipient set — add one in System → Email.' });
-  const att = resolveBatchAttachment(format);
+  // v7.0: an explicit per-send choice (menu click) wins; otherwise fall back
+  // to the saved email.format preference — same default the auto-send uses.
+  const att = resolveBatchAttachment(format || cfg.email?.format);
   if (!att.ok) return out({ ok: false, error: att.error || 'No batch yet — run a scrape first.' });
   const subject = renderSubject(cfg.email?.subject, att.date);
   try {

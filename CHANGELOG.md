@@ -8,6 +8,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.0.0] — 2026-07-20
+
+### Changed
+
+- **Bolder dashboard hierarchy pass.** The Jobs view now leads with its numbers: the KPI tiles (jobs in batch, average match, strong matches, batch date) use larger, heavier hero figures, and **Strong matches** is rendered in the same green the match meter already uses for strong jobs — making "is today worth my time?" the first thing the eye lands on. Match percentages in the ranked table are larger and heavier, the match meter is slightly taller, and the view title is stronger. Column headers and stat labels were darkened one step, which also fixes a light-theme WCAG AA contrast shortfall on those labels. All changes stay inside the existing design tokens — no new colors, gradients, or radii — and apply to both light and dark themes.
+
+### Smart match (AI) accuracy overhaul
+
+- **The rerank now reads your actual resume.** When a Smart match API key is set, the model receives the raw resume text the parser already stores (first ~6 KB) instead of only the extracted keyword arrays — so it can judge experience, tenure, and seniority, not just word overlap. Keyword arrays ride along as a supplement, and older `cv-parsed.json` files without stored text fall back to keyword-summary mode unchanged.
+- **Fuller job descriptions.** Each reranked candidate now carries up to 2,200 characters of the real posting (was 900), so requirements the model is grading against are actually in front of it.
+- **Rubric scoring.** The model must score `skills`, `seniority`, and `role` fit (0–100 each) before committing to an overall fit — decomposed judgments are measurably more accurate than one opaque number. The subscores are saved to `last-batch.json` (`aiSub`) and shown in the Why panel next to the Smart match reason.
+- **The AI's opinion counts for more.** With the real resume and fuller descriptions in hand, the blend moved from 45% keywords / 55% AI to 35% / 65%.
+
+### Email batch format
+
+- **Your format preference now sticks — and the morning auto-send honors it.** v6.2 added per-send format choice on manual emails but the automatic morning send stayed hard-coded to `.txt` and nothing persisted. A new saved preference (`email.format`: txt | csv | xlsx, set from System → Email's "Send batch as" select) now drives the **morning auto-send** and serves as the **default for manual sends**; the per-send Email menu still overrides for one-offs. The .xlsx carries clickable apply links.
+
+### Accessibility & polish
+
+- The keyboard focus ring on the match-strength filter (All / ≥70% / 50–69% / <50%) is no longer clipped by the segmented control's `overflow: hidden`; it now draws inset so keyboard users can see the focused band.
+- The dashboard error banner is now announced by screen readers (`role="alert"`), and the header status chip (connecting / healthy / stale) announces changes politely (`aria-live`).
+- Typographic craft: headings use `text-wrap: balance` for even line breaks, body/hint prose uses `text-wrap: pretty` to avoid orphans, and macOS/Firefox get `-moz-osx-font-smoothing: grayscale`. All degrade gracefully where unsupported.
+- A **zero** strong-matches count now renders muted instead of green — a green "0" would misread as good news for a bad state. The batch-date tile is sized as secondary context rather than a hero number, which also keeps it from wrapping on narrow windows. The header status chip only rewrites its text on an actual state change, so its `aria-live` region won't re-announce an unchanged status.
+
 ## [6.2.0] — 2026-07-13
 
 ### Added
