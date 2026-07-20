@@ -64,13 +64,35 @@ export function restoreConfigSnapshot(name) {
   return true;
 }
 
+// v7.1: pure picker — newest valid snapshot name from a list (exported for
+// tests). Names embed an ISO timestamp, so a reverse lexical sort is newest-first.
+export function pickLatestSnapshot(names) {
+  return (names || []).filter(f => /^config-.*\.json$/.test(f)).sort().reverse()[0] || null;
+}
+
 // Profile-aware: ensure migration ran, then return a flattened view of the
 // active profile's contents at the top level. Backward compat — consumers
 // keep doing `cfg.user.salaryFloorUsd`.
 export function read() {
   if (!fs.existsSync(CFG_PATH)) {
-    if (fs.existsSync(CFG_EXAMPLE)) fs.copyFileSync(CFG_EXAMPLE, CFG_PATH);
-    else throw new Error('config.json not found and no example to copy from');
+    // v7.1 self-heal: a missing config.json on a machine that HAS backups
+    // means settings were lost (bad update, wrong-dir install, manual mishap)
+    // — restore the newest snapshot instead of resetting to the example.
+    // Fresh installs have no backups and fall through to the example copy.
+    let healed = false;
+    const snapName = pickLatestSnapshot(listConfigSnapshots());
+    if (snapName) {
+      try {
+        const src = path.join(ROOT, 'data', 'backups', snapName);
+        JSON.parse(fs.readFileSync(src, 'utf8')); // validate before trusting
+        fs.copyFileSync(src, CFG_PATH);
+        healed = true;
+      } catch { /* corrupt snapshot — fall through to the example */ }
+    }
+    if (!healed) {
+      if (fs.existsSync(CFG_EXAMPLE)) fs.copyFileSync(CFG_EXAMPLE, CFG_PATH);
+      else throw new Error('config.json not found and no example to copy from');
+    }
   }
   migrateIfNeeded();
   return readActiveConfig();

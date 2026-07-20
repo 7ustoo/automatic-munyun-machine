@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.1.0] — 2026-07-20
+
+### Fixed
+
+- **Updates no longer reset your settings.** Root cause found and killed: CI's test step creates a `config.json` in the build checkout, the Windows installer packaged the repo root without excluding it, and Inno Setup's `ignoreversion` then overwrote the user's real `config.json` on every update — wiping blocked companies, the Smart match API key, schedule, and email settings (profiles and the scanned resume live in `data/`, which was always excluded, so they survived). Four defenses now stand between an update and your settings:
+  1. The installer excludes the payload-root `config.json` (`\config.json` in `amm.iss`).
+  2. The release workflow scrubs `config.json`, `data/`, and `.env` from the checkout before the installer is built.
+  3. `self-update` snapshots `config.json` into `data/backups/` (`pre-update`) right before every update, joining the existing pre-restore/pre-delete/pre-setup snapshots (last 10 kept, restorable from System → Backups).
+  4. Self-heal: if `config.json` is ever missing while backups exist, the newest valid snapshot is restored automatically instead of resetting to defaults.
+- A new regression test file (`update-safety.test.mjs`) pins all four layers so this bug class can't quietly return.
+
 ## [7.0.0] — 2026-07-20
 
 ### Changed

@@ -106,6 +106,18 @@ jobs:
       - name: Install Inno Setup
         run: choco install innosetup -y --no-progress
 
+      # v7.1: npm test (above) creates config.json + data/ in the checkout as
+      # side effects. The .iss now excludes them, but scrub here too so no
+      # user-state file can ever ride into the payload and clobber a real
+      # install on upgrade. Belt AND suspenders — this bug reset users'
+      # settings on every update and must never come back.
+      - name: Scrub user-state files from installer payload
+        shell: powershell
+        run: |
+          if (Test-Path config.json) { Remove-Item config.json -Force; Write-Host "removed config.json" }
+          if (Test-Path data) { Remove-Item data -Recurse -Force; Write-Host "removed data/" }
+          if (Test-Path .env) { Remove-Item .env -Force; Write-Host "removed .env" }
+
       - name: Build .exe via Inno Setup
         shell: powershell
         run: |

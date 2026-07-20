@@ -46,7 +46,7 @@ import (
 // at compile time and silently ignore -X. Without this, every release built
 // since the wrapper landed would have shipped with whatever string happened
 // to be on this line.
-var AMMVersion = "7.0.0"
+var AMMVersion = "7.1.0"
 
 // CLI flags. The wrapper is usually invoked with no args from Task Scheduler /
 // launchd / systemd; the flags exist for manual debugging.
