@@ -15,6 +15,7 @@
 import { fetchGreenhouse } from './greenhouse.mjs';
 import { fetchLever } from './lever.mjs';
 import { fetchAshby } from './ashby.mjs';
+import { fetchDice } from './dice.mjs';
 import { matchesWorkplace } from './normalize.mjs';
 
 const FETCHERS = { greenhouse: fetchGreenhouse, lever: fetchLever, ashby: fetchAshby };
@@ -46,7 +47,7 @@ async function loadRemoteSources(url, { fetchImpl = fetch, timeoutMs = 12000 } =
   } catch { return {}; }
 }
 
-export async function fetchAllSources(sources = {}, { workplaceTypes = [], log = () => {}, fetchImpl } = {}) {
+export async function fetchAllSources(sources = {}, { workplaceTypes = [], log = () => {}, fetchImpl, queries = [] } = {}) {
   const remote = await loadRemoteSources(sources.remoteConfigUrl, { fetchImpl });
   const merged = mergeSources(sources, remote);
   const tasks = [];
@@ -56,6 +57,16 @@ export async function fetchAllSources(sources = {}, { workplaceTypes = [], log =
         fetcher(token, { fetchImpl })
           .then(jobs => ({ ats, token, jobs }))
           .catch(() => ({ ats, token, jobs: [] }))
+      );
+    }
+  }
+  // v7.3: Dice is search-driven — one task per configured search term.
+  if (sources.dice?.enabled) {
+    for (const q of queries.map(t => String(t || '').trim()).filter(Boolean)) {
+      tasks.push(
+        fetchDice(q, { fetchImpl })
+          .then(jobs => ({ ats: 'dice', token: q, jobs }))
+          .catch(() => ({ ats: 'dice', token: q, jobs: [] }))
       );
     }
   }

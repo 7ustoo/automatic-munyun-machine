@@ -102,6 +102,7 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/config/restore", d.guardPost(d.handleConfigRestore)) // v4.0
 	mux.HandleFunc("/api/jobs/add", d.guardPost(d.handleJobsAdd))
 	mux.HandleFunc("/api/jobs/remove", d.guardPost(d.handleJobsRemove))
+	mux.HandleFunc("/api/jobs/engine", d.guardPost(d.handleJobsEngine)) // v7.3: per-term source routing
 	mux.HandleFunc("/api/jobs/clear", d.guardPost(d.handleJobsClear))   // v2.8: clear all terms
 	mux.HandleFunc("/api/skip/add", d.guardPost(d.handleSkipAdd))       // v4.6: block a company
 	mux.HandleFunc("/api/skip/remove", d.guardPost(d.handleSkipRemove)) // v4.6: unblock a company
@@ -143,6 +144,11 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	// Playwright probe and refreshes the cache.
 	mux.HandleFunc("/api/hcafe/auth", d.handleHcafeAuth)
 	mux.HandleFunc("/api/hcafe/auth/refresh", d.guardPost(d.handleHcafeAuthRefresh))
+	// v7.3: Dice sign-in — same flow as hcafe (visible window + probe + cache).
+	mux.HandleFunc("/api/setup/dice-login/status", d.handleDiceLoginStatus)
+	mux.HandleFunc("/api/setup/dice-login/start", d.guardPost(d.handleDiceLoginStart))
+	mux.HandleFunc("/api/dice/auth", d.handleDiceAuth)
+	mux.HandleFunc("/api/dice/auth/refresh", d.guardPost(d.handleDiceAuthRefresh))
 	mux.HandleFunc("/api/setup/init", d.guardPost(d.handleSetupInit))
 	mux.HandleFunc("/api/setup/finalize", d.guardPost(d.handleSetupFinalize))
 
@@ -500,6 +506,7 @@ type batchJob struct {
 	DirectURL string   `json:"directUrl"`
 	ViewURL   string   `json:"viewjobUrl"`
 	SalaryK   int      `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
+	Src       string   `json:"src"`     // v7.3: job source (hcafe/dice/greenhouse/lever/ashby)
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the

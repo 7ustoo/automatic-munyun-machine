@@ -8,6 +8,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.3.0] — 2026-07-20
+
+### Added
+
+- **Dice.com job source.** Toggle "Dice.com" on the Searches page (Job sources card) and every scrape also runs your configured search terms against dice.com — no login, no API key, no extra browser work. Jobs arrive with structured data straight from Dice's server-rendered pages: real salary ranges (fed into the existing salary tie-breaker), posted dates, workplace type (Remote/Hybrid/On-Site, honored by your workplace preference filter), and a JD summary; the top results per term additionally get their full job description fetched so JD-pass scoring sees real posting text. Dice cards ride the same filter → dedup → score → rank pipeline as every other source (`sources.dice.enabled` in config; `scripts/sources/dice.mjs`; parsing is pure and fixture-tested, fetching is best-effort so a Dice outage can never break a scrape).
+- **Pick what each scrape runs.** With Dice on, a "What to scrape" selector appears on the Searches page: both sources, hiring.cafe only, or Dice only (`search.scrapeSources`). A Dice-only scrape skips launching the browser entirely — it's pure fetch, so it's fast. And each search term gets its own source tag (click to cycle **both → cafe → dice**), so "iam engineer" can run everywhere while "dice-only niche term" stays off hiring.cafe (`queries[].engines`, routed by `scripts/query-engines.mjs`).
+- **Ranked jobs say where they came from.** Every job in the dashboard's ranked list now carries a source badge — **cafe** for hiring.cafe, **dice** for dice.com (company boards keep their ATS name). The "Save on hiring.cafe" button only renders on hiring.cafe jobs, since saving a Dice job there makes no sense (`src` field in `last-batch.json`).
+- **Sign in to Dice — same flow as hiring.cafe.** A Dice.com card on the System page (visible when the Dice source is on) with the identical UX: Sign in launches a browser window at Dice's login page using the same persistent profile, closing it triggers a headless probe (`/home-feed` redirect check — the dice.com twin of hiring.cafe's `/saved` probe), status is cached to `data/dice-auth.json` with a Re-check button. Optional: search scraping works signed out; signing in makes Dice apply links open already logged in so Easy Apply and Dice's saved/applied tracking work for you or your VA. (`scripts/dice-login.mjs`, `scripts/dice-auth-probe.mjs`, `scripts/dice-session.mjs`.)
+
 ## [7.2.0] — 2026-07-20
 
 ### Added

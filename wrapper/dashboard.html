@@ -319,6 +319,24 @@
     font-size: 15px; line-height: 1; cursor: pointer;
   }
   .chip button:hover { color: var(--red); background: none; border: none; }
+
+  /* v7.3: per-term source tag (both/cafe/dice) — click cycles */
+  .chip .engine-tag {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    padding: 1px 7px; border-radius: 999px; cursor: pointer;
+    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-2);
+  }
+  .chip .engine-tag.hcafe { border-color: var(--yellow); color: var(--yellow); background: var(--yellow-dim); }
+  .chip .engine-tag.dice  { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
+  .chip .engine-tag:hover { border-color: var(--accent-2); color: var(--accent-2); }
+
+  /* v7.3: job source badge in the ranked list (cafe / dice / greenhouse / …) */
+  .src-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; padding: 1px 7px; border-radius: 999px; margin-right: 6px;
+    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-2);
+  }
+  .src-badge.dice { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
   .terms .chip[data-sterm] { cursor: pointer; padding: 4px 12px; user-select: none; }
   .terms .chip[data-sterm].off { opacity: .38; text-decoration: line-through; }
   .terms .chip[data-sterm]:not(.off) { border-color: rgba(88,166,255,.4); background: var(--accent-dim); }
@@ -1199,8 +1217,17 @@
             <button class="sm primary" id="term-add"><svg class="ic"><use href="#i-plus"/></svg>Add</button>
             <button class="sm danger" id="term-clear" title="Remove every search term"><svg class="ic"><use href="#i-trash"/></svg>Clear all</button>
           </div>
+          <!-- v7.3: source routing — hidden until the Dice source is enabled -->
+          <div class="row hidden" id="scrape-sources-row" style="margin-top:10px">
+            <label for="scrape-sources" class="muted-sm">What to scrape</label>
+            <select class="slim" id="scrape-sources">
+              <option value="both">Both — hiring.cafe + Dice</option>
+              <option value="hcafe">hiring.cafe only</option>
+              <option value="dice">Dice only</option>
+            </select>
+          </div>
           <div id="terms-list" class="terms"></div>
-          <div class="hint">Tip: the Resume page can suggest terms straight from your CV — and switch between title-style and keyword-style suggestions.</div>
+          <div class="hint">Tip: the Resume page can suggest terms straight from your CV — and switch between title-style and keyword-style suggestions.<span id="engine-hint" class="hidden"> With Dice on, click a term's <b>both / cafe / dice</b> tag to route it to one source.</span></div>
         </div>
         <div class="card">
           <h2>Blocked companies <span class="pill" id="skip-count"></span></h2>
@@ -1220,6 +1247,9 @@
             <input type="text" id="src-lever" placeholder="e.g. netflix" autocomplete="off" spellcheck="false" /></div>
           <div class="src-row"><label for="src-ashby">Ashby <span class="muted-sm">jobs.ashbyhq.com/<b>slug</b></span></label>
             <input type="text" id="src-ashby" placeholder="e.g. ramp, openai" autocomplete="off" spellcheck="false" /></div>
+          <!-- v7.3: Dice is search-driven — a toggle, not a slug list. It reuses
+               the search terms configured above. -->
+          <label class="watch-toggle" style="margin-top:10px"><input type="checkbox" id="src-dice" /><span>Dice.com — search your terms on Dice too <span class="muted-sm">(tech-heavy board, real salary ranges, no login)</span></span></label>
           <div class="note" id="src-note"></div>
         </div>
       </section>
@@ -1426,6 +1456,20 @@
               <button class="sm" id="hc-recheck"><svg class="ic"><use href="#i-refresh"/></svg>Re-check</button>
             </div>
             <div class="setup-hcafe-state hidden" id="hc-state-msg"></div>
+          </div>
+
+          <!-- v7.3: Dice sign-in — same flow as hiring.cafe. Hidden until the
+               Dice source is enabled on the Searches page. -->
+          <div class="card hidden" id="dice-card">
+            <h2>Dice.com <span class="pill" id="dice-pill">—</span></h2>
+            <div class="big" id="dice-big"><span class="dot" id="dice-dot"></span><span id="dice-state">Checking…</span></div>
+            <div class="stat-row"><span class="k">Last checked</span><span class="v" id="dice-checked">—</span></div>
+            <div class="muted-sm">Signing in makes Dice apply links open already logged in — Easy Apply and Dice's saved/applied tracking work for you or your VA. Optional — Dice search works signed out either way.</div>
+            <div class="row" style="margin-top:8px">
+              <button class="sm primary" id="dice-signin">Sign in to Dice</button>
+              <button class="sm" id="dice-recheck"><svg class="ic"><use href="#i-refresh"/></svg>Re-check</button>
+            </div>
+            <div class="setup-hcafe-state hidden" id="dice-state-msg"></div>
           </div>
 
           <div class="card">
@@ -2045,6 +2089,13 @@ function renderJobs() {
     $("lb-foot").textContent = "0 of " + all.length + " jobs";
     return;
   }
+  // v7.3: which site the job came from. hiring.cafe reads "cafe"; company
+  // boards keep their ATS name. Missing src (pre-v7.3 batches) = cafe.
+  const srcBadge = (s) => {
+    const src = s || "hcafe";
+    const label = src === "hcafe" ? "cafe" : src;
+    return `<span class="src-badge ${escapeAttr(src)}" title="Job found on ${src === "hcafe" ? "hiring.cafe" : src === "dice" ? "dice.com" : escapeAttr(src)}">${escapeHTML(label)}</span>`;
+  };
   const rows = jobs.map(j => {
     const url = j.directUrl || j.viewjobUrl || "#";
     const pct = j.matchPct ?? 0;
@@ -2059,11 +2110,11 @@ function renderJobs() {
       </td>
       <td class="match"><span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span></td>
       <td class="yoe">${j.yoe == null ? "—" : escapeHTML(String(j.yoe)) + " yr"}</td>
-      <td class="src">${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
+      <td class="src">${srcBadge(j.src)}${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
       <td class="actions">
         <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">Apply<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
         <button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>
-        <button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>
+        ${(j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
         <button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>
       </td>
     </tr>`;
@@ -2244,6 +2295,8 @@ async function loadSettings() {
     const wt = new Set(s.workplaceTypes || ["Remote"]);
     $("set-workplace").querySelectorAll("input[type=checkbox]").forEach(cb => { cb.checked = wt.has(cb.value); });
     $("set-location").value = s.searchLocation || "";
+    window.__queryEngines = s.queryEngines || {};                       // v7.3
+    $("scrape-sources").value = s.scrapeSources || "both";              // v7.3
     if (typeof renderSources === "function") renderSources(s.sources || {});
     renderTerms(s.queries || []);
     renderSkip(s.skipCompanies || []);
@@ -2346,12 +2399,37 @@ $("set-mode").addEventListener("change", async e => {
 
 // ---- Search terms ----
 function renderTerms(terms) {
+  window.__lastTerms = terms; // v7.3: re-render when the Dice toggle flips
   $("terms-count").textContent = terms.length + " terms";
   $("nav-terms-badge").textContent = terms.length ? String(terms.length) : "";
-  $("terms-list").innerHTML = terms.map(t =>
-    `<span class="chip">${escapeHTML(t)}<button data-term="${escapeAttr(t)}" title="remove" aria-label="remove ${escapeAttr(t)}">×</button></span>`
-  ).join("");
+  const dice = !!window.__diceEnabled;
+  $("engine-hint").classList.toggle("hidden", !dice);
+  const engines = window.__queryEngines || {};
+  $("terms-list").innerHTML = terms.map(t => {
+    const e = engines[t] || "both";
+    // v7.3: per-term source tag — click cycles both → cafe → dice. Only
+    // rendered while the Dice source is on; 'both' is the invisible default.
+    const tag = dice
+      ? `<button class="engine-tag ${e}" data-engine-term="${escapeAttr(t)}" title="Where this term searches — click to change">${e === "hcafe" ? "cafe" : e}</button>`
+      : "";
+    return `<span class="chip">${escapeHTML(t)}${tag}<button data-term="${escapeAttr(t)}" title="remove" aria-label="remove ${escapeAttr(t)}">×</button></span>`;
+  }).join("");
 }
+// v7.3: cycle a term's engine tag: both → hcafe → dice → both.
+$("terms-list").addEventListener("click", async (ev) => {
+  const tagBtn = ev.target.closest("button[data-engine-term]");
+  if (!tagBtn) return;
+  const term = tagBtn.dataset.engineTerm;
+  const cur = (window.__queryEngines || {})[term] || "both";
+  const next = cur === "both" ? "hcafe" : cur === "hcafe" ? "dice" : "both";
+  const r = await postJSON("/api/jobs/engine", { term, engines: next });
+  if (r.ok) {
+    (window.__queryEngines = window.__queryEngines || {})[term] = r.engines;
+    renderTerms(window.__lastTerms || []);
+  } else {
+    toast("Could not update: " + (r.error || "error"), "bad");
+  }
+});
 $("terms-list").addEventListener("click", async (ev) => {
   const b = ev.target.closest("button[data-term]");
   if (!b) return;
@@ -2394,7 +2472,32 @@ function renderSources(sources) {
   $("src-greenhouse").value = (sources.greenhouse || []).join(", ");
   $("src-lever").value = (sources.lever || []).join(", ");
   $("src-ashby").value = (sources.ashby || []).join(", ");
+  $("src-dice").checked = !!sources.dice; // v7.3
+  // v7.3: the Dice sign-in card + per-term source tags only make sense with
+  // the Dice source on.
+  $("dice-card").classList.toggle("hidden", !sources.dice);
+  $("scrape-sources-row").classList.toggle("hidden", !sources.dice);
+  window.__diceEnabled = !!sources.dice;
+  if (sources.dice) loadDiceAuthCached();
+  renderTerms(window.__lastTerms || []);
 }
+$("src-dice").addEventListener("change", () => {
+  const on = $("src-dice").checked;
+  saveSetting("sources.dice.enabled", on);
+  $("src-note").textContent = on
+    ? "✓ Dice on — your search terms run on dice.com next scrape."
+    : "✓ Dice off.";
+  $("dice-card").classList.toggle("hidden", !on);
+  $("scrape-sources-row").classList.toggle("hidden", !on);
+  window.__diceEnabled = on;
+  if (on) loadDiceAuthCached();
+  renderTerms(window.__lastTerms || []);
+});
+$("scrape-sources").addEventListener("change", () => {
+  saveSetting("search.scrapeSources", $("scrape-sources").value);
+  const label = { both: "both sources", hcafe: "hiring.cafe only", dice: "Dice only" }[$("scrape-sources").value];
+  toast("Scrapes now use " + label + ".", "good");
+});
 ["greenhouse", "lever", "ashby"].forEach(ats => {
   const el = $("src-" + ats);
   if (!el) return;
@@ -3083,6 +3186,97 @@ function pollHcafeSignin() {
     } catch { /* transient — keep polling */ }
   };
   hcafePollTimer = setInterval(poll, 2500);
+  poll();
+}
+
+// ---- Dice sign-in (v7.3) — hcafe card logic cloned for dice.com ----------
+let dicePollTimer = null;
+function renderDiceAuth(d) {
+  const authed = d ? d.authed : null; // true | false | null(unknown)
+  const dot = authed === true ? "alive" : authed === false ? "dead" : "unknown";
+  const big = $("dice-big");
+  big.classList.remove("alive", "stale", "dead", "unknown");
+  big.classList.add(dot);
+  setDot($("dice-dot"), dot);
+  $("dice-state").textContent = authed === true ? "Signed in" : authed === false ? "Not signed in" : "Unknown";
+  $("dice-pill").textContent = authed === true ? "on" : authed === false ? "off" : "—";
+  if (d && d.checkedAt) {
+    const ageSec = Math.max(0, (Date.now() - new Date(d.checkedAt).getTime()) / 1000);
+    $("dice-checked").textContent = humanDuration(ageSec) + " ago";
+  } else {
+    $("dice-checked").textContent = "never";
+  }
+}
+
+async function loadDiceAuthCached() {
+  try {
+    const r = await (await fetch("/api/dice/auth", { cache: "no-store" })).json();
+    if (r.ok) renderDiceAuth(r);
+  } catch { /* transient — leave as-is */ }
+}
+
+$("dice-recheck").addEventListener("click", async () => {
+  const btn = $("dice-recheck");
+  btn.disabled = true;
+  $("dice-state").textContent = "Checking…";
+  $("dice-pill").textContent = "…";
+  try {
+    const r = await postJSON("/api/dice/auth/refresh");
+    if (r.ok) {
+      renderDiceAuth(r);
+      toast(r.authed ? "Signed in to Dice." : "Not signed in to Dice.", r.authed ? "good" : "bad");
+    } else {
+      toast("Could not check: " + (r.error || "error"), "bad");
+      loadDiceAuthCached();
+    }
+  } finally { btn.disabled = false; }
+});
+
+$("dice-signin").addEventListener("click", async () => {
+  const btn = $("dice-signin");
+  const msg = $("dice-state-msg");
+  btn.disabled = true;
+  msg.classList.remove("hidden", "done", "err");
+  msg.classList.add("running");
+  msg.textContent = "Launching Chrome… a browser window should appear at Dice's sign-in page. Sign in, then close the window.";
+  try {
+    const r = await postJSON("/api/setup/dice-login/start");
+    if (!r.ok) {
+      msg.textContent = "✗ Could not launch: " + (r.error || "unknown");
+      msg.classList.remove("running"); msg.classList.add("err");
+      btn.disabled = false; return;
+    }
+    pollDiceSignin();
+  } catch (e) {
+    msg.textContent = "✗ " + e.message;
+    msg.classList.remove("running"); msg.classList.add("err");
+    btn.disabled = false;
+  }
+});
+
+function pollDiceSignin() {
+  const msg = $("dice-state-msg");
+  const btn = $("dice-signin");
+  const poll = async () => {
+    try {
+      const r = await (await fetch("/api/setup/dice-login/status", { cache: "no-store" })).json();
+      if (r.running) {
+        msg.textContent = "Browser open — sign in to Dice, then close the window.";
+        return;
+      }
+      clearInterval(dicePollTimer); dicePollTimer = null;
+      btn.disabled = false;
+      renderDiceAuth({ authed: !!r.authed, checkedAt: new Date().toISOString() });
+      if (r.authed) {
+        msg.classList.remove("running", "err"); msg.classList.add("done");
+        msg.textContent = "✓ Signed in to Dice.";
+      } else {
+        msg.classList.remove("running"); msg.classList.add("err");
+        msg.textContent = "✗ Couldn't confirm sign-in. Try again — make sure you signed in before closing the window.";
+      }
+    } catch { /* transient — keep polling */ }
+  };
+  dicePollTimer = setInterval(poll, 2500);
   poll();
 }
 
