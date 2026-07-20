@@ -354,12 +354,13 @@
     border-radius: var(--r-md); box-shadow: var(--shadow-2);
     padding: 6px; min-width: 220px; display: flex; flex-direction: column; gap: 2px;
   }
-  details.menu .menu-panel a {
+  details.menu .menu-panel a, details.menu .menu-panel button {
     display: flex; align-items: center; gap: 9px; padding: 7px 10px;
     border-radius: var(--r-sm); color: var(--text); font-size: 13px; text-decoration: none;
+    width: 100%; border: 0; background: transparent; text-align: left; font-weight: 400; cursor: pointer;
   }
-  details.menu .menu-panel a:hover { background: var(--surface-3); }
-  details.menu .menu-panel a small { color: var(--text-3); margin-left: auto; padding-left: 12px; }
+  details.menu .menu-panel a:hover, details.menu .menu-panel button:hover { background: var(--surface-3); }
+  details.menu .menu-panel a small, details.menu .menu-panel button small { color: var(--text-3); margin-left: auto; padding-left: 12px; }
 
   /* ---- Jobs table ----------------------------------------------------------- */
   .table-wrap { overflow-x: auto; }
@@ -1151,7 +1152,14 @@
               </div>
             </details>
             <button class="sm" id="open-all-btn" title="Open every job in this batch in your default browser"><svg class="ic"><use href="#i-external"/></svg>Open All</button>
-            <button class="sm" id="email-btn" title="Email this batch to your recipient (e.g. your VA)"><svg class="ic"><use href="#i-send"/></svg>Email</button>
+            <details class="menu" id="email-menu">
+              <summary class="btn sm" id="email-btn" title="Email this batch to your recipient (e.g. your VA)"><svg class="ic"><use href="#i-send"/></svg>Email<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
+              <div class="menu-panel">
+                <button type="button" data-email-format="txt"><svg class="ic"><use href="#i-file"/></svg>Plain text <small>.txt</small></button>
+                <button type="button" data-email-format="csv" title="Links are text — CSV can't carry native hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Spreadsheet <small>.csv</small></button>
+                <button type="button" data-email-format="xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></button>
+              </div>
+            </details>
             <button class="sm icon" id="refresh-btn" title="Refresh the list" aria-label="Refresh the list"><svg class="ic"><use href="#i-refresh"/></svg></button>
           </div>
           <div class="table-wrap"><div id="lb-body"></div></div>
@@ -1332,14 +1340,15 @@
             <div id="email-on" class="hidden">
               <div class="stat-row"><span class="k">Sends to</span><span class="v" id="email-to-v">—</span></div>
               <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send every morning after the scrape</span></label>
-              <!-- v7.0: pick what lands in the inbox — same three formats as Export. -->
-              <div class="set-row"><label for="email-format">Send batch as</label>
-                <select id="email-format">
-                  <option value="txt">Text list (.txt)</option>
+              <!-- v7.0: ONE format select — it persists as email.format (drives the
+                   morning auto-send + default for manual sends) and is also the
+                   format for the "Send latest batch now" button below. -->
+              <div class="row">
+                <select class="slim" id="email-send-format" aria-label="Batch attachment format — saved as your preference">
+                  <option value="txt">Plain text (.txt)</option>
                   <option value="csv">Spreadsheet (.csv)</option>
                   <option value="xlsx">Excel workbook (.xlsx)</option>
-                </select></div>
-              <div class="row">
+                </select>
                 <button class="sm primary" id="email-send-now"><svg class="ic"><use href="#i-send"/></svg>Send latest batch now</button>
                 <button class="danger sm" id="email-disable">Disconnect</button>
               </div>
@@ -1348,7 +1357,7 @@
 
             <!-- DISABLED / setup view -->
             <div id="email-off">
-              <div class="muted-sm">Off — connect Gmail with Google, then email your daily job batch to someone such as a virtual assistant (as .txt, .csv, or .xlsx — your pick). AMM can send messages but cannot read or delete your mail.</div>
+              <div class="muted-sm">Off — connect Gmail with Google, then email your job batch as .txt, .csv, or .xlsx to someone such as a virtual assistant. AMM can send messages but cannot read or delete your mail.</div>
               <button class="sm" id="email-setup-start"><svg class="ic"><use href="#i-send"/></svg>Set up email…</button>
 
               <div id="email-setup" class="hidden">
@@ -1570,10 +1579,11 @@ document.addEventListener("keydown", (e) => {
   $("job-search").focus();
 });
 
-// Close the export menu when clicking anywhere else.
+// Close toolbar menus when clicking anywhere else.
 document.addEventListener("click", (e) => {
-  const menu = $("export-menu");
-  if (menu && menu.open && !menu.contains(e.target)) menu.open = false;
+  for (const menu of document.querySelectorAll("details.menu")) {
+    if (menu.open && !menu.contains(e.target)) menu.open = false;
+  }
 });
 
 // ---- Toast (single, bottom-right, aria-live) ----
@@ -2707,7 +2717,7 @@ function renderEmail(e) {
   if (connected) {
     $("email-to-v").textContent = e.to || "—";
     $("email-autosend").checked = !!e.autoSend;
-    $("email-format").value = e.format || "txt";   // v7.0: persisted attach format
+    $("email-send-format").value = e.format || "txt";   // v7.0: persisted attach format
     $("email-on-note").textContent = e.provider === "gmail-oauth"
       ? `Connected securely with Google as ${e.connectedEmail || e.from || "Gmail"}.`
       : "Connected with a Gmail App Password (advanced setup).";
@@ -2822,19 +2832,38 @@ $("email-autosend").addEventListener("change", async e => {
   if (r.ok) setTimeout(() => note("email-on-note", ""), 1500);
 });
 
-// v7.0: attach-format preference — persists to config (email.format).
-$("email-format").addEventListener("change", async e => {
+// v7.0: the card's format select doubles as the persisted preference
+// (email.format) — it drives the morning auto-send and defaults manual sends.
+$("email-send-format").addEventListener("change", async e => {
   const r = await postJSON("/api/settings/set", { path: "email.format", value: e.target.value });
   note("email-on-note", r.ok ? "✓ Saved — batches send as ." + e.target.value + " now." : ("✗ " + (r.error || "could not save")), r.ok);
   if (r.ok) setTimeout(() => note("email-on-note", ""), 2000);
 });
 
-$("email-send-now").addEventListener("click", async () => {
-  const btn = $("email-send-now"); btn.disabled = true;
-  note("email-on-note", "Sending…", true);
-  const r = await postJSON("/api/email/send", {});
-  note("email-on-note", r.ok ? `✓ Emailed ${r.filename || "the batch"} to ${r.to}.` : ("✗ " + (r.error || "send failed")), r.ok);
-  btn.disabled = false;
+async function sendEmailBatch(format, btn, noteId = "") {
+  btn.disabled = true;
+  const old = btn.innerHTML;
+  btn.textContent = "Sending…";
+  if (noteId) note(noteId, `Sending ${String(format).toUpperCase()}…`, true);
+  try {
+    const r = await postJSON("/api/email/send", { format });
+    const msg = r.ok
+      ? `Emailed ${r.filename || "the batch"} to ${r.to}.`
+      : `Email failed: ${r.error || "send failed"}`;
+    if (noteId) note(noteId, (r.ok ? "✓ " : "✗ ") + msg, r.ok);
+    else toast(msg, r.ok ? "good" : "bad");
+  } catch (e) {
+    const msg = "Email failed: " + e.message;
+    if (noteId) note(noteId, "✗ " + msg, false);
+    else toast(msg, "bad");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = old;
+  }
+}
+
+$("email-send-now").addEventListener("click", () => {
+  sendEmailBatch($("email-send-format").value, $("email-send-now"), "email-on-note");
 });
 
 $("email-disable").addEventListener("click", async () => {
@@ -2849,21 +2878,17 @@ $("email-disable").addEventListener("click", async () => {
   if (r.ok) loadEmail();
 });
 
-// The "Email" button in the Jobs toolbar — send the current batch on demand.
-$("email-btn").addEventListener("click", async () => {
+// The Jobs toolbar Email menu sends the current batch in the chosen format.
+$("email-menu").addEventListener("click", (ev) => {
+  const choice = ev.target.closest("button[data-email-format]");
+  if (!choice) return;
+  $("email-menu").open = false;
   if (!window.__emailConnected) {
     navTo("system"); // v5.0: navTo (not setView) so hash + view stay in sync — the '/' shortcut and reload depend on it
     toast("Set up email first — see the Email card on this page.", "bad");
     return;
   }
-  const btn = $("email-btn"); btn.disabled = true;
-  const old = btn.innerHTML; btn.innerHTML = "Sending…";
-  try {
-    const r = await postJSON("/api/email/send", {});
-    toast(r.ok ? `Emailed batch to ${r.to}.` : ("Email failed: " + (r.error || "error")), r.ok ? "good" : "bad");
-  } finally {
-    btn.disabled = false; btn.innerHTML = old;
-  }
+  sendEmailBatch(choice.dataset.emailFormat, choice);
 });
 
 // ---- Hiring.cafe sign-in status (v4.1) ----

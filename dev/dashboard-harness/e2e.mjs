@@ -37,6 +37,22 @@ await popup.waitForLoadState('domcontentloaded');
 await page.waitForFunction(() => window.__emailConnected === true, null, { timeout: 10000 });
 if ((await page.locator('#email-state').textContent()) !== 'Connected') throw new Error('OAuth email did not become connected');
 
+await page.selectOption('#email-send-format', 'xlsx');
+const xlsxRequestPromise = page.waitForRequest(r => r.url().endsWith('/api/email/send') && r.method() === 'POST');
+await page.click('#email-send-now');
+const xlsxRequest = await xlsxRequestPromise;
+if (xlsxRequest.postDataJSON().format !== 'xlsx') throw new Error('System email send did not request XLSX');
+await page.waitForFunction(() => document.querySelector('#email-on-note')?.textContent.includes('.xlsx'));
+
+await page.goto('http://127.0.0.1:8765/#jobs', { waitUntil: 'networkidle' });
+await page.waitForSelector('tr.job-row');
+await page.click('#email-btn');
+const csvRequestPromise = page.waitForRequest(r => r.url().endsWith('/api/email/send') && r.method() === 'POST');
+await page.click('button[data-email-format="csv"]');
+const csvRequest = await csvRequestPromise;
+if (csvRequest.postDataJSON().format !== 'csv') throw new Error('Jobs email menu did not request CSV');
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('.csv'));
+
 if (errors.length) throw new Error('dashboard console errors:\n' + errors.join('\n'));
 await browser.close();
 console.log('E2E: dashboard jobs, profiles, and Gmail OAuth flow passed');

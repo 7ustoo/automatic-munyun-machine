@@ -379,7 +379,11 @@ func (d *dashboardServer) handleEmailOAuthCallback(w http.ResponseWriter, r *htt
 }
 
 func (d *dashboardServer) handleEmailSend(w http.ResponseWriter, r *http.Request) {
-	d.relayDashboardAPI(w, 40*time.Second, "email-send")
+	format := readBody(r)["format"]
+	if format != "csv" && format != "xlsx" {
+		format = "txt"
+	}
+	d.relayDashboardAPI(w, 40*time.Second, "email-send", format)
 }
 
 func (d *dashboardServer) handleEmailDisable(w http.ResponseWriter, r *http.Request) {

@@ -107,10 +107,10 @@ export function loadExport(format) {
   if (fmt === 'xlsx') {
     // Binary format — base64 so it survives the one-line-JSON stdout contract.
     const contentBase64 = buildExportXlsx(rows, date).toString('base64');
-    return { ok: true, format: fmt, filename, contentBase64, count: rows.length };
+    return { ok: true, format: fmt, filename, contentBase64, count: rows.length, date };
   }
   const content = fmt === 'csv' ? buildExportCsv(rows) : buildExportTxt(rows, date);
-  return { ok: true, format: fmt, filename, content, count: rows.length };
+  return { ok: true, format: fmt, filename, content, count: rows.length, date };
 }
 
 // ---- CLI (the Go wrapper execs this) ----

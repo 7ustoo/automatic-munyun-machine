@@ -57,7 +57,7 @@ Company-board sources are optional and disabled until you add them.
 The desktop dashboard is the primary app. Extra delivery channels are optional:
 
 - **Telegram:** receive batches and run commands from your phone
-- **Email:** send the apply-link list to yourself or a helper through Gmail
+- **Email:** send the apply-link list to yourself or a helper through Gmail as `.txt`, `.csv`, or `.xlsx`
 - **Export:** download `.txt`, `.csv`, or `.xlsx` files with direct apply links
 
 ### Explainable matching

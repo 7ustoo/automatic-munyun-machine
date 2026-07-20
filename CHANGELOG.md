@@ -23,7 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Email batch format
 
-- **Pick what your VA gets.** The batch email (both the morning auto-send and "Send latest batch now") can now attach the job list as **.txt**, **.csv**, or **.xlsx** — same three formats as the Export menu, with the .xlsx carrying clickable apply links. Set it once in System → Email ("Send batch as") and it persists (`email.format` in config, default .txt). Email copy now says "job batch" instead of hard-coding ".txt".
+- **Your format preference now sticks — and the morning auto-send honors it.** v6.2 added per-send format choice on manual emails but the automatic morning send stayed hard-coded to `.txt` and nothing persisted. A new saved preference (`email.format`: txt | csv | xlsx, set from System → Email's "Send batch as" select) now drives the **morning auto-send** and serves as the **default for manual sends**; the per-send Email menu still overrides for one-offs. The .xlsx carries clickable apply links.
 
 ### Accessibility & polish
 
@@ -31,6 +31,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The dashboard error banner is now announced by screen readers (`role="alert"`), and the header status chip (connecting / healthy / stale) announces changes politely (`aria-live`).
 - Typographic craft: headings use `text-wrap: balance` for even line breaks, body/hint prose uses `text-wrap: pretty` to avoid orphans, and macOS/Firefox get `-moz-osx-font-smoothing: grayscale`. All degrade gracefully where unsupported.
 - A **zero** strong-matches count now renders muted instead of green — a green "0" would misread as good news for a bad state. The batch-date tile is sized as secondary context rather than a hero number, which also keeps it from wrapping on narrow windows. The header status chip only rewrites its text on an actual state change, so its `aria-live` region won't re-announce an unchanged status.
+
+## [6.2.0] — 2026-07-13
+
+### Added
+
+- Manual dashboard emails can now attach the ranked apply-link list as plain text (`.txt`), CSV (`.csv`), or an Excel workbook (`.xlsx`) with clickable application links. The format is selectable from both the Jobs toolbar and the System email card; automatic morning email remains `.txt`.
 
 ## [6.1.0] — 2026-07-13
 
@@ -923,7 +929,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.1.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.2.0...HEAD
+[6.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.1.0...v6.2.0
 [6.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.0.0...v6.1.0
 [6.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.2.0...v6.0.0
 [5.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.0.1...v5.2.0
