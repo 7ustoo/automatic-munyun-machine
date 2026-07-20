@@ -1220,6 +1220,9 @@
             <input type="text" id="src-lever" placeholder="e.g. netflix" autocomplete="off" spellcheck="false" /></div>
           <div class="src-row"><label for="src-ashby">Ashby <span class="muted-sm">jobs.ashbyhq.com/<b>slug</b></span></label>
             <input type="text" id="src-ashby" placeholder="e.g. ramp, openai" autocomplete="off" spellcheck="false" /></div>
+          <!-- v7.3: Dice is search-driven — a toggle, not a slug list. It reuses
+               the search terms configured above. -->
+          <label class="watch-toggle" style="margin-top:10px"><input type="checkbox" id="src-dice" /><span>Dice.com — search your terms on Dice too <span class="muted-sm">(tech-heavy board, real salary ranges, no login)</span></span></label>
           <div class="note" id="src-note"></div>
         </div>
       </section>
@@ -2394,7 +2397,14 @@ function renderSources(sources) {
   $("src-greenhouse").value = (sources.greenhouse || []).join(", ");
   $("src-lever").value = (sources.lever || []).join(", ");
   $("src-ashby").value = (sources.ashby || []).join(", ");
+  $("src-dice").checked = !!sources.dice; // v7.3
 }
+$("src-dice").addEventListener("change", () => {
+  saveSetting("sources.dice.enabled", $("src-dice").checked);
+  $("src-note").textContent = $("src-dice").checked
+    ? "✓ Dice on — your search terms run on dice.com next scrape."
+    : "✓ Dice off.";
+});
 ["greenhouse", "lever", "ashby"].forEach(ats => {
   const el = $("src-" + ats);
   if (!el) return;

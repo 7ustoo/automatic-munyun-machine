@@ -23,6 +23,8 @@
     "greenhouse": [],
     "lever": [],
     "ashby": [],
+    "dice": { "enabled": false },
+    "_diceComment": "v7.3: pull jobs from dice.com using your configured search terms (no login, no key). Toggle from the dashboard Searches page. Salary ranges come structured; top results per term get full-JD scoring.",
     "remoteConfigUrl": "",
     "_remoteConfigUrlComment": "v5.0: optional URL to a JSON file (e.g. a GitHub raw link) that can add source companies / adapter tweaks remotely, so a site change is a same-day fix without an app update. Empty = off. Fetched read-only, cached, and merged over local sources."
   },

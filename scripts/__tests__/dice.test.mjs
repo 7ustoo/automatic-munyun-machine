@@ -1,0 +1,166 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  extractFlightPayload, parseDiceJobs, extractFlightText, parseDiceDetailJD,
+  normalizeDice, fetchDice
+} from '../sources/dice.mjs';
+import { fetchAllSources } from '../sources/index.mjs';
+
+// ---- fixtures: synthetic Next.js flight pages in dice.com's real shape ----
+
+const JOB_A = {
+  id: 'aa11', guid: '95cb7fb9-416d-41d5-9e58-7323bc680a7f',
+  detailsPageUrl: 'https://www.dice.com/job-detail/95cb7fb9-416d-41d5-9e58-7323bc680a7f',
+  companyName: 'Disney', employmentType: 'Full-time',
+  jobLocation: { displayName: 'Orlando, Florida, USA' },
+  postedDate: '2026-07-19T11:38:21Z',
+  salary: 'USD 135,400.00 - 181,600.00 per year',
+  summary: 'We make the impossible possible. IAM, SAML, cloud security at scale.',
+  title: 'Senior Security Engineer', isRemote: false, workplaceTypes: ['On-Site']
+};
+const JOB_B = {
+  id: 'bb22', guid: '4ab2dea4-f804-4e91-8c0c-41b54b4dd24c',
+  detailsPageUrl: 'https://www.dice.com/job-detail/4ab2dea4-f804-4e91-8c0c-41b54b4dd24c',
+  companyName: 'EnerSys', jobLocation: { displayName: 'Remote, USA' },
+  postedDate: '2026-07-20T08:00:00Z', salary: 'Competitive',
+  summary: 'AppSec role.', title: 'Application Security Engineer',
+  isRemote: true, workplaceTypes: ['Remote']
+};
+
+// Flight payloads escape quotes; wrap as the page would, split across two
+// pushes mid-object to prove chunk joining works. JOB_A appears twice (result
+// list + "similar jobs" rail) to prove guid dedup.
+function flightWrap(json) {
+  return json.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+function searchFixture() {
+  const payload = `{"jobList":{"data":[${JSON.stringify(JOB_A)},${JSON.stringify(JOB_B)}]}},"similar":[${JSON.stringify(JOB_A)}]`;
+  const esc = flightWrap(payload);
+  const cut = Math.floor(esc.length / 2);
+  return `<html><body>` +
+    `<script>self.__next_f.push([1,"${esc.slice(0, cut)}"])</script>` +
+    `<script>self.__next_f.push([1,"${esc.slice(cut)}"])</script>` +
+    `</body></html>`;
+}
+function detailFixture() {
+  const jd = '\\u003cp\\u003eGreat \\u003cb\\u003eIAM\\u003c/b\\u003e job. Requires SAML &amp; OIDC.\\u003c/p\\u003e';
+  const text = `4b:T${jd.length.toString(16)},${jd}`;
+  const body = flightWrap(`{"jobDetail":{"description":"$4b","positionId":"X"}}`);
+  return `<html><body>` +
+    `<script>self.__next_f.push([1,"${flightWrap(text)}\\n"])</script>` +
+    `<script>self.__next_f.push([1,"${body}"])</script>` +
+    `</body></html>`;
+}
+
+// ---- parsers ----
+
+test('extractFlightPayload joins chunks and unescapes quotes', () => {
+  const flight = extractFlightPayload(searchFixture());
+  assert.ok(flight.includes('"guid":"95cb7fb9-416d-41d5-9e58-7323bc680a7f"'));
+  assert.ok(flight.includes('"salary":"USD 135,400.00 - 181,600.00 per year"'));
+});
+
+test('parseDiceJobs finds both jobs, dedups the similar-jobs repeat', () => {
+  const jobs = parseDiceJobs(searchFixture());
+  assert.equal(jobs.length, 2);
+  assert.equal(jobs[0].title, 'Senior Security Engineer');
+  assert.equal(jobs[1].guid, JOB_B.guid);
+});
+
+test('parseDiceJobs: no flight data → empty, never throws', () => {
+  assert.deepEqual(parseDiceJobs('<html>nothing here</html>'), []);
+  assert.deepEqual(parseDiceJobs(''), []);
+});
+
+test('extractFlightText resolves a hex-length text chunk', () => {
+  const txt = extractFlightText(detailFixture(), '4b');
+  assert.ok(txt.includes('\\u003cp\\u003e') || txt.includes('<p>')); // raw chunk, pre-decode
+});
+
+test('parseDiceDetailJD decodes \\uXXXX, strips tags and entities', () => {
+  const jd = parseDiceDetailJD(detailFixture());
+  assert.equal(jd, 'Great IAM job. Requires SAML OIDC.');
+});
+
+// ---- normalization ----
+
+test('normalizeDice maps fields; salary lands in jd text for the salary parser', () => {
+  const c = normalizeDice(JOB_A);
+  assert.equal(c.source, 'dice');
+  assert.equal(c.company, 'Disney');
+  assert.equal(c.location, 'Orlando, Florida, USA');
+  assert.equal(c.workplaceType, 'onsite');
+  assert.equal(c.postedAt, '2026-07-19T11:38:21Z');
+  assert.ok(c.jdText.includes('Salary: USD 135,400.00 - 181,600.00 per year'));
+  assert.ok(c.__ats, 'dice cards skip the Playwright resolve pass');
+});
+
+test('normalizeDice: remote flag fallback; non-numeric salary omitted', () => {
+  const c = normalizeDice({ ...JOB_B, workplaceTypes: [] });
+  assert.equal(c.workplaceType, 'remote');
+  assert.ok(!c.jdText.includes('Salary:'), 'text-only salary strings add no note');
+});
+
+test('normalizeDice: junk in → null out', () => {
+  assert.equal(normalizeDice(null), null);
+  assert.equal(normalizeDice({ title: 'X' }), null); // no url
+});
+
+// ---- fetch orchestration (stubbed network) ----
+
+function stubFetch() {
+  const calls = [];
+  const impl = async (url) => {
+    calls.push(url);
+    const body = url.includes('/job-detail/') ? detailFixture()
+      : url.includes('page=2') ? '<html></html>'
+      : searchFixture();
+    return { ok: true, text: async () => body, json: async () => ({}) };
+  };
+  return { impl, calls };
+}
+
+test('fetchDice: parses search, enriches top cards with detail JD', async () => {
+  const { impl, calls } = stubFetch();
+  const cards = await fetchDice('security engineer', { fetchImpl: impl, jdTop: 1 });
+  assert.equal(cards.length, 2);
+  // top card enriched from detail page; salary note preserved
+  assert.ok(cards[0].jdText.startsWith('Great IAM job.'));
+  assert.ok(cards[0].jdText.includes('Salary: USD 135,400.00'));
+  // second card keeps its summary (jdTop=1)
+  assert.ok(cards[1].jdText.includes('AppSec role.'));
+  assert.ok(calls[0].includes('q=security%20engineer'));
+});
+
+test('fetchDice: network failure → [] (best-effort contract)', async () => {
+  const cards = await fetchDice('x', { fetchImpl: async () => { throw new Error('down'); } });
+  assert.deepEqual(cards, []);
+});
+
+test('fetchAllSources: dice toggle runs one task per query and dedups by href', async () => {
+  const { impl } = stubFetch();
+  const logs = [];
+  const out = await fetchAllSources(
+    { dice: { enabled: true } },
+    { queries: ['iam', 'appsec'], fetchImpl: impl, log: l => logs.push(l), workplaceTypes: [] }
+  );
+  // both queries return the same 2 fixture jobs → deduped to 2
+  assert.equal(out.length, 2);
+  assert.ok(logs.some(l => l.includes('dice/iam: 2 jobs')));
+  assert.ok(logs.some(l => l.includes('dice/appsec: 2 jobs')));
+});
+
+test('fetchAllSources: dice disabled/absent stays inert', async () => {
+  const out = await fetchAllSources({}, { queries: ['iam'], fetchImpl: async () => { throw new Error('must not be called'); } });
+  assert.deepEqual(out, []);
+});
+
+test('fetchAllSources: workplace filter applies to dice cards', async () => {
+  const { impl } = stubFetch();
+  const out = await fetchAllSources(
+    { dice: { enabled: true } },
+    { queries: ['iam'], fetchImpl: impl, workplaceTypes: ['Remote'] }
+  );
+  assert.equal(out.length, 1);
+  assert.equal(out[0].workplaceType, 'remote');
+});

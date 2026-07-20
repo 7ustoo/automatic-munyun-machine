@@ -615,7 +615,7 @@ const SCORING = CFG.scoring || {};
 // v5.0: ATS source boards (Greenhouse/Lever/Ashby). Inert unless the user lists
 // companies (or a remote config URL) — so existing installs are unaffected.
 const SOURCES = CFG.sources || {};
-const SOURCES_CONFIGURED = ['greenhouse', 'lever', 'ashby'].some(k => Array.isArray(SOURCES[k]) && SOURCES[k].length) || !!(SOURCES.remoteConfigUrl && String(SOURCES.remoteConfigUrl).trim());
+const SOURCES_CONFIGURED = ['greenhouse', 'lever', 'ashby'].some(k => Array.isArray(SOURCES[k]) && SOURCES[k].length) || !!(SOURCES.remoteConfigUrl && String(SOURCES.remoteConfigUrl).trim()) || !!SOURCES.dice?.enabled; // v7.3: dice toggle counts too
 // v4.5: user-selectable batch size (50/100/150/200). Clamped so a hand-edited
 // config can't make the resolve pass visit an unbounded number of job pages.
 const DELIVER_COUNT = clampBatchSize(SCORING.targetJobsPerBatch);
@@ -1343,7 +1343,7 @@ if (IS_CLI) (async () => {
     // v5.0: pull configured ATS boards (best-effort, never throws) and merge
     // them into the same filter+score pipeline as the hiring.cafe cards.
     const atsCards = SOURCES_CONFIGURED
-      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
+      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: QUERIES.map(([, term]) => term) }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
       : [];
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
     const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery, atsCards);

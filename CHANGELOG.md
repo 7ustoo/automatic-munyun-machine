@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.3.0] — 2026-07-20
+
+### Added
+
+- **Dice.com job source.** Toggle "Dice.com" on the Searches page (Job sources card) and every scrape also runs your configured search terms against dice.com — no login, no API key, no extra browser work. Jobs arrive with structured data straight from Dice's server-rendered pages: real salary ranges (fed into the existing salary tie-breaker), posted dates, workplace type (Remote/Hybrid/On-Site, honored by your workplace preference filter), and a JD summary; the top results per term additionally get their full job description fetched so JD-pass scoring sees real posting text. Dice cards ride the same filter → dedup → score → rank pipeline as every other source (`sources.dice.enabled` in config; `scripts/sources/dice.mjs`; parsing is pure and fixture-tested, fetching is best-effort so a Dice outage can never break a scrape).
+
 ## [7.2.0] — 2026-07-20
 
 ### Added
