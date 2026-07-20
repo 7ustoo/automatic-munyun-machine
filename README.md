@@ -41,7 +41,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - Multiple profiles, each with its own resume, searches, settings, and history
 - Trends and a search-term leaderboard to show which searches produce the best matches
 - Previous scrapes: every scrape is saved for 30 days — view or download any older batch (txt/csv/xlsx) from the Jobs page, so re-scraping never loses jobs
-- Optional Dice.com source: one toggle runs your search terms on dice.com too — structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline. Choose what each scrape runs (both, hiring.cafe only, or Dice only), route individual terms to either source, and optionally sign in to Dice from the System page so apply links open logged in
+- Dice.com built in alongside hiring.cafe: every scrape can run both, hiring.cafe only, or Dice only — with per-term routing (send "iam engineer" everywhere, keep a niche term on one source). Dice jobs carry structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline with a source badge on every ranked job. Sign in to Dice from the System page (same flow as hiring.cafe) so apply links open logged in
 - Light and dark themes, desktop notifications, exports, and one-click manual scrapes
 
 ### More than one job source

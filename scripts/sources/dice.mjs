@@ -3,7 +3,8 @@
  *
  * Dice is a search-driven job board (like hiring.cafe), not a per-company ATS
  * feed — so unlike greenhouse/lever/ashby it reuses the user's configured
- * search terms instead of board tokens. Toggled by `sources.dice.enabled`.
+ * search terms instead of board tokens. Always-on since v7.4 — routing is
+ * decided by search.scrapeSources + per-term engines (query-engines.mjs).
  *
  * No API key, no Playwright: dice.com's search and job-detail pages are
  * server-rendered Next.js (App Router). The full result set rides in the

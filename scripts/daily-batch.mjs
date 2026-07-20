@@ -620,7 +620,7 @@ const SCORING = CFG.scoring || {};
 // v5.0: ATS source boards (Greenhouse/Lever/Ashby). Inert unless the user lists
 // companies (or a remote config URL) — so existing installs are unaffected.
 const SOURCES = CFG.sources || {};
-const SOURCES_CONFIGURED = ['greenhouse', 'lever', 'ashby'].some(k => Array.isArray(SOURCES[k]) && SOURCES[k].length) || !!(SOURCES.remoteConfigUrl && String(SOURCES.remoteConfigUrl).trim()) || !!SOURCES.dice?.enabled; // v7.3: dice toggle counts too
+const SOURCES_CONFIGURED = ['greenhouse', 'lever', 'ashby'].some(k => Array.isArray(SOURCES[k]) && SOURCES[k].length) || !!(SOURCES.remoteConfigUrl && String(SOURCES.remoteConfigUrl).trim()); // ATS boards only — Dice is always-on (v7.4), gated purely by term routing
 // v4.5: user-selectable batch size (50/100/150/200). Clamped so a hand-edited
 // config can't make the resolve pass visit an unbounded number of job pages.
 const DELIVER_COUNT = clampBatchSize(SCORING.targetJobsPerBatch);
@@ -1357,7 +1357,9 @@ if (IS_CLI) (async () => {
     }
     // v5.0: pull configured ATS boards (best-effort, never throws) and merge
     // them into the same filter+score pipeline as the hiring.cafe cards.
-    const atsCards = SOURCES_CONFIGURED
+    // v7.4: Dice is always-on — fetch whenever any term routes to it, with or
+    // without ATS boards configured.
+    const atsCards = (SOURCES_CONFIGURED || DICE_QUERY_TERMS.length)
       ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: DICE_QUERY_TERMS }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
       : [];
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);

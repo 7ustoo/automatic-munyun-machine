@@ -60,15 +60,16 @@ export async function fetchAllSources(sources = {}, { workplaceTypes = [], log =
       );
     }
   }
-  // v7.3: Dice is search-driven — one task per configured search term.
-  if (sources.dice?.enabled) {
-    for (const q of queries.map(t => String(t || '').trim()).filter(Boolean)) {
-      tasks.push(
-        fetchDice(q, { fetchImpl })
-          .then(jobs => ({ ats: 'dice', token: q, jobs }))
-          .catch(() => ({ ats: 'dice', token: q, jobs: [] }))
-      );
-    }
+  // v7.3: Dice is search-driven — one task per search term. v7.4: no toggle;
+  // Dice is a first-class source like hiring.cafe. The caller decides which
+  // terms run here (search.scrapeSources + per-term engines routing), so an
+  // empty queries list is the only off switch.
+  for (const q of queries.map(t => String(t || '').trim()).filter(Boolean)) {
+    tasks.push(
+      fetchDice(q, { fetchImpl })
+        .then(jobs => ({ ats: 'dice', token: q, jobs }))
+        .catch(() => ({ ats: 'dice', token: q, jobs: [] }))
+    );
   }
   if (!tasks.length) return [];
   const results = await Promise.all(tasks);

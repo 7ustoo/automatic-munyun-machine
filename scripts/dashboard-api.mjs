@@ -86,7 +86,6 @@ function settingsGet() {
         greenhouse: cfg.sources?.greenhouse || [],
         lever: cfg.sources?.lever || [],
         ashby: cfg.sources?.ashby || [],
-        dice: !!cfg.sources?.dice?.enabled, // v7.3
         remoteConfigUrl: cfg.sources?.remoteConfigUrl || ''
       },
       maxJobAge: cfg.filters?.maxJobAge || 'any',
@@ -133,8 +132,7 @@ function settingsSet(dotPath, jsonValue) {
     'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'search.mode',
     'search.workplaceTypes', 'search.location', // v5.0
     'sources.greenhouse', 'sources.lever', 'sources.ashby', 'sources.remoteConfigUrl', // v5.0
-    'sources.dice.enabled', // v7.3: dice.com search toggle
-    'search.scrapeSources', // v7.3: what to scrape — both/hcafe/dice
+    'search.scrapeSources', // v7.3: what to scrape — both/hcafe/dice (v7.4: the only Dice knob — the enable toggle is gone)
     'display.showSalary',
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
@@ -146,7 +144,6 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
   if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
-  if (dotPath === 'sources.dice.enabled') value = (value === true || value === 'true' || value === 'on'); // v7.3
   if (dotPath === 'search.scrapeSources') value = normalizeScrapeSources(value); // v7.3
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.format') {

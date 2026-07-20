@@ -137,11 +137,11 @@ test('fetchDice: network failure → [] (best-effort contract)', async () => {
   assert.deepEqual(cards, []);
 });
 
-test('fetchAllSources: dice toggle runs one task per query and dedups by href', async () => {
+test('fetchAllSources: dice runs one task per query and dedups by href (always-on, v7.4)', async () => {
   const { impl } = stubFetch();
   const logs = [];
   const out = await fetchAllSources(
-    { dice: { enabled: true } },
+    {},
     { queries: ['iam', 'appsec'], fetchImpl: impl, log: l => logs.push(l), workplaceTypes: [] }
   );
   // both queries return the same 2 fixture jobs → deduped to 2
@@ -150,15 +150,15 @@ test('fetchAllSources: dice toggle runs one task per query and dedups by href', 
   assert.ok(logs.some(l => l.includes('dice/appsec: 2 jobs')));
 });
 
-test('fetchAllSources: dice disabled/absent stays inert', async () => {
-  const out = await fetchAllSources({}, { queries: ['iam'], fetchImpl: async () => { throw new Error('must not be called'); } });
+test('fetchAllSources: empty query list is the only dice off switch (v7.4)', async () => {
+  const out = await fetchAllSources({}, { queries: [], fetchImpl: async () => { throw new Error('must not be called'); } });
   assert.deepEqual(out, []);
 });
 
 test('fetchAllSources: workplace filter applies to dice cards', async () => {
   const { impl } = stubFetch();
   const out = await fetchAllSources(
-    { dice: { enabled: true } },
+    {},
     { queries: ['iam'], fetchImpl: impl, workplaceTypes: ['Remote'] }
   );
   assert.equal(out.length, 1);
