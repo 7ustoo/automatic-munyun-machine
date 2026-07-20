@@ -75,6 +75,14 @@ const routes = (needsSetup, opts = {}) => ({
       "linux": { count: 10, avgPct: 41, strong: 1 },
     },
   })) },
+  // v7.2: previous scrapes (batch archive). Ids follow batch-archive.mjs
+  // ARCHIVE_ID_RX; the detail route serves the same stub jobs for any id.
+  "/api/archive": { ok: true, archives: [
+    { id: "batch-2026-07-06T14-30-00", date: "2026-07-06", generatedAt: "2026-07-06T14:30:00.000Z", sent: 84, avgPct: 61, strongCount: 19 },
+    { id: "batch-2026-07-06T08-00-00", date: "2026-07-06", generatedAt: "2026-07-06T08:00:00.000Z", sent: 77, avgPct: 58, strongCount: 15 },
+    { id: "batch-2026-07-05T08-00-00", date: "2026-07-05", generatedAt: "2026-07-05T08:00:00.000Z", sent: 91, avgPct: 55, strongCount: 12 },
+  ] },
+  "/api/archive/batch": () => ({ ok: true, batch: { date: "2026-07-06", generatedAt: "2026-07-06T14:30:00.000Z", jobs: liveJobs() } }),
 });
 
 // POST endpoints reply generically so buttons can be exercised.

@@ -2,10 +2,10 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 6.2.0
-**Active release branch:** `v6.2`
+**Version:** 7.2.0
+**Active release branch:** `v7.2`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-07-13
+**Last refreshed:** 2026-07-20
 
 ## Product
 
@@ -88,7 +88,7 @@ The wrapper is a thin native shell. Business logic stays in JavaScript helpers t
 7. Fetches real job descriptions, validates role-family fit, and rescores.
 8. Optionally invokes Claude reranking.
 9. Resolves direct application URLs.
-10. Writes `last-batch.json`, exports, scrape status, and batch history atomically.
+10. Writes `last-batch.json`, exports, scrape status, and batch history atomically. v7.2: also archives the full batch to `data/profiles/<profile>/batch-archive/` (`scripts/batch-archive.mjs`, 30-day retention, non-fatal) — the dashboard's "Previous scrapes" section lists these via `GET /api/archive`, serves one via `GET /api/archive/batch?id=`, and downloads one via `GET /api/export?format=…&archive=<id>`.
 11. Optionally delivers through Telegram and email.
 
 ### Desktop dashboard

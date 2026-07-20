@@ -42,6 +42,7 @@ import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
 import { loadExport } from './export-batch.mjs';
+import { listArchives, readArchive } from './batch-archive.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
@@ -774,7 +775,14 @@ if (isMain) (async () => {
     case 'resume-parse': return resumeParse(a, b);
     case 'resume-apply': return resumeApply(a);
     // v2.4: minimal export (number · title · apply link) as txt or csv.
-    case 'export':       return out(loadExport(a));
+    // v7.2: optional second arg = archive id to export a previous scrape.
+    case 'export':       return out(loadExport(a, b));
+    // v7.2: previous scrapes (full-batch snapshots, 30-day retention).
+    case 'archive-list': return out({ ok: true, archives: listArchives(profilePaths().batchArchiveDir) });
+    case 'archive-get': {
+      const batch = readArchive(profilePaths().batchArchiveDir, a);
+      return out(batch ? { ok: true, batch } : { ok: false, error: 'That archived scrape is no longer available.' });
+    }
     // v2.6: profile CRUD from the dashboard.
     case 'profile-list':   return profileList();
     case 'profile-add':    return profileAdd(a);

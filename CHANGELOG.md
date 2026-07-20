@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.2.0] — 2026-07-20
+
+### Added
+
+- **Previous scrapes — re-scraping never loses jobs again.** Every scrape now saves a full snapshot of the batch (all jobs, scores, and links) to the active profile's `data/profiles/<profile>/batch-archive/`, kept for 30 days. A new "Previous scrapes" section on the dashboard's Jobs page lists every saved scrape (when, job count, average match, strong matches) with per-scrape downloads in all three formats (`.txt`, `.csv`, `.xlsx` — filenames carry the scrape's timestamp so same-day downloads don't collide) and an inline viewer that expands any snapshot's full job list with clickable apply links. New endpoints: `GET /api/archive` (index), `GET /api/archive/batch?id=` (one snapshot), and `GET /api/export?format=…&archive=<id>` (export a previous scrape). Archive ids are strictly validated in both the Node and Go layers (path-traversal guard), archiving is non-fatal by design (a write failure can never break a scrape), and expired snapshots are pruned automatically on each run.
+
 ## [7.1.0] — 2026-07-20
 
 ### Fixed
