@@ -33,6 +33,7 @@ import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
 import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
+import { exportRows, buildExportCsv, buildExportXlsx } from './export-batch.mjs';
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
@@ -1509,15 +1510,26 @@ if (IS_CLI) (async () => {
     if (deliveryTxtPath && EMAIL_ON && CFG.email?.enabled && CFG.email?.autoSend && String(CFG.email?.to || '').trim()) {
       try {
         const to = String(CFG.email.to).trim();
+        // v7.0: honor email.format (txt | csv | xlsx, set in System → Email).
+        // txt keeps the pre-written delivery file; csv/xlsx build the same
+        // minimal number·title·link sheet the Export menu produces, in-memory.
+        const emailFmt = ['txt', 'csv', 'xlsx'].includes(CFG.email?.format) ? CFG.email.format : 'txt';
+        let attachment = { filename: path.basename(deliveryTxtPath), path: deliveryTxtPath };
+        if (emailFmt !== 'txt') {
+          const rows = exportRows(lastBatch);
+          attachment = emailFmt === 'csv'
+            ? { filename: `apply-links(${DATE}).csv`, content: buildExportCsv(rows) }
+            : { filename: `apply-links(${DATE}).xlsx`, content: buildExportXlsx(rows, DATE) };
+        }
         await sendConfiguredEmail({
           env,
           to,
           from: CFG.email.from || env.SMTP_USER,
           subject: renderSubject(CFG.email.subject, DATE),
-          text: `Attached: apply-links(${DATE}).txt — today's job titles and direct apply links from Automatic Munyun Machine.`,
-          attachments: [{ filename: path.basename(deliveryTxtPath), path: deliveryTxtPath }],
+          text: `Attached: ${attachment.filename} — today's job batch (titles and direct apply links) from Automatic Munyun Machine.`,
+          attachments: [attachment],
         });
-        log(`Emailed batch .txt to ${to}`);
+        log(`Emailed job batch (${emailFmt}) to ${to}`);
       } catch (e) {
         log(`Batch email failed (non-fatal): ${SCRUB(e.message || e)}`);
       }

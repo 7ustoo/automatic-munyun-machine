@@ -101,6 +101,7 @@ function settingsGet() {
         from: cfg.email?.from || '',
         subject: cfg.email?.subject || 'Job batch — {DATE}',
         autoSend: !!cfg.email?.autoSend,
+        format: ['txt', 'csv', 'xlsx'].includes(cfg.email?.format) ? cfg.email.format : 'txt', // v7.0
         hasCreds: delivery.connected,
         provider: delivery.provider,
         connectedEmail: delivery.email,
@@ -130,13 +131,18 @@ function settingsSet(dotPath, jsonValue) {
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
-    'email.autoSend', 'email.subject', 'email.to'
+    'email.autoSend', 'email.subject', 'email.to',
+    'email.format' // v7.0: attachment format for the batch email (txt | csv | xlsx)
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
   if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
   if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'email.format') {
+    value = String(value || '').trim().toLowerCase();
+    if (!['txt', 'csv', 'xlsx'].includes(value)) return out({ ok: false, error: 'format must be txt, csv, or xlsx' });
+  }
   if (dotPath === 'email.subject') { value = String(value || '').trim().slice(0, 120) || 'Job batch — {DATE}'; }
   if (dotPath === 'email.to') {
     value = String(value || '').trim();
@@ -610,17 +616,23 @@ function profileSwitch(slug) {
 // ---- email-to-VA (v4.3) ----
 // Pick the compact apply-links .txt for every email path. The detailed
 // jobs(DATE).txt remains a local archive, not the handoff attachment.
-function resolveBatchAttachment() {
+function resolveBatchAttachment(format = 'txt') {
+  // v7.0: format-aware (txt | csv | xlsx). txt prefers the batch-time compact
+  // file; csv/xlsx build the same minimal sheet the Export menu produces.
+  const fmt = ['txt', 'csv', 'xlsx'].includes(format) ? format : 'txt';
   let date = null;
   try { date = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')).date; } catch {}
-  if (date) {
+  if (fmt === 'txt' && date) {
     const compact = path.join(profilePaths().dir, `apply-links(${date}).txt`);
     if (fs.existsSync(compact)) return { path: compact, filename: `apply-links(${date}).txt`, date };
   }
-  const ex = loadExport('txt');
+  const ex = loadExport(fmt);
   if (!ex.ok) return null;
   const tmp = path.join(profilePaths().dir, ex.filename);
-  try { atomicWriteText(tmp, ex.content); } catch { return null; }
+  try {
+    if (ex.contentBase64) fs.writeFileSync(tmp, Buffer.from(ex.contentBase64, 'base64')); // xlsx is binary
+    else atomicWriteText(tmp, ex.content);
+  } catch { return null; }
   return { path: tmp, filename: ex.filename, date, count: ex.count };
 }
 
@@ -705,13 +717,13 @@ async function emailSend() {
   const cfg = cfgRW.read();
   const to = String(cfg.email?.to || '').trim();
   if (!isEmailAddress(to)) return out({ ok: false, error: 'No recipient set — add one in System → Email.' });
-  const att = resolveBatchAttachment();
+  const att = resolveBatchAttachment(cfg.email?.format);
   if (!att) return out({ ok: false, error: 'No batch yet — run a scrape first.' });
   const subject = renderSubject(cfg.email?.subject, att.date);
   try {
     await sendConfiguredEmail({
       env, to, from: cfg.email?.from || delivery.email, subject,
-      text: `Attached: ${att.filename} — today's ranked job batch from Automatic Munyun Machine.`,
+      text: `Attached: ${att.filename} — today's job batch (titles and direct apply links) from Automatic Munyun Machine.`,
       attachments: [{ filename: att.filename, path: att.path }]
     });
     return out({ ok: true, to, filename: att.filename });

@@ -99,11 +99,12 @@
     "showAuthIndicator": true
   },
   "email": {
-    "_comment": "v4.4: email the daily job-batch .txt to someone (e.g. a virtual assistant). Connect Gmail through Google's consent screen with send-only permission; App Password SMTP remains an advanced fallback. OAuth tokens and SMTP credentials stay local and never live in config.json. 'to' = recipient; 'autoSend' also emails automatically after each morning scrape; {DATE} in 'subject' expands to the batch date.",
+    "_comment": "v4.4: email the daily job batch to someone (e.g. a virtual assistant). Connect Gmail through Google's consent screen with send-only permission; App Password SMTP remains an advanced fallback. OAuth tokens and SMTP credentials stay local and never live in config.json. 'to' = recipient; 'autoSend' also emails automatically after each morning scrape; {DATE} in 'subject' expands to the batch date; 'format' (v7.0) = attachment type: txt, csv, or xlsx.",
     "enabled": false,
     "to": "",
     "from": "",
     "subject": "Job batch \u2014 {DATE}",
-    "autoSend": false
+    "autoSend": false,
+    "format": "txt"
   }
 }

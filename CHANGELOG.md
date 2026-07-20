@@ -21,6 +21,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - **Rubric scoring.** The model must score `skills`, `seniority`, and `role` fit (0–100 each) before committing to an overall fit — decomposed judgments are measurably more accurate than one opaque number. The subscores are saved to `last-batch.json` (`aiSub`) and shown in the Why panel next to the Smart match reason.
 - **The AI's opinion counts for more.** With the real resume and fuller descriptions in hand, the blend moved from 45% keywords / 55% AI to 35% / 65%.
 
+### Email batch format
+
+- **Pick what your VA gets.** The batch email (both the morning auto-send and "Send latest batch now") can now attach the job list as **.txt**, **.csv**, or **.xlsx** — same three formats as the Export menu, with the .xlsx carrying clickable apply links. Set it once in System → Email ("Send batch as") and it persists (`email.format` in config, default .txt). Email copy now says "job batch" instead of hard-coding ".txt".
+
 ### Accessibility & polish
 
 - The keyboard focus ring on the match-strength filter (All / ≥70% / 50–69% / <50%) is no longer clipped by the segmented control's `overflow: hidden`; it now draws inset so keyboard users can see the focused band.

@@ -1332,6 +1332,13 @@
             <div id="email-on" class="hidden">
               <div class="stat-row"><span class="k">Sends to</span><span class="v" id="email-to-v">—</span></div>
               <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send every morning after the scrape</span></label>
+              <!-- v7.0: pick what lands in the inbox — same three formats as Export. -->
+              <div class="set-row"><label for="email-format">Send batch as</label>
+                <select id="email-format">
+                  <option value="txt">Text list (.txt)</option>
+                  <option value="csv">Spreadsheet (.csv)</option>
+                  <option value="xlsx">Excel workbook (.xlsx)</option>
+                </select></div>
               <div class="row">
                 <button class="sm primary" id="email-send-now"><svg class="ic"><use href="#i-send"/></svg>Send latest batch now</button>
                 <button class="danger sm" id="email-disable">Disconnect</button>
@@ -1341,7 +1348,7 @@
 
             <!-- DISABLED / setup view -->
             <div id="email-off">
-              <div class="muted-sm">Off — connect Gmail with Google, then email your daily job batch (.txt) to someone such as a virtual assistant. AMM can send messages but cannot read or delete your mail.</div>
+              <div class="muted-sm">Off — connect Gmail with Google, then email your daily job batch to someone such as a virtual assistant (as .txt, .csv, or .xlsx — your pick). AMM can send messages but cannot read or delete your mail.</div>
               <button class="sm" id="email-setup-start"><svg class="ic"><use href="#i-send"/></svg>Set up email…</button>
 
               <div id="email-setup" class="hidden">
@@ -2700,6 +2707,7 @@ function renderEmail(e) {
   if (connected) {
     $("email-to-v").textContent = e.to || "—";
     $("email-autosend").checked = !!e.autoSend;
+    $("email-format").value = e.format || "txt";   // v7.0: persisted attach format
     $("email-on-note").textContent = e.provider === "gmail-oauth"
       ? `Connected securely with Google as ${e.connectedEmail || e.from || "Gmail"}.`
       : "Connected with a Gmail App Password (advanced setup).";
@@ -2812,6 +2820,13 @@ $("email-autosend").addEventListener("change", async e => {
   const r = await postJSON("/api/settings/set", { path: "email.autoSend", value: e.target.checked ? "true" : "false" });
   note("email-on-note", r.ok ? "✓ Saved." : ("✗ " + (r.error || "could not save")), r.ok);
   if (r.ok) setTimeout(() => note("email-on-note", ""), 1500);
+});
+
+// v7.0: attach-format preference — persists to config (email.format).
+$("email-format").addEventListener("change", async e => {
+  const r = await postJSON("/api/settings/set", { path: "email.format", value: e.target.value });
+  note("email-on-note", r.ok ? "✓ Saved — batches send as ." + e.target.value + " now." : ("✗ " + (r.error || "could not save")), r.ok);
+  if (r.ok) setTimeout(() => note("email-on-note", ""), 2000);
 });
 
 $("email-send-now").addEventListener("click", async () => {
