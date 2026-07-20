@@ -19,6 +19,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 - The keyboard focus ring on the match-strength filter (All / ≥70% / 50–69% / <50%) is no longer clipped by the segmented control's `overflow: hidden`; it now draws inset so keyboard users can see the focused band.
 - The dashboard error banner is now announced by screen readers (`role="alert"`), and the header status chip (connecting / healthy / stale) announces changes politely (`aria-live`).
 - Typographic craft: headings use `text-wrap: balance` for even line breaks, body/hint prose uses `text-wrap: pretty` to avoid orphans, and macOS/Firefox get `-moz-osx-font-smoothing: grayscale`. All degrade gracefully where unsupported.
+- A **zero** strong-matches count now renders muted instead of green — a green "0" would misread as good news for a bad state. The batch-date tile is sized as secondary context rather than a hero number, which also keeps it from wrapping on narrow windows. The header status chip only rewrites its text on an actual state change, so its `aria-live` region won't re-announce an unchanged status.
 
 ## [6.1.0] — 2026-07-13
 
