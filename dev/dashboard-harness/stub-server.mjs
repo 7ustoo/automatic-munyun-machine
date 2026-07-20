@@ -58,8 +58,8 @@ const routes = (needsSetup, opts = {}) => ({
   }),
   "/api/batch": () => ({ ok: true, available: true, date: "2026-07-06", profile: "default", generatedAt: genAt(), jobCount: liveJobs().length, jobs: liveJobs() }),
   "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
-      // v7.3: Dice source on + per-term routing so the Searches controls render.
-      sources: { greenhouse: [], lever: [], ashby: [], dice: true, remoteConfigUrl: "" },
+      // v7.4: Dice is always-on; per-term routing renders unconditionally.
+      sources: { greenhouse: [], lever: [], ashby: [], remoteConfigUrl: "" },
       queryEngines: Object.fromEntries(queries.map((q, i) => [q, i === 1 ? "hcafe" : i === 2 ? "dice" : "both"])),
       scrapeSources: "both",
       showSalary: true, skipCompanies: ["Deloitte", "Accenture"],

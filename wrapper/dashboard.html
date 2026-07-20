@@ -1217,8 +1217,8 @@
             <button class="sm primary" id="term-add"><svg class="ic"><use href="#i-plus"/></svg>Add</button>
             <button class="sm danger" id="term-clear" title="Remove every search term"><svg class="ic"><use href="#i-trash"/></svg>Clear all</button>
           </div>
-          <!-- v7.3: source routing — hidden until the Dice source is enabled -->
-          <div class="row hidden" id="scrape-sources-row" style="margin-top:10px">
+          <!-- v7.4: source routing — always visible; Dice is built in -->
+          <div class="row" id="scrape-sources-row" style="margin-top:10px">
             <label for="scrape-sources" class="muted-sm">What to scrape</label>
             <select class="slim" id="scrape-sources">
               <option value="both">Both — hiring.cafe + Dice</option>
@@ -1227,7 +1227,7 @@
             </select>
           </div>
           <div id="terms-list" class="terms"></div>
-          <div class="hint">Tip: the Resume page can suggest terms straight from your CV — and switch between title-style and keyword-style suggestions.<span id="engine-hint" class="hidden"> With Dice on, click a term's <b>both / cafe / dice</b> tag to route it to one source.</span></div>
+          <div class="hint">Tip: the Resume page can suggest terms straight from your CV — and switch between title-style and keyword-style suggestions.<span id="engine-hint"> Click a term's <b>both / cafe / dice</b> tag to route it to one source.</span></div>
         </div>
         <div class="card">
           <h2>Blocked companies <span class="pill" id="skip-count"></span></h2>
@@ -1249,7 +1249,8 @@
             <input type="text" id="src-ashby" placeholder="e.g. ramp, openai" autocomplete="off" spellcheck="false" /></div>
           <!-- v7.3: Dice is search-driven — a toggle, not a slug list. It reuses
                the search terms configured above. -->
-          <label class="watch-toggle" style="margin-top:10px"><input type="checkbox" id="src-dice" /><span>Dice.com — search your terms on Dice too <span class="muted-sm">(tech-heavy board, real salary ranges, no login)</span></span></label>
+          <!-- v7.4: Dice is a built-in source like hiring.cafe — no toggle.
+               Routing lives in "What to scrape" + per-term tags above. -->
           <div class="note" id="src-note"></div>
         </div>
       </section>
@@ -1458,9 +1459,8 @@
             <div class="setup-hcafe-state hidden" id="hc-state-msg"></div>
           </div>
 
-          <!-- v7.3: Dice sign-in — same flow as hiring.cafe. Hidden until the
-               Dice source is enabled on the Searches page. -->
-          <div class="card hidden" id="dice-card">
+          <!-- v7.4: Dice sign-in — same flow as hiring.cafe, always visible. -->
+          <div class="card" id="dice-card">
             <h2>Dice.com <span class="pill" id="dice-pill">—</span></h2>
             <div class="big" id="dice-big"><span class="dot" id="dice-dot"></span><span id="dice-state">Checking…</span></div>
             <div class="stat-row"><span class="k">Last checked</span><span class="v" id="dice-checked">—</span></div>
@@ -2402,16 +2402,12 @@ function renderTerms(terms) {
   window.__lastTerms = terms; // v7.3: re-render when the Dice toggle flips
   $("terms-count").textContent = terms.length + " terms";
   $("nav-terms-badge").textContent = terms.length ? String(terms.length) : "";
-  const dice = !!window.__diceEnabled;
-  $("engine-hint").classList.toggle("hidden", !dice);
   const engines = window.__queryEngines || {};
   $("terms-list").innerHTML = terms.map(t => {
     const e = engines[t] || "both";
-    // v7.3: per-term source tag — click cycles both → cafe → dice. Only
-    // rendered while the Dice source is on; 'both' is the invisible default.
-    const tag = dice
-      ? `<button class="engine-tag ${e}" data-engine-term="${escapeAttr(t)}" title="Where this term searches — click to change">${e === "hcafe" ? "cafe" : e}</button>`
-      : "";
+    // v7.4: per-term source tag — click cycles both → cafe → dice. Always
+    // rendered; Dice is a first-class source.
+    const tag = `<button class="engine-tag ${e}" data-engine-term="${escapeAttr(t)}" title="Where this term searches — click to change">${e === "hcafe" ? "cafe" : e}</button>`;
     return `<span class="chip">${escapeHTML(t)}${tag}<button data-term="${escapeAttr(t)}" title="remove" aria-label="remove ${escapeAttr(t)}">×</button></span>`;
   }).join("");
 }
@@ -2472,27 +2468,8 @@ function renderSources(sources) {
   $("src-greenhouse").value = (sources.greenhouse || []).join(", ");
   $("src-lever").value = (sources.lever || []).join(", ");
   $("src-ashby").value = (sources.ashby || []).join(", ");
-  $("src-dice").checked = !!sources.dice; // v7.3
-  // v7.3: the Dice sign-in card + per-term source tags only make sense with
-  // the Dice source on.
-  $("dice-card").classList.toggle("hidden", !sources.dice);
-  $("scrape-sources-row").classList.toggle("hidden", !sources.dice);
-  window.__diceEnabled = !!sources.dice;
-  if (sources.dice) loadDiceAuthCached();
-  renderTerms(window.__lastTerms || []);
+  // v7.4: Dice is always-on — no toggle, no conditional UI.
 }
-$("src-dice").addEventListener("change", () => {
-  const on = $("src-dice").checked;
-  saveSetting("sources.dice.enabled", on);
-  $("src-note").textContent = on
-    ? "✓ Dice on — your search terms run on dice.com next scrape."
-    : "✓ Dice off.";
-  $("dice-card").classList.toggle("hidden", !on);
-  $("scrape-sources-row").classList.toggle("hidden", !on);
-  window.__diceEnabled = on;
-  if (on) loadDiceAuthCached();
-  renderTerms(window.__lastTerms || []);
-});
 $("scrape-sources").addEventListener("change", () => {
   saveSetting("search.scrapeSources", $("scrape-sources").value);
   const label = { both: "both sources", hcafe: "hiring.cafe only", dice: "Dice only" }[$("scrape-sources").value];
@@ -3404,6 +3381,7 @@ $("ub-update").addEventListener("click", async () => {
     loadProfiles();
     loadBackups();
     loadHcafeAuthCached();
+    loadDiceAuthCached(); // v7.4: Dice card is always visible now
     loadEmail();
     if (currentView() === "trends") loadTrends(); // v4.6: deep-link/reload lands on Trends
     checkForUpdate();

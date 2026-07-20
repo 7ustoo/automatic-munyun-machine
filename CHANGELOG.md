@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.4.0] — 2026-07-20
+
+### Changed
+
+- **Dice is now fully built in — the enable toggle is gone.** v7.3 shipped Dice as an opt-in source, which also hid the Dice sign-in card and the scrape-source controls until you found the checkbox. That's fixed: Dice gets the same first-class treatment as hiring.cafe. The **"What to scrape"** selector (Both / hiring.cafe only / Dice only) is always on the Searches page, every search term always shows its **both / cafe / dice** routing tag, and the **Dice.com sign-in card** is always on the System page right next to hiring.cafe's — sign in once and Dice apply links open logged in. Under the hood `sources.dice.enabled` is retired; term routing (`search.scrapeSources` + `queries[].engines`) is the only control, and a scrape with zero Dice-routed terms simply doesn't touch Dice.
+
 ## [7.3.0] — 2026-07-20
 
 ### Added

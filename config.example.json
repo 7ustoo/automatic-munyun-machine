@@ -23,8 +23,7 @@
     "greenhouse": [],
     "lever": [],
     "ashby": [],
-    "dice": { "enabled": false },
-    "_diceComment": "v7.3: pull jobs from dice.com using your configured search terms (no login, no key). Toggle from the dashboard Searches page. Salary ranges come structured; top results per term get full-JD scoring. Optional Dice sign-in (System page) makes apply links open logged in. search.scrapeSources picks what runs: both | hcafe | dice; each queries[] entry may carry engines: both | hcafe | dice to route a single term.",
+    "_diceComment": "v7.4: dice.com is a built-in source like hiring.cafe — no enable toggle. search.scrapeSources picks what a scrape runs: both | hcafe | dice (default both); each queries[] entry may carry engines: both | hcafe | dice to route a single term. Optional Dice sign-in (System page) makes apply links open logged in. Salary ranges come structured; top results per term get full-JD scoring.",
     "remoteConfigUrl": "",
     "_remoteConfigUrlComment": "v5.0: optional URL to a JSON file (e.g. a GitHub raw link) that can add source companies / adapter tweaks remotely, so a site change is a same-day fix without an app update. Empty = off. Fetched read-only, cached, and merged over local sources."
   },
