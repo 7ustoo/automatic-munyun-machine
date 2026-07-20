@@ -20,6 +20,7 @@ const jobs = Array.from({ length: 42 }, (_, i) => ({
   matchPct: Math.max(18, 92 - Math.floor(i * 1.9) - (i % 3) * 2),
   score: 900 - i * 12,
   q: queries[i % queries.length],
+  src: i % 3 === 2 ? "dice" : "hcafe", // v7.3: every third job from dice.com
   matched: ["iam", "azure ad", "okta", "mfa", "security+"].slice(0, (i % 5) + 1),
   cardPct: Math.max(10, 92 - Math.floor(i * 1.9) - 9),
   jdPct: i % 4 === 3 ? null : Math.max(12, 92 - Math.floor(i * 1.9) + 3),
@@ -57,12 +58,19 @@ const routes = (needsSetup, opts = {}) => ({
   }),
   "/api/batch": () => ({ ok: true, available: true, date: "2026-07-06", profile: "default", generatedAt: genAt(), jobCount: liveJobs().length, jobs: liveJobs() }),
   "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
+      // v7.3: Dice source on + per-term routing so the Searches controls render.
+      sources: { greenhouse: [], lever: [], ashby: [], dice: true, remoteConfigUrl: "" },
+      queryEngines: Object.fromEntries(queries.map((q, i) => [q, i === 1 ? "hcafe" : i === 2 ? "dice" : "both"])),
+      scrapeSources: "both",
       showSalary: true, skipCompanies: ["Deloitte", "Accenture"],
       aiEnabled: true, aiHasKey: true, aiModel: "claude-opus-4-8", mutedTerms: ["palo alto"], cvTermCount: 34,
       email: { enabled: oauthEmailConnected, hasCreds: oauthEmailConnected, provider: oauthEmailConnected ? "gmail-oauth" : null, connectedEmail: oauthEmailConnected ? "owner@gmail.com" : "", oauthAvailable: true, to: oauthEmailConnected ? "helper@example.com" : "", autoSend: true } } }),
   "/api/config/backups": { ok: true, backups: ["config-2026-07-06T12-00-00-000Z-pre-setup.json", "config-2026-07-05T09-10-00-000Z-pre-rename.json"] },
   "/api/profile/list": { ok: true, profiles: [ { slug: "default", active: true, hasCV: true }, { slug: "marketing", active: false, hasCV: false } ] },
   "/api/hcafe/auth": { ok: true, authed: true, checkedAt: "2026-07-10T12:00:00Z" },
+  // v7.3: Dice sign-in card (System page).
+  "/api/dice/auth": { ok: true, authed: false, checkedAt: "2026-07-10T12:00:00Z", cached: true },
+  "/api/setup/dice-login/status": { ok: true, running: false, authed: true },
   // v4.6: 14 days of batch history for the Trends view + leaderboard.
   "/api/history": { ok: true, days: Array.from({ length: 14 }, (_, i) => ({
     date: new Date(Date.UTC(2026, 5, 23 + i)).toISOString().slice(0, 10), // 2026-06-23 … 2026-07-06
@@ -98,6 +106,10 @@ const postReplies = {
   "/api/skip/remove": { ok: true, list: ["Deloitte"] },
   "/api/suggest": { ok: true, mode: "titles", suggestions: ["IAM Engineer", "Cloud Security Engineer", "Security Analyst"] },
   "/api/telegram/validate": { ok: true, username: "demo_bot" },
+  // v7.3: per-term source routing + Dice sign-in actions.
+  "/api/jobs/engine": body => ({ ok: true, term: body?.term || "", engines: body?.engines || "both" }),
+  "/api/dice/auth/refresh": { ok: true, authed: true, checkedAt: new Date().toISOString(), cached: false },
+  "/api/setup/dice-login/start": { ok: true, pid: 4242 },
   "/api/email/oauth/start": { ok: true, authUrl: "http://127.0.0.1:8765/oauth/google/callback?stub=1" },
   "/api/email/send": body => {
     const format = ["txt", "csv", "xlsx"].includes(body?.format) ? body.format : "txt";

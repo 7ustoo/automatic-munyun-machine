@@ -1263,6 +1263,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       aiSub: r.aiSub || null,   // v7.0: {skills, seniority, role} rubric subscores
       missing: r.missing || [],
       salaryK: r.salaryK || 0,
+      src: r.source || 'hcafe', // v7.3: where the job came from (hcafe/dice/greenhouse/lever/ashby)
       directUrl: directUrls[i] || '',
       viewjobUrl: r.href
     }))

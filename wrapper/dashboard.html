@@ -329,6 +329,14 @@
   .chip .engine-tag.hcafe { border-color: var(--yellow); color: var(--yellow); background: var(--yellow-dim); }
   .chip .engine-tag.dice  { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
   .chip .engine-tag:hover { border-color: var(--accent-2); color: var(--accent-2); }
+
+  /* v7.3: job source badge in the ranked list (cafe / dice / greenhouse / …) */
+  .src-badge {
+    display: inline-block; font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .04em; padding: 1px 7px; border-radius: 999px; margin-right: 6px;
+    border: 1px solid var(--border-2); background: var(--surface-2); color: var(--text-2);
+  }
+  .src-badge.dice { border-color: var(--accent); color: var(--accent); background: var(--accent-dim); }
   .terms .chip[data-sterm] { cursor: pointer; padding: 4px 12px; user-select: none; }
   .terms .chip[data-sterm].off { opacity: .38; text-decoration: line-through; }
   .terms .chip[data-sterm]:not(.off) { border-color: rgba(88,166,255,.4); background: var(--accent-dim); }
@@ -2081,6 +2089,13 @@ function renderJobs() {
     $("lb-foot").textContent = "0 of " + all.length + " jobs";
     return;
   }
+  // v7.3: which site the job came from. hiring.cafe reads "cafe"; company
+  // boards keep their ATS name. Missing src (pre-v7.3 batches) = cafe.
+  const srcBadge = (s) => {
+    const src = s || "hcafe";
+    const label = src === "hcafe" ? "cafe" : src;
+    return `<span class="src-badge ${escapeAttr(src)}" title="Job found on ${src === "hcafe" ? "hiring.cafe" : src === "dice" ? "dice.com" : escapeAttr(src)}">${escapeHTML(label)}</span>`;
+  };
   const rows = jobs.map(j => {
     const url = j.directUrl || j.viewjobUrl || "#";
     const pct = j.matchPct ?? 0;
@@ -2095,11 +2110,11 @@ function renderJobs() {
       </td>
       <td class="match"><span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span></td>
       <td class="yoe">${j.yoe == null ? "—" : escapeHTML(String(j.yoe)) + " yr"}</td>
-      <td class="src">${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
+      <td class="src">${srcBadge(j.src)}${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
       <td class="actions">
         <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">Apply<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
         <button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>
-        <button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>
+        ${(j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
         <button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>
       </td>
     </tr>`;

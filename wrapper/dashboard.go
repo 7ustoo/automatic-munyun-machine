@@ -506,6 +506,7 @@ type batchJob struct {
 	DirectURL string   `json:"directUrl"`
 	ViewURL   string   `json:"viewjobUrl"`
 	SalaryK   int      `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
+	Src       string   `json:"src"`     // v7.3: job source (hcafe/dice/greenhouse/lever/ashby)
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the
