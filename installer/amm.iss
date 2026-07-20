@@ -21,7 +21,7 @@
 ; it pointing at the current release branch so local builds still produce
 ; a sensibly-named .exe.
 #ifndef MyAppVersion
-  #define MyAppVersion "7.0.0"
+  #define MyAppVersion "7.1.0"
 #endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
@@ -75,8 +75,16 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; (no native compilation), so CI's `npm ci` output ships inside the installer
 ; and the user never runs npm at install time. That kills the multi-minute
 ; silent "Installing dependencies" step that looked like a hang.
+; v7.1: \config.json MUST stay excluded. CI's npm-test step creates a
+; config.json in the checkout (config-rw copies the example on first read),
+; and without this exclusion it shipped in the payload and — with
+; ignoreversion — OVERWROTE the user's real config.json on every update:
+; blocked companies, API key, schedule, email settings all reset. data\*
+; and .env were always excluded, which is why profiles/resume survived
+; while settings vanished. The leading backslash pins the pattern to the
+; payload root so a dependency's own config.json (node_modules) still ships.
 Source: "..\*"; DestDir: "{app}"; \
-  Excludes: "data\*,.env,.env.*,*.log,installer\dist\*,.git\*,.github\*,.claude\*,*.zip,*.tmp,node_modules\.cache\*"; \
+  Excludes: "\config.json,data\*,.env,.env.*,*.log,installer\dist\*,.git\*,.github\*,.claude\*,*.zip,*.tmp,node_modules\.cache\*"; \
   Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]

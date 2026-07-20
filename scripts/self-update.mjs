@@ -26,6 +26,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { currentVersion, semverGt } from './update-checker.mjs';
+import { snapshotConfig } from './config-rw.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -132,6 +133,15 @@ async function apply() {
     try { fs.unlinkSync(dest); } catch {}
     return out({ ok: false, error: 'Could not verify the download (' + String(e.message || e) + '). Nothing was installed.' });
   }
+
+  // v7.1: snapshot config.json into data/backups/ right before the installer
+  // runs — so even if an update ever goes wrong again, the user's settings
+  // (blocked companies, API key, schedule, email) are one restore away.
+  // Best-effort: a failed snapshot must not block the update.
+  try {
+    const snap = snapshotConfig('pre-update');
+    if (snap) process.stderr.write(`config snapshot: ${snap}\n`);
+  } catch {}
 
   // Detached updater: a cmd script that OUTLIVES this process AND the AMM
   // wrapper the installer is about to kill. It waits a beat, runs the
