@@ -14,6 +14,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Bolder dashboard hierarchy pass.** The Jobs view now leads with its numbers: the KPI tiles (jobs in batch, average match, strong matches, batch date) use larger, heavier hero figures, and **Strong matches** is rendered in the same green the match meter already uses for strong jobs — making "is today worth my time?" the first thing the eye lands on. Match percentages in the ranked table are larger and heavier, the match meter is slightly taller, and the view title is stronger. Column headers and stat labels were darkened one step, which also fixes a light-theme WCAG AA contrast shortfall on those labels. All changes stay inside the existing design tokens — no new colors, gradients, or radii — and apply to both light and dark themes.
 
+### Accessibility & polish
+
+- The keyboard focus ring on the match-strength filter (All / ≥70% / 50–69% / <50%) is no longer clipped by the segmented control's `overflow: hidden`; it now draws inset so keyboard users can see the focused band.
+- The dashboard error banner is now announced by screen readers (`role="alert"`), and the header status chip (connecting / healthy / stale) announces changes politely (`aria-live`).
+- Typographic craft: headings use `text-wrap: balance` for even line breaks, body/hint prose uses `text-wrap: pretty` to avoid orphans, and macOS/Firefox get `-moz-osx-font-smoothing: grayscale`. All degrade gracefully where unsupported.
+
 ## [6.1.0] — 2026-07-13
 
 ### Added

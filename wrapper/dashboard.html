@@ -82,9 +82,14 @@
                  Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
     font-size: 14px; line-height: 1.5;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
   a { color: var(--accent); text-decoration: none; }
   a:hover { text-decoration: underline; }
+  /* v7.0 polish: typographic craft — even heading line-breaks, fewer prose
+     orphans. Ignored gracefully by engines that don't support text-wrap. */
+  h1, h2, h3, h4 { text-wrap: balance; }
+  .muted-sm, .hint, .desc, .blurb, .setup-step .desc, .us-sub, .e-sub { text-wrap: pretty; }
   svg.ic { width: 16px; height: 16px; flex: none; vertical-align: -3px;
            fill: none; stroke: currentColor; stroke-width: 2;
            stroke-linecap: round; stroke-linejoin: round; }
@@ -332,6 +337,10 @@
   .seg button + button { border-left: 1px solid var(--border-2); }
   .seg button:hover:not(.on) { color: var(--text); background: var(--surface-2); }
   .seg button.on { background: var(--accent-dim); color: var(--accent-2); }
+  /* v7.0 polish: the segmented control clips its children (overflow:hidden),
+     which would hide the global focus-visible ring. Draw it inset instead so
+     keyboard users can see the focused band. */
+  .seg button:focus-visible { outline-offset: -2px; }
   select.slim { width: auto; padding: 5px 9px; font-size: 12.5px; font-weight: 600; color: var(--text-2); background: var(--surface); }
 
   details.menu { position: relative; }
@@ -1015,7 +1024,7 @@
         <span class="profile-chip" id="top-profile" title="Active profile — manage on the Profiles page">
           <svg class="ic"><use href="#i-users"/></svg><span id="profile-big">—</span>
         </span>
-        <span class="status-chip"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
+        <span class="status-chip" aria-live="polite"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
         <label class="watch-toggle" title="Show the browser window so you can watch it search hiring.cafe">
           <input type="checkbox" id="watch-scrape" /><svg class="ic"><use href="#i-eye"/></svg><span>Watch</span>
         </label>
@@ -1025,7 +1034,7 @@
     <div id="scrapebar"></div>
 
     <main id="content">
-      <div id="err" class="err" style="display:none"></div>
+      <div id="err" class="err" style="display:none" role="alert"></div>
 
       <!-- v2.5: forced-feel update banner. Appears only when a newer release
            exists; auto-checked on load + every 30 min. One click does the
