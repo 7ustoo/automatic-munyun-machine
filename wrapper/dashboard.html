@@ -1964,7 +1964,12 @@ function whyRowHTML(idx) {
     parts.push(`<div style="margin-top:6px"><b>The job asks for — not on your resume:</b> ${j.missing.map(t =>
       `<span class="kw miss">${escapeHTML(t)}<button class="kwbtn add" data-kwadd="${escapeAttr(t)}" title="Add as a search term">+ search</button><button class="kwbtn" data-kwmute="${escapeAttr(t)}" title="Never count this term in scoring again">mute</button></span>`).join("")}</div>`);
   }
-  if (j.aiReason) parts.push(`<span class="why-ai"><b>Smart match${j.aiPct != null ? " — " + j.aiPct + "/100" : ""}:</b> ${escapeHTML(j.aiReason)}</span>`);
+  if (j.aiReason) {
+    // v7.0: rubric subscores when the rerank returned them (skills/seniority/role).
+    const sub = j.aiSub && [j.aiSub.skills, j.aiSub.seniority, j.aiSub.role].every(Number.isFinite)
+      ? ` <span style="color:var(--text-3)">· skills ${Number(j.aiSub.skills)} · seniority ${Number(j.aiSub.seniority)} · role ${Number(j.aiSub.role)}</span>` : "";
+    parts.push(`<span class="why-ai"><b>Smart match${j.aiPct != null ? " — " + j.aiPct + "/100" : ""}:</b> ${escapeHTML(j.aiReason)}${sub}</span>`);
+  }
   return `<td></td><td colspan="5">${parts.join("")}</td>`;
 }
 

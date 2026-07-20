@@ -14,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Bolder dashboard hierarchy pass.** The Jobs view now leads with its numbers: the KPI tiles (jobs in batch, average match, strong matches, batch date) use larger, heavier hero figures, and **Strong matches** is rendered in the same green the match meter already uses for strong jobs — making "is today worth my time?" the first thing the eye lands on. Match percentages in the ranked table are larger and heavier, the match meter is slightly taller, and the view title is stronger. Column headers and stat labels were darkened one step, which also fixes a light-theme WCAG AA contrast shortfall on those labels. All changes stay inside the existing design tokens — no new colors, gradients, or radii — and apply to both light and dark themes.
 
+### Smart match (AI) accuracy overhaul
+
+- **The rerank now reads your actual resume.** When a Smart match API key is set, the model receives the raw resume text the parser already stores (first ~6 KB) instead of only the extracted keyword arrays — so it can judge experience, tenure, and seniority, not just word overlap. Keyword arrays ride along as a supplement, and older `cv-parsed.json` files without stored text fall back to keyword-summary mode unchanged.
+- **Fuller job descriptions.** Each reranked candidate now carries up to 2,200 characters of the real posting (was 900), so requirements the model is grading against are actually in front of it.
+- **Rubric scoring.** The model must score `skills`, `seniority`, and `role` fit (0–100 each) before committing to an overall fit — decomposed judgments are measurably more accurate than one opaque number. The subscores are saved to `last-batch.json` (`aiSub`) and shown in the Why panel next to the Smart match reason.
+- **The AI's opinion counts for more.** With the real resume and fuller descriptions in hand, the blend moved from 45% keywords / 55% AI to 35% / 65%.
+
 ### Accessibility & polish
 
 - The keyboard focus ring on the match-strength filter (All / ≥70% / 50–69% / <50%) is no longer clipped by the segmented control's `overflow: hidden`; it now draws inset so keyboard users can see the focused band.

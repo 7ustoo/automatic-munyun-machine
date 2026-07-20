@@ -18,9 +18,13 @@
 const API_URL = 'https://api.anthropic.com/v1/messages';
 export const DEFAULT_AI_MODEL = 'claude-opus-4-8';
 
-// Strict schema: {ratings:[{n,fit,reason}]}. additionalProperties:false is
-// required by the API on every object.
-const RATINGS_SCHEMA = {
+// Strict schema: {ratings:[{n,fit,reason,skills,seniority,role}]}.
+// v7.0: rubric subscores force the model to decompose the judgment (skills
+// coverage / seniority match / role family) before committing to an overall
+// fit — measurably more accurate than one opaque number, and the Why panel
+// can show the breakdown. additionalProperties:false is required by the API
+// on every object. Exported for testability.
+export const RATINGS_SCHEMA = {
   type: 'object',
   properties: {
     ratings: {
@@ -31,8 +35,11 @@ const RATINGS_SCHEMA = {
           n: { type: 'integer' },
           fit: { type: 'integer' },
           reason: { type: 'string' },
+          skills: { type: 'integer' },
+          seniority: { type: 'integer' },
+          role: { type: 'integer' },
         },
-        required: ['n', 'fit', 'reason'],
+        required: ['n', 'fit', 'reason', 'skills', 'seniority', 'role'],
         additionalProperties: false,
       },
     },
@@ -42,15 +49,34 @@ const RATINGS_SCHEMA = {
 };
 
 export function buildPrompt(cvSummary, candidates) {
-  return [
-    'You are scoring job postings for fit against a candidate resume.',
-    'Resume summary (extracted keywords):',
-    JSON.stringify(cvSummary),
+  // v7.0: when the parser's raw resume text is available, the model reads the
+  // ACTUAL resume — experience, tenure, seniority — not just a keyword list.
+  // Keywords ride along as a supplement either way.
+  const { resumeText, ...keywords } = cvSummary || {};
+  const parts = ['You are an expert recruiter scoring job postings for fit against one candidate.'];
+  if (resumeText) {
+    parts.push(
+      'Candidate resume (verbatim; may be truncated):',
+      resumeText,
+      '',
+      'Keyword profile extracted from the resume (supplemental):',
+      JSON.stringify(keywords),
+    );
+  } else {
+    parts.push('Resume summary (extracted keywords):', JSON.stringify(keywords));
+  }
+  parts.push(
     '',
-    'For EACH job below, output fit 0-100 (how well the job\'s requirements and seniority match this resume — weigh required tools/skills heavily, penalize wrong role family or seniority) and a reason under 140 characters written to the candidate ("Strong: X. Gap: Y.").',
+    'For EACH job below, score these 0-100 integers:',
+    '- skills: how well the candidate\'s demonstrated tools, skills, and experience cover the job\'s stated requirements',
+    '- seniority: how well the candidate\'s level and years match what the job asks (penalize a big over- or under-shoot)',
+    '- role: whether this is the candidate\'s role family at all (wrong family scores low no matter the keyword overlap)',
+    'Then output overall fit 0-100 (weigh skills heaviest, then role, then seniority) and a reason under 140 characters written to the candidate ("Strong: X. Gap: Y.").',
+    'Judge from what the resume actually demonstrates, not keyword overlap alone.',
     'Jobs:',
     JSON.stringify(candidates),
-  ].join('\n');
+  );
+  return parts.join('\n');
 }
 
 /**

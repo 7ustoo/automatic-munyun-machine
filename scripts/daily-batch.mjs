@@ -585,6 +585,10 @@ const CV_TITLES     = CV.titles     || [];
 const CV_CERTS      = CV.certs      || [];
 const CV_SKILLS     = CV.skills     || [];
 const CV_COMPLIANCE = CV.compliance || [];
+// v7.0: raw resume text (first 8KB, stored by resume-parser since v4.0) —
+// feeds the Smart match rerank so the model reads the actual resume, not
+// just the keyword arrays. Empty string on older cv-parsed.json files.
+const CV_RAW        = typeof CV.raw === 'string' ? CV.raw : '';
 
 // v1.0 E3: cluster-aware scoring. The CV's primary clusters narrow which
 // matches count at full weight — non-cluster matches still count but at
@@ -1249,6 +1253,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       jdPct: r.jdPct ?? null,
       aiPct: r.aiPct ?? null,
       aiReason: r.aiReason || '',
+      aiSub: r.aiSub || null,   // v7.0: {skills, seniority, role} rubric subscores
       missing: r.missing || [],
       salaryK: r.salaryK || 0,
       directUrl: directUrls[i] || '',
@@ -1395,23 +1400,35 @@ if (IS_CLI) (async () => {
         // v5.0 fix: use r.__jd (stashed pre-sort) — resolved[] is aligned to the
         // PRE-sort order, so resolved[shortlist.indexOf(r)] fed each job another
         // job's description once the sort reordered the shortlist.
+        // v7.0: fuller JD text per candidate (900 → 2200 chars) — the model
+        // can't judge requirements it never sees.
         const candidates = shortlist.slice(0, 40).map((r, i) => ({
           n: i, title: r.title, company: r.company,
-          text: (r.__jd || r.cardText || '').slice(0, 900)
+          text: (r.__jd || r.cardText || '').slice(0, 2200)
         }));
+        // v7.0: include the real resume text when the parser stored it —
+        // the single biggest accuracy lever. Keywords stay as a supplement.
         const cvSummary = {
           titles: CV_TITLES.slice(0, 8), certs: CV_CERTS.slice(0, 8),
-          skills: CV_SKILLS.slice(0, 25), compliance: CV_COMPLIANCE.slice(0, 8)
+          skills: CV_SKILLS.slice(0, 25), compliance: CV_COMPLIANCE.slice(0, 8),
+          ...(CV_RAW ? { resumeText: CV_RAW.slice(0, 6000) } : {})
         };
         const ratings = await aiRerank({ apiKey: AI_CFG.apiKey, model: AI_CFG.model, cvSummary, candidates });
+        const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
         let applied2 = 0;
         for (const rt of ratings || []) {
           const r = shortlist[rt.n];
           if (!r || typeof rt.fit !== 'number') continue;
-          r.aiPct = Math.max(0, Math.min(100, Math.round(rt.fit)));
+          r.aiPct = clamp100(rt.fit);
           r.aiReason = String(rt.reason || '').slice(0, 180);
+          // v7.0: rubric subscores (skills / seniority / role) for the Why panel.
+          if (Number.isInteger(rt.skills) && Number.isInteger(rt.seniority) && Number.isInteger(rt.role)) {
+            r.aiSub = { skills: clamp100(rt.skills), seniority: clamp100(rt.seniority), role: clamp100(rt.role) };
+          }
           r.kwPct = r.matchPct;
-          r.matchPct = Math.round(0.45 * r.kwPct + 0.55 * r.aiPct);
+          // v7.0: 0.45/0.55 → 0.35/0.65 — now that the model reads the real
+          // resume against fuller descriptions, its judgment earns more weight.
+          r.matchPct = Math.round(0.35 * r.kwPct + 0.65 * r.aiPct);
           applied2++;
         }
         log(`AI rerank applied to ${applied2} jobs (model=${AI_CFG.model})`);
