@@ -217,6 +217,12 @@ func (d *dashboardServer) handleJobsAdd(w http.ResponseWriter, r *http.Request) 
 	d.relayDashboardAPI(w, 15*time.Second, "jobs-add", b["term"])
 }
 
+// v7.3: route one search term to a source (both/hcafe/dice).
+func (d *dashboardServer) handleJobsEngine(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "jobs-engine", b["term"], b["engines"])
+}
+
 func (d *dashboardServer) handleJobsRemove(w http.ResponseWriter, r *http.Request) {
 	b := readBody(r)
 	d.relayDashboardAPI(w, 15*time.Second, "jobs-remove", b["term"])
@@ -607,6 +613,25 @@ func (d *dashboardServer) handleHcafeAuth(w http.ResponseWriter, r *http.Request
 // button and after a sign-in completes.
 func (d *dashboardServer) handleHcafeAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	d.relayDashboardAPI(w, 100*time.Second, "hcafe-auth-check")
+}
+
+// v7.3: Dice sign-in — the four hcafe handlers cloned for dice.com. Same
+// budgets: start returns immediately, status/refresh may run a headless
+// Playwright probe (up to ~90s).
+func (d *dashboardServer) handleDiceLoginStart(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "dice-login-start")
+}
+
+func (d *dashboardServer) handleDiceLoginStatus(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 100*time.Second, "dice-login-status")
+}
+
+func (d *dashboardServer) handleDiceAuth(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "dice-auth-get")
+}
+
+func (d *dashboardServer) handleDiceAuthRefresh(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 100*time.Second, "dice-auth-check")
 }
 
 // handleSetupInit (POST): body is the initial-config JSON blob. Read the raw

@@ -41,6 +41,8 @@ import { parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
+import { readDiceAuthCache } from './dice-session.mjs';
+import { normalizeEngines, normalizeScrapeSources } from './query-engines.mjs';
 import { loadExport } from './export-batch.mjs';
 import { listArchives, readArchive } from './batch-archive.mjs';
 import { clampBatchSize } from './batch-size.mjs';
@@ -89,6 +91,8 @@ function settingsGet() {
       },
       maxJobAge: cfg.filters?.maxJobAge || 'any',
       queries: (cfg.queries || []).map(q => q.term),
+      queryEngines: Object.fromEntries((cfg.queries || []).map(q => [q.term, normalizeEngines(q.engines)])), // v7.3
+      scrapeSources: normalizeScrapeSources(cfg.search?.scrapeSources), // v7.3
       // v4.0: Smart match (AI) — the key itself is NEVER returned, only
       // whether one is stored. Plus muted terms + a thin-CV signal.
       aiEnabled: !!cfg.scoring?.ai?.enabled,
@@ -130,6 +134,7 @@ function settingsSet(dotPath, jsonValue) {
     'search.workplaceTypes', 'search.location', // v5.0
     'sources.greenhouse', 'sources.lever', 'sources.ashby', 'sources.remoteConfigUrl', // v5.0
     'sources.dice.enabled', // v7.3: dice.com search toggle
+    'search.scrapeSources', // v7.3: what to scrape — both/hcafe/dice
     'display.showSalary',
     'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
@@ -142,6 +147,7 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'sources.dice.enabled') value = (value === true || value === 'true' || value === 'on'); // v7.3
+  if (dotPath === 'search.scrapeSources') value = normalizeScrapeSources(value); // v7.3
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.format') {
     value = String(value || '').trim().toLowerCase();
@@ -209,6 +215,19 @@ function jobsMode(mode) {
 function jobsClear() {
   cfgRW.set('queries', []);
   out({ ok: true, list: [] });
+}
+
+// v7.3: route one search term to a source — 'both' (default), 'hcafe', 'dice'.
+function jobsEngine(term, engines) {
+  term = (term || '').trim();
+  const e = normalizeEngines(engines);
+  const cfg = cfgRW.read();
+  const queries = (cfg.queries || []).map(q =>
+    q.term === term ? { ...q, engines: e } : q
+  );
+  if (!queries.some(q => q.term === term)) return out({ ok: false, error: 'unknown term: ' + term });
+  cfgRW.set('queries', queries);
+  out({ ok: true, term, engines: e });
 }
 
 // v4.6: blocked-companies management from the dashboard (was Telegram-only via
@@ -471,6 +490,57 @@ async function hcafeAuthCheck() {
   const authed = r.code === 0;
   writeHcafeAuthCache(authed);
   out({ ok: true, authed, checkedAt: new Date().toISOString(), cached: false, output: (r.output || '').slice(0, 300) });
+}
+
+// ---- Dice sign-in (v7.3) — the hcafe login flow, cloned for dice.com ----
+// Same shape end to end: start spawns a visible sign-in window (PID file),
+// status polls the PID and probes auth after the window closes, get reads
+// the cache instantly, check runs the live probe on demand.
+
+function diceLoginStart() {
+  try {
+    const scriptPath = path.join(ROOT, 'scripts', 'dice-login.mjs');
+    if (!fs.existsSync(scriptPath)) return out({ ok: false, error: 'dice-login.mjs missing — corrupt install?' });
+    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false });
+    child.unref();
+    const pidPath = path.join(ROOT, 'data', 'dice-login.pid');
+    fs.mkdirSync(path.dirname(pidPath), { recursive: true });
+    fs.writeFileSync(pidPath, String(child.pid));
+    out({ ok: true, pid: child.pid });
+  } catch (e) { out({ ok: false, error: String(e.message || e) }); }
+}
+
+// Spawn the headless probe (writes data/dice-auth.json itself); exit 0 = in.
+function spawnDiceProbe() {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, [path.join(ROOT, 'scripts', 'dice-auth-probe.mjs')], { cwd: ROOT, windowsHide: true });
+    let output = '';
+    child.stdout.on('data', d => output += d);
+    child.stderr.on('data', d => output += d);
+    const t = setTimeout(() => { try { child.kill(); } catch {} }, 90000);
+    child.on('close', code => { clearTimeout(t); resolve({ code, output }); });
+    child.on('error', e => { clearTimeout(t); resolve({ code: 1, output: String(e.message || e) }); });
+  });
+}
+
+async function diceLoginStatus() {
+  const pidPath = path.join(ROOT, 'data', 'dice-login.pid');
+  let pid = 0;
+  try { pid = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10); }
+  catch { return out({ ok: true, running: false, authed: false, started: false }); }
+  if (pidIsAlive(pid)) return out({ ok: true, running: true, pid });
+  const r = await spawnDiceProbe();
+  out({ ok: true, running: false, authed: r.code === 0, output: (r.output || '').slice(0, 300) });
+}
+
+function diceAuthGet() {
+  const c = readDiceAuthCache();
+  out({ ok: true, authed: c.authed, checkedAt: c.checkedAt, cached: c.authed !== null });
+}
+
+async function diceAuthCheck() {
+  const r = await spawnDiceProbe();
+  out({ ok: true, authed: r.code === 0, checkedAt: new Date().toISOString(), cached: false, output: (r.output || '').slice(0, 300) });
 }
 
 // buildInitConfig: pure merge of user-collected setup input over config
@@ -799,6 +869,12 @@ if (isMain) (async () => {
     // v4.1: persistent hiring.cafe sign-in status for the main dashboard.
     case 'hcafe-auth-get':           return hcafeAuthGet();
     case 'hcafe-auth-check':         return hcafeAuthCheck();
+    // v7.3: Dice sign-in — same flow as hcafe.
+    case 'dice-login-start':         return diceLoginStart();
+    case 'dice-login-status':        return diceLoginStatus();
+    case 'dice-auth-get':            return diceAuthGet();
+    case 'dice-auth-check':          return diceAuthCheck();
+    case 'jobs-engine':              return jobsEngine(a, b);
     case 'setup-init':               cfgRW.snapshotConfig('pre-setup'); return setupInit(a);
     case 'setup-finalize':           return setupFinalize();
     // v4.3: email-to-VA setup + send.

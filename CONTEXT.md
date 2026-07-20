@@ -63,7 +63,7 @@ Scheduled or manual scrape
 scripts/daily-batch.mjs
   ├─ hiring.cafe through Playwright
   ├─ optional Greenhouse / Lever / Ashby feeds
-  ├─ optional Dice.com search (v7.3: sources.dice.enabled — reuses the user's search terms; scripts/sources/dice.mjs parses the SSR flight payload, no key/login)
+  ├─ optional Dice.com search (v7.3: sources.dice.enabled — reuses the user's search terms; scripts/sources/dice.mjs parses the SSR flight payload, no key/login. search.scrapeSources both|hcafe|dice + per-term queries[].engines routing via scripts/query-engines.mjs; a Dice-only scrape skips Playwright. Optional Dice sign-in mirrors the hcafe flow: dice-login.mjs window + dice-auth-probe.mjs headless check + data/dice-auth.json cache, System-page card)
   ├─ filter, deduplicate, and score
   ├─ write local batch + history
   └─ optional Telegram / email delivery

@@ -31,13 +31,14 @@ import { atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
 import { aiRerank } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
-import { isSignedIn, writeHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
+import { isSignedIn, writeHcafeAuthCache, readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
 import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
 import { exportRows, buildExportCsv, buildExportXlsx } from './export-batch.mjs';
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
+import { splitQueriesByEngine } from './query-engines.mjs';
 import { fetchAllSources } from './sources/index.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
@@ -229,6 +230,10 @@ async function getWeather() {
 const QUERIES = (CFG.queries && CFG.queries.length)
   ? CFG.queries.map(q => [q.key, q.term])
   : [];
+// v7.3: per-term engine routing (both/hcafe/dice) + the global scrape-source
+// switch. HCAFE_QUERIES drives the hiring.cafe loop; DICE_QUERY_TERMS drives
+// the Dice per-query fetch. QUERIES stays the full list for key→term lookups.
+const { hcafe: HCAFE_QUERIES, dice: DICE_QUERY_TERMS } = splitQueriesByEngine(CFG.queries || [], CFG.search?.scrapeSources);
 // v5.0: key→term lookup so a job's `q` (and the dashboard source pill /
 // leaderboard) shows the human search TERM, not the mashed internal key
 // (e.g. 'SeniorSecurityEngine').
@@ -453,7 +458,7 @@ async function _scrapeWith(ctx) {
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
   let runningFreshEstimate = 0;
 
-  for (const [key, query] of QUERIES) {
+  for (const [key, query] of HCAFE_QUERIES) {
     const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}"…`);
@@ -1324,7 +1329,16 @@ if (IS_CLI) (async () => {
     }
 
     let byQuery, hcafeAuthed = false, accountDedupEnabled = true;
-    try {
+    // v7.3: when the source selection leaves hiring.cafe with zero terms
+    // (scrapeSources='dice' or every term tagged Dice-only), skip the whole
+    // Playwright scrape — Dice + ATS feeds are plain fetch. Auth state falls
+    // back to the cached probe so dedup-mode wording stays honest.
+    if (!HCAFE_QUERIES.length) {
+      byQuery = {};
+      hcafeAuthed = readHcafeAuthCache().authed === true;
+      accountDedupEnabled = SCORING.accountDedup !== false;
+      log('hiring.cafe scrape skipped — no terms routed to it (source selection).');
+    } else try {
       ({ byQuery, hcafeAuthed, accountDedupEnabled } = await scrape());
     } catch (e) {
       if (e.unauth) {
@@ -1343,7 +1357,7 @@ if (IS_CLI) (async () => {
     // v5.0: pull configured ATS boards (best-effort, never throws) and merge
     // them into the same filter+score pipeline as the hiring.cafe cards.
     const atsCards = SOURCES_CONFIGURED
-      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: QUERIES.map(([, term]) => term) }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
+      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: DICE_QUERY_TERMS }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
       : [];
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
     const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery, atsCards);
