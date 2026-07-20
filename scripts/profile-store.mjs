@@ -145,7 +145,8 @@ export function paths(slug) {
     lastBatchCallbacks: path.join(dir, 'last-batch-callbacks.json'),
     applications:       path.join(dir, 'applications.md'),
     queryStats:         path.join(dir, 'query-stats.json'),
-    batchHistory:       path.join(dir, 'batch-history.json') // v4.6: daily snapshots for Trends
+    batchHistory:       path.join(dir, 'batch-history.json'), // v4.6: daily snapshots for Trends
+    batchArchiveDir:    path.join(dir, 'batch-archive')       // v7.2: full per-scrape snapshots (30-day retention)
   };
 }
 

@@ -37,6 +37,7 @@ import { exportRows, buildExportCsv, buildExportXlsx } from './export-batch.mjs'
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
+import { archiveBatch } from './batch-archive.mjs';
 import { fetchAllSources } from './sources/index.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
@@ -1274,6 +1275,14 @@ function writeBatchTsv(top, directUrls, funnel) {
     }));
   } catch (e) {
     log(`batch-history write skipped (non-fatal): ${SCRUB(String(e.message || e))}`);
+  }
+
+  // v7.2: archive the FULL batch (jobs included) so re-scraping never loses
+  // the previous list. 30-day retention; dashboard lists/downloads them.
+  try {
+    archiveBatch(PP.batchArchiveDir, lastBatch);
+  } catch (e) {
+    log(`batch-archive write skipped (non-fatal): ${SCRUB(String(e.message || e))}`);
   }
 }
 

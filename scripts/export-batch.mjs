@@ -31,6 +31,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths as profilePaths } from './profile-store.mjs';
+import { readArchive } from './batch-archive.mjs';
 import { buildXlsx } from './xlsx-writer.mjs';
 
 // ---- pure builders (unit-tested) ----
@@ -90,10 +91,15 @@ export function buildExportXlsx(rows, date = '') {
 
 // ---- loader (reads the active profile's last batch) ----
 
-export function loadExport(format) {
+export function loadExport(format, archiveId) {
   const fmt = format === 'csv' ? 'csv' : format === 'xlsx' ? 'xlsx' : 'txt';
   let lb;
-  try {
+  if (archiveId) {
+    // v7.2: export a previous scrape from the batch archive instead of the
+    // live last-batch.json. readArchive validates the id (path-safe).
+    lb = readArchive(profilePaths().batchArchiveDir, archiveId);
+    if (!lb) return { ok: false, error: 'That archived scrape is no longer available.' };
+  } else try {
     lb = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
   } catch {
     return { ok: false, error: 'No batch yet — run a scrape first.' };
@@ -103,7 +109,10 @@ export function loadExport(format) {
     return { ok: false, error: 'The latest batch has no jobs to export.' };
   }
   const date = lb.date || new Date().toISOString().slice(0, 10);
-  const filename = `apply-links(${date}).${fmt}`;
+  // Archived exports carry the full scrape timestamp so two same-day
+  // downloads don't overwrite each other in the user's Downloads folder.
+  const stamp = archiveId ? archiveId.replace(/^batch-/, '') : date;
+  const filename = `apply-links(${stamp}).${fmt}`;
   if (fmt === 'xlsx') {
     // Binary format — base64 so it survives the one-line-JSON stdout contract.
     const contentBase64 = buildExportXlsx(rows, date).toString('base64');
@@ -116,7 +125,7 @@ export function loadExport(format) {
 // ---- CLI (the Go wrapper execs this) ----
 const invoked = process.argv[1] ? path.resolve(process.argv[1]) : '';
 if (invoked === path.resolve(fileURLToPath(import.meta.url))) {
-  const r = loadExport(process.argv[2]);
+  const r = loadExport(process.argv[2], process.argv[3]);
   process.stdout.write(JSON.stringify(r) + '\n');
   process.exit(r.ok ? 0 : 1);
 }

@@ -28,6 +28,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -87,7 +88,9 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))       // GET: full ranked batch (all jobs + matched)
 	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory))   // GET: daily snapshots → Trends + leaderboard (v4.6)
 	mux.HandleFunc("/api/settings", d.guardGet(d.handleSettings)) // GET: editable knobs + search terms
-	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))     // GET ?format=txt|csv: number·title·apply-link export (v2.4)
+	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))     // GET ?format=txt|csv[&archive=id]: number·title·apply-link export (v2.4, archives v7.2)
+	mux.HandleFunc("/api/archive", d.guardGet(d.handleArchiveList))       // GET: previous scrapes index (v7.2)
+	mux.HandleFunc("/api/archive/batch", d.guardGet(d.handleArchiveGet))  // GET ?id=: one archived batch's jobs (v7.2)
 	mux.HandleFunc("/api/jobs-txt", d.guardGet(d.handleExport))   // legacy alias (pre-v2.4 bookmark) → txt export
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
@@ -259,6 +262,62 @@ func (d *dashboardServer) handleHistory(w http.ResponseWriter, r *http.Request) 
 	_ = json.NewEncoder(w).Encode(out)
 }
 
+// archiveIDRx mirrors scripts/batch-archive.mjs ARCHIVE_ID_RX — the only ids
+// either layer will touch on disk (path-traversal guard).
+var archiveIDRx = regexp.MustCompile(`^batch-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$`)
+
+// handleArchiveList (GET /api/archive) returns the active profile's previous
+// scrapes index (data/profiles/<active>/batch-archive/index.json, written by
+// daily-batch on every run; 30-day retention). Missing file → ok with empty
+// archives — same shape rule as handleHistory. v7.2.
+func (d *dashboardServer) handleArchiveList(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	out := struct {
+		OK       bool              `json:"ok"`
+		Archives []json.RawMessage `json:"archives"`
+	}{OK: true, Archives: []json.RawMessage{}}
+	if active := activeProfileSlug(d.installDir); active != "" {
+		if data, err := os.ReadFile(filepath.Join(d.installDir, "data", "profiles", active, "batch-archive", "index.json")); err == nil {
+			var idx struct {
+				Archives []json.RawMessage `json:"archives"`
+			}
+			if json.Unmarshal(data, &idx) == nil && idx.Archives != nil {
+				out.Archives = idx.Archives
+			}
+		}
+	}
+	_ = json.NewEncoder(w).Encode(out)
+}
+
+// handleArchiveGet (GET /api/archive/batch?id=batch-…) returns one archived
+// batch (full jobs) for the dashboard's Previous scrapes viewer. v7.2.
+func (d *dashboardServer) handleArchiveGet(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	id := r.URL.Query().Get("id")
+	if !archiveIDRx.MatchString(id) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"bad archive id"}`))
+		return
+	}
+	active := activeProfileSlug(d.installDir)
+	if active == "" {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"no active profile"}`))
+		return
+	}
+	data, err := os.ReadFile(filepath.Join(d.installDir, "data", "profiles", active, "batch-archive", id+".json"))
+	if err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"ok":false,"error":"That archived scrape is no longer available."}`))
+		return
+	}
+	_, _ = w.Write([]byte(`{"ok":true,"batch":`))
+	_, _ = w.Write(data)
+	_, _ = w.Write([]byte(`}`))
+}
+
 // activeProfileSlug reads config.json's active_profile ("" when unreadable).
 func activeProfileSlug(installDir string) string {
 	data, err := os.ReadFile(filepath.Join(installDir, "config.json"))
@@ -292,7 +351,17 @@ func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	if format != "csv" && format != "xlsx" {
 		format = "txt"
 	}
-	out, err := d.execDashboardAPI(20*time.Second, "export", format)
+	// v7.2: &archive=batch-… exports a previous scrape instead of the live
+	// batch. Validate here too so garbage never reaches the exec layer.
+	args := []string{"export", format}
+	if id := r.URL.Query().Get("archive"); id != "" {
+		if !archiveIDRx.MatchString(id) {
+			http.Error(w, "bad archive id", http.StatusBadRequest)
+			return
+		}
+		args = append(args, id)
+	}
+	out, err := d.execDashboardAPI(20*time.Second, args...)
 	if err != nil {
 		http.Error(w, "Export failed: "+err.Error(), http.StatusInternalServerError)
 		return

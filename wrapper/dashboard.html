@@ -392,6 +392,15 @@
   .lb-table td { padding: 7px 10px; border-bottom: 1px solid var(--border); }
   .lb-table td.num { font-variant-numeric: tabular-nums; }
   .lb-table tr:last-child td { border-bottom: none; }
+
+  /* ---- Previous scrapes (v7.2) ---- */
+  .arch-dl a { color: var(--accent); text-decoration: none; font-weight: 600; margin-right: 10px; }
+  .arch-dl a:hover { text-decoration: underline; }
+  .arch-detail td { background: var(--surface-2); }
+  .arch-jobs { margin: 6px 0 6px 18px; padding: 0; max-height: 300px; overflow-y: auto; }
+  .arch-jobs li { padding: 3px 0; }
+  .arch-jobs a { color: var(--text); text-decoration: none; }
+  .arch-jobs a:hover { color: var(--accent); text-decoration: underline; }
   .lb-term { font-weight: 600; }
   .lb-weak td { opacity: .6; }
   td.yoe { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1165,6 +1174,19 @@
           <div class="table-wrap"><div id="lb-body"></div></div>
           <div class="table-foot" id="lb-foot"></div>
         </div>
+
+        <!-- v7.2: Previous scrapes — full-batch archive, 30-day retention.
+             Every scrape is saved before the next one overwrites the live
+             list, so re-scraping never loses jobs. -->
+        <div class="card" id="archive-card">
+          <h2>Previous scrapes <span class="pill" id="arch-pill">—</span></h2>
+          <div class="muted-sm">Every scrape is saved here for 30 days — view or download an older batch any time. Re-scraping never loses your jobs again.</div>
+          <table class="lb-table" id="arch-table">
+            <thead><tr><th>Scraped</th><th>Jobs</th><th>Avg match</th><th>Strong (70%+)</th><th>Download</th><th></th></tr></thead>
+            <tbody id="arch-body"></tbody>
+          </table>
+          <div class="muted-sm" id="arch-empty" style="margin-top:8px">No previous scrapes yet — each new scrape adds one here.</div>
+        </div>
       </section>
 
       <!-- =================== View: Searches =================== -->
@@ -1866,6 +1888,7 @@ function onFreshBatch(lb) {
   $("batch-banner").classList.remove("hidden");
   toast(`Scrape complete — ${what}.`, "good");
   loadTrends(true); // v4.6: today's snapshot just landed — refresh Trends
+  loadArchives();   // v7.2: the finished scrape was archived — refresh the list
 }
 $("bb-dismiss").addEventListener("click", () => $("batch-banner").classList.add("hidden"));
 $("bb-view").addEventListener("click", () => {
@@ -2425,6 +2448,62 @@ async function loadTrends(force) {
     renderLeaderboard(days);
   } catch (e) {}
 }
+
+// ---- Previous scrapes (v7.2) ----------------------------------------------
+// Full-batch snapshots from /api/archive (batch-archive/, 30-day retention).
+// Each row: when, counts, per-format download links, expandable job list.
+function archLabel(id) {
+  // batch-2026-07-20T14-33-05 → "Jul 20, 2026 · 2:33 PM" (local words, not ISO)
+  const m = /^batch-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})$/.exec(id || "");
+  if (!m) return id || "";
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]));
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
+       + " · " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+}
+async function loadArchives() {
+  try {
+    const r = await (await fetch("/api/archive", { cache: "no-store" })).json();
+    const list = (r && r.ok && Array.isArray(r.archives)) ? r.archives : [];
+    $("arch-pill").textContent = list.length ? `${list.length} saved · 30-day history` : "—";
+    $("arch-empty").classList.toggle("hidden", list.length > 0);
+    $("arch-table").classList.toggle("hidden", list.length === 0);
+    $("arch-body").innerHTML = list.map(e => `
+      <tr data-arch="${escapeHTML(e.id)}">
+        <td>${escapeHTML(archLabel(e.id))}</td>
+        <td>${e.sent ?? "—"}</td>
+        <td>${e.avgPct != null ? e.avgPct + "%" : "—"}</td>
+        <td>${e.strongCount ?? "—"}</td>
+        <td class="arch-dl">
+          <a class="sm" href="/api/export?format=txt&archive=${encodeURIComponent(e.id)}" title="Plain text">.txt</a>
+          <a class="sm" href="/api/export?format=csv&archive=${encodeURIComponent(e.id)}" title="Spreadsheet (links are text)">.csv</a>
+          <a class="sm" href="/api/export?format=xlsx&archive=${encodeURIComponent(e.id)}" title="Excel workbook, clickable links">.xlsx</a>
+        </td>
+        <td><button class="sm arch-view" data-id="${escapeHTML(e.id)}">View</button></td>
+      </tr>
+      <tr class="arch-detail hidden" data-detail="${escapeHTML(e.id)}"><td colspan="6"></td></tr>`).join("");
+  } catch (e) {}
+}
+document.addEventListener("click", async ev => {
+  const btn = ev.target.closest(".arch-view");
+  if (!btn) return;
+  const id = btn.dataset.id;
+  const row = document.querySelector(`[data-detail="${CSS.escape(id)}"]`);
+  if (!row) return;
+  if (!row.classList.contains("hidden")) { row.classList.add("hidden"); btn.textContent = "View"; return; }
+  btn.textContent = "…";
+  try {
+    const r = await (await fetch(`/api/archive/batch?id=${encodeURIComponent(id)}`, { cache: "no-store" })).json();
+    const jobs = (r && r.ok && Array.isArray(r.batch?.jobs)) ? r.batch.jobs : [];
+    row.firstElementChild.innerHTML = jobs.length ? `<ol class="arch-jobs">` + jobs.map(j => {
+      const url = j.directUrl || j.viewjobUrl || "";
+      const t = `${escapeHTML(j.title || "Untitled")}${j.company ? " — " + escapeHTML(j.company) : ""}`;
+      return `<li>${url ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">${t}</a>` : t}` +
+             `${j.matchPct != null ? ` <span class="muted-sm">· ${j.matchPct}%</span>` : ""}</li>`;
+    }).join("") + `</ol>` : `<div class="muted-sm">This snapshot has no jobs.</div>`;
+    row.classList.remove("hidden");
+    btn.textContent = "Hide";
+  } catch (e) { btn.textContent = "View"; toast("Couldn't load that scrape.", "bad"); }
+});
 
 function renderTrendsChart(days) {
   const svg = $("tr-chart");
@@ -3126,6 +3205,7 @@ $("ub-update").addEventListener("click", async () => {
   await tick();
   if (!window.__setupStarted) {
     loadBatch();
+    loadArchives(); // v7.2: previous scrapes list
     loadSettings();
     loadProfiles();
     loadBackups();

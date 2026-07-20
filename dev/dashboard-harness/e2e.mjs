@@ -53,6 +53,15 @@ const csvRequest = await csvRequestPromise;
 if (csvRequest.postDataJSON().format !== 'csv') throw new Error('Jobs email menu did not request CSV');
 await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('.csv'));
 
+// v7.2: Previous scrapes — list renders, snapshot expands, downloads carry the id.
+await page.waitForSelector('#arch-body tr[data-arch]');
+if (await page.locator('#arch-body tr[data-arch]').count() !== 3) throw new Error('archive list did not render 3 previous scrapes');
+const dlHref = await page.locator('#arch-body .arch-dl a').first().getAttribute('href');
+if (!/\/api\/export\?format=txt&archive=batch-2026-07-06T14-30-00$/.test(dlHref)) throw new Error('archive download link missing archive id: ' + dlHref);
+await page.click('.arch-view[data-id="batch-2026-07-06T14-30-00"]');
+await page.waitForSelector('[data-detail="batch-2026-07-06T14-30-00"]:not(.hidden) .arch-jobs li');
+if (await page.locator('[data-detail="batch-2026-07-06T14-30-00"] .arch-jobs li').count() < 20) throw new Error('archived jobs did not render');
+
 if (errors.length) throw new Error('dashboard console errors:\n' + errors.join('\n'));
 await browser.close();
-console.log('E2E: dashboard jobs, profiles, and Gmail OAuth flow passed');
+console.log('E2E: dashboard jobs, profiles, Gmail OAuth, and previous scrapes passed');
