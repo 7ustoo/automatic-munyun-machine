@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.0.0] — 2026-07-20
+
+### Changed
+
+- **Bolder dashboard hierarchy pass.** The Jobs view now leads with its numbers: the KPI tiles (jobs in batch, average match, strong matches, batch date) use larger, heavier hero figures, and **Strong matches** is rendered in the same green the match meter already uses for strong jobs — making "is today worth my time?" the first thing the eye lands on. Match percentages in the ranked table are larger and heavier, the match meter is slightly taller, and the view title is stronger. Column headers and stat labels were darkened one step, which also fixes a light-theme WCAG AA contrast shortfall on those labels. All changes stay inside the existing design tokens — no new colors, gradients, or radii — and apply to both light and dark themes.
+
 ## [6.1.0] — 2026-07-13
 
 ### Added

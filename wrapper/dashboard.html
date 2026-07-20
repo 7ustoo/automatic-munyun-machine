@@ -147,7 +147,7 @@
     background: var(--topbar-bg); backdrop-filter: blur(8px);
     border-bottom: 1px solid var(--border);
   }
-  #view-title { margin: 0; font-size: 16px; font-weight: 650; letter-spacing: .01em; }
+  #view-title { margin: 0; font-size: 18px; font-weight: 720; letter-spacing: -.01em; }
   .top-actions { display: flex; align-items: center; gap: 10px; flex-wrap: nowrap; }
   .top-help-btn { white-space: nowrap; }
 
@@ -197,7 +197,7 @@
   }
   .card + .card { margin-top: 16px; }
   .card h2 {
-    margin: 0 0 14px; font-size: 12px; font-weight: 650;
+    margin: 0 0 14px; font-size: 12px; font-weight: 700;
     letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2);
     display: flex; align-items: center; gap: 8px;
   }
@@ -221,14 +221,18 @@
   .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-bottom: 16px; }
   .tile {
     background: var(--surface); border: 1px solid var(--border);
-    border-radius: var(--r-lg); padding: 14px 16px; box-shadow: var(--shadow-1);
+    border-radius: var(--r-lg); padding: 16px 18px; box-shadow: var(--shadow-1);
   }
   .tile .t-label {
     font-size: 11px; font-weight: 650; letter-spacing: .06em;
-    text-transform: uppercase; color: var(--text-3); margin-bottom: 6px;
+    text-transform: uppercase; color: var(--text-2); margin-bottom: 7px;
   }
-  .tile .t-value { font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.15; }
-  .tile .t-sub { font-size: 12px; color: var(--text-3); margin-top: 3px; font-variant-numeric: tabular-nums; }
+  /* v7.0 bolder pass: hero KPI numbers carry the "confidence at a glance" read —
+     larger, heavier, tighter. #st-strong (jobs ≥70%) is the focal metric, so it
+     takes the green that already means "strong" in the match meter. */
+  .tile .t-value { font-size: 30px; font-weight: 750; letter-spacing: -.02em; font-variant-numeric: tabular-nums; line-height: 1.12; }
+  #st-strong { color: var(--green); }
+  .tile .t-sub { font-size: 12px; color: var(--text-3); margin-top: 4px; font-variant-numeric: tabular-nums; }
 
   /* ---- Buttons ------------------------------------------------------------ */
   button, .btn {
@@ -356,7 +360,7 @@
   }
   th {
     font-size: 11px; text-transform: uppercase;
-    letter-spacing: 0.05em; color: var(--text-3); font-weight: 650;
+    letter-spacing: 0.05em; color: var(--text-2); font-weight: 700;
     position: sticky; top: 0; background: var(--surface); z-index: 2;
   }
   tbody tr { transition: background .1s var(--ease); }
@@ -389,7 +393,7 @@
   td.match { white-space: nowrap; width: 120px; }
   .meter {
     display: inline-block; vertical-align: middle;
-    width: 62px; height: 4px; border-radius: 4px; background: var(--surface-3);
+    width: 64px; height: 5px; border-radius: 4px; background: var(--surface-3);
     margin-right: 9px; overflow: hidden;
   }
   .meter i {
@@ -399,7 +403,7 @@
   .meter i.hi { background: var(--green); }
   .meter i.md { background: var(--yellow); }
   .meter i.lo { background: var(--gray); }
-  .meter-num { font-variant-numeric: tabular-nums; font-weight: 650; }
+  .meter-num { font-variant-numeric: tabular-nums; font-weight: 700; font-size: 14px; }
 
   tr.applied-row { opacity: .5; }
   tr.applied-row .j-title { text-decoration: line-through; text-decoration-color: var(--text-3); }
