@@ -185,13 +185,17 @@ async function get(url, fetchImpl, timeoutMs = 20000) {
 // Fetch one search query from Dice. Enriches the top `jdTop` cards with the
 // full JD from their detail pages (small concurrency, best-effort — a failed
 // detail fetch leaves the card's summary text in place).
-export const DICE_PAGES = 3; // v7.5: paginate — page 1 alone caps at ~35 jobs
+// v7.6: walk EVERY result page, not a fixed count. The loop stops itself when
+// a page yields no new jobs (Dice repeats results past the end) or comes back
+// empty; the cap is a runaway guard, not a target (~30 jobs/page ≈ 600 jobs).
+export const DICE_MAX_PAGES = 20;
 
-export async function fetchDice(query, { fetchImpl = fetch, pages = DICE_PAGES, jdTop = DICE_JD_TOP, filters = {}, onPage } = {}) {
+export async function fetchDice(query, { fetchImpl = fetch, pages = DICE_MAX_PAGES, jdTop = DICE_JD_TOP, filters = {}, onPage } = {}) {
   const q = String(query || '').trim();
   if (!q) return [];
-  const raw = [];
-  for (let p = 1; p <= Math.max(1, Math.min(5, pages)); p++) {
+  const seen = new Set();
+  const cards = [];
+  for (let p = 1; p <= Math.max(1, Math.min(DICE_MAX_PAGES, pages)); p++) {
     const url = buildDiceSearchUrl(q, { ...filters, page: p });
     // v7.5: watch-mode hook — daily-batch mirrors this URL in a visible
     // browser page so "Watch" shows exactly what Dice is being asked.
@@ -199,16 +203,14 @@ export async function fetchDice(query, { fetchImpl = fetch, pages = DICE_PAGES, 
     const html = await get(url, fetchImpl);
     if (!html) break;
     const jobs = parseDiceJobs(html);
-    if (!jobs.length) break;
-    raw.push(...jobs);
-  }
-  const seen = new Set();
-  const cards = [];
-  for (const j of raw) {
-    if (seen.has(j.guid)) continue;
-    seen.add(j.guid);
-    const card = normalizeDice(j);
-    if (card) cards.push(card);
+    let fresh = 0;
+    for (const j of jobs) {
+      if (seen.has(j.guid)) continue;
+      seen.add(j.guid);
+      const card = normalizeDice(j);
+      if (card) { cards.push(card); fresh++; }
+    }
+    if (!fresh) break; // exhausted — this page added nothing new
   }
   // JD enrichment: Dice relevance-sorts results, so the head of the list is
   // where full-JD scoring pays off most.
