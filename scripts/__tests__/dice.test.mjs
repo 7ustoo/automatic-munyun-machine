@@ -204,3 +204,15 @@ test('fetchDice: onPage watch hook sees every search page URL, and a throwing ho
   assert.ok(seen[0].startsWith('1:https://www.dice.com/jobs?q=iam'));
   assert.ok(seen[1].includes('page=2'));
 });
+
+test('fetchDice: v7.6 pagination stops when a page adds nothing new (repeat-page guard)', async () => {
+  let calls = 0;
+  const impl = async (url) => {
+    calls++;
+    return { ok: true, text: async () => url.includes('/job-detail/') ? detailFixture() : searchFixture() };
+  };
+  const cards = await fetchDice('iam', { fetchImpl: impl, jdTop: 0 });
+  assert.equal(cards.length, 2);
+  // page 1 → 2 new; page 2 (same fixture) → 0 new → stop. No 20-page runaway.
+  assert.equal(calls, 2);
+});

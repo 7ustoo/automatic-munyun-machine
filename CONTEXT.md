@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 7.5.0
-**Active release branch:** `v7.5`
+**Version:** 7.6.0
+**Active release branch:** `v7.6`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-20
 
@@ -63,7 +63,7 @@ Scheduled or manual scrape
 scripts/daily-batch.mjs
   ├─ hiring.cafe through Playwright
   ├─ optional Greenhouse / Lever / Ashby feeds
-  ├─ built-in Dice.com search (v7.4: always-on, no toggle — reuses the user's search terms; scripts/sources/dice.mjs parses the SSR flight payload, no key/login. search.scrapeSources both|hcafe|dice + per-term queries[].engines routing via scripts/query-engines.mjs; a Dice-only scrape skips Playwright; v7.5: user filters ride the Dice URL (workplace/location/recency) + 3-page pagination, and Watch mirrors Dice search pages in a visible browser. Optional Dice sign-in mirrors the hcafe flow: dice-login.mjs window + dice-auth-probe.mjs headless check + data/dice-auth.json cache, System-page card)
+  ├─ built-in Dice.com search (v7.4: always-on, no toggle — reuses the user's search terms; scripts/sources/dice.mjs parses the SSR flight payload, no key/login. search.scrapeSources both|hcafe|dice + per-term queries[].engines routing via scripts/query-engines.mjs; a Dice-only scrape skips Playwright; v7.5: user filters ride the Dice URL (workplace/location/recency) + exhaustive pagination (v7.6: all pages until no new jobs, 20-page cap), and Watch mirrors Dice search pages in a visible browser. Optional Dice sign-in mirrors the hcafe flow: dice-login.mjs window + dice-auth-probe.mjs headless check + data/dice-auth.json cache, System-page card)
   ├─ filter, deduplicate, and score
   ├─ write local batch + history
   └─ optional Telegram / email delivery

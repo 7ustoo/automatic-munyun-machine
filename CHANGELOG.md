@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.6.0] — 2026-07-20
+
+### Changed
+
+- **Dice now walks every result page.** v7.5 fetched a fixed 3 pages per term; now the fetch keeps paging until Dice runs out of new jobs (it repeats results past the end — the loop detects that and stops), with a 20-page runaway guard (~600 jobs/term). Live test: the same remote-only 7-day search that returned 93 jobs on 3 pages returns **657** walking all pages.
+- Already-applied tracking for Dice needs no new machinery — it's been in place since the source shipped: every delivered job's link (Dice included) is persisted to the local seen-jobs store after each successful run and excluded from future batches for 60 days (`scoring.seenJobsFreshnessDays`), independent of Telegram/email delivery. The funnel line ("skipped N previously seen") shows it working.
+
 ## [7.5.0] — 2026-07-20
 
 ### Fixed
