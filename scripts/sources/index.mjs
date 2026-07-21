@@ -47,7 +47,7 @@ async function loadRemoteSources(url, { fetchImpl = fetch, timeoutMs = 12000 } =
   } catch { return {}; }
 }
 
-export async function fetchAllSources(sources = {}, { workplaceTypes = [], log = () => {}, fetchImpl, queries = [] } = {}) {
+export async function fetchAllSources(sources = {}, { workplaceTypes = [], log = () => {}, fetchImpl, queries = [], diceOptions = {} } = {}) {
   const remote = await loadRemoteSources(sources.remoteConfigUrl, { fetchImpl });
   const merged = mergeSources(sources, remote);
   const tasks = [];
@@ -66,7 +66,7 @@ export async function fetchAllSources(sources = {}, { workplaceTypes = [], log =
   // empty queries list is the only off switch.
   for (const q of queries.map(t => String(t || '').trim()).filter(Boolean)) {
     tasks.push(
-      fetchDice(q, { fetchImpl })
+      fetchDice(q, { fetchImpl, ...diceOptions })
         .then(jobs => ({ ats: 'dice', token: q, jobs }))
         .catch(() => ({ ats: 'dice', token: q, jobs: [] }))
     );

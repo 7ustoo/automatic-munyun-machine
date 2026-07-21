@@ -1359,9 +1359,40 @@ if (IS_CLI) (async () => {
     // them into the same filter+score pipeline as the hiring.cafe cards.
     // v7.4: Dice is always-on — fetch whenever any term routes to it, with or
     // without ATS boards configured.
+    // v7.5: the user's workplace/location/recency filters ride the Dice search
+    // URL itself (buildDiceSearchUrl) so page 1 is already filtered server-
+    // side — fixes "Dice only returned 2 jobs" (unfiltered nationwide page 1,
+    // then the client workplace filter gutted it).
+    const diceFilters = {
+      workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes),
+      location: CFG.search?.location || '',
+      maxAgeDays: recencyMaxDays(CFG.filters?.maxJobAge)
+    };
+    // v7.5: Watch support for Dice. Dice is plain fetch (no browser), so when
+    // the user clicked Watch, mirror every Dice search URL in a visible
+    // browser page — they see exactly what Dice is being asked, page by page.
+    // Navigation is serialized (terms fetch in parallel) and cosmetic: any
+    // failure is swallowed, the browser closes when the fetch is done.
+    let watchCtx = null, watchChain = Promise.resolve();
+    const watchDice = process.env.AMM_SHOW_BROWSER === '1' && DICE_QUERY_TERMS.length;
+    if (watchDice) {
+      try {
+        log('👁  Watch: opening a browser window to mirror the Dice searches…');
+        watchCtx = await launchBrowser();
+      } catch (e) { log(`watch browser skipped (non-fatal): ${SCRUB(String(e.message || e))}`); }
+    }
+    const onDicePage = watchCtx ? (url) => {
+      watchChain = watchChain.then(async () => {
+        const page = watchCtx.pages()[0] || await watchCtx.newPage();
+        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 20000 });
+        await page.waitForTimeout(1200); // let the user actually see each page
+      }).catch(() => {});
+      return watchChain;
+    } : undefined;
     const atsCards = (SOURCES_CONFIGURED || DICE_QUERY_TERMS.length)
-      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: DICE_QUERY_TERMS }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
+      ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: DICE_QUERY_TERMS, diceOptions: { filters: diceFilters, onPage: onDicePage } }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
       : [];
+    if (watchCtx) { try { await watchChain; await watchCtx.close(); } catch {} }
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
     const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery, atsCards);
     log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance}, droppedStale=${droppedStale})`);

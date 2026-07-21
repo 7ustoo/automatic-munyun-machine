@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   extractFlightPayload, parseDiceJobs, extractFlightText, parseDiceDetailJD,
-  normalizeDice, fetchDice
+  normalizeDice, fetchDice, buildDiceSearchUrl
 } from '../sources/dice.mjs';
 import { fetchAllSources } from '../sources/index.mjs';
 
@@ -129,7 +129,7 @@ test('fetchDice: parses search, enriches top cards with detail JD', async () => 
   assert.ok(cards[0].jdText.includes('Salary: USD 135,400.00'));
   // second card keeps its summary (jdTop=1)
   assert.ok(cards[1].jdText.includes('AppSec role.'));
-  assert.ok(calls[0].includes('q=security%20engineer'));
+  assert.ok(calls[0].includes('q=security+engineer')); // URLSearchParams space encoding (v7.5)
 });
 
 test('fetchDice: network failure → [] (best-effort contract)', async () => {
@@ -163,4 +163,44 @@ test('fetchAllSources: workplace filter applies to dice cards', async () => {
   );
   assert.equal(out.length, 1);
   assert.equal(out[0].workplaceType, 'remote');
+});
+
+// ---- v7.5: server-side filter params + watch hook ----
+
+test('buildDiceSearchUrl: filters ride the URL', () => {
+  const u = new URL(buildDiceSearchUrl('iam engineer', {
+    workplaceTypes: ['Remote'], location: 'Atlanta, GA, USA', maxAgeDays: 7, page: 2
+  }));
+  assert.equal(u.searchParams.get('q'), 'iam engineer');
+  assert.equal(u.searchParams.get('filters.workplaceTypes'), 'Remote');
+  assert.equal(u.searchParams.get('location'), null, 'remote-only search must not pin a location');
+  assert.equal(u.searchParams.get('filters.postedDate'), 'SEVEN');
+  assert.equal(u.searchParams.get('page'), '2');
+});
+
+test('buildDiceSearchUrl: local search carries location + radius', () => {
+  const u = new URL(buildDiceSearchUrl('iam', { workplaceTypes: ['Onsite', 'Hybrid'], location: 'Atlanta, GA, USA' }));
+  assert.equal(u.searchParams.get('filters.workplaceTypes'), 'On-Site|Hybrid');
+  assert.equal(u.searchParams.get('location'), 'Atlanta, GA, USA');
+  assert.equal(u.searchParams.get('radius'), '30');
+});
+
+test('buildDiceSearchUrl: all-or-no workplace types means no filter, age>7d omitted', () => {
+  const all = new URL(buildDiceSearchUrl('iam', { workplaceTypes: ['Remote', 'Hybrid', 'Onsite'], maxAgeDays: 30 }));
+  assert.equal(all.searchParams.get('filters.workplaceTypes'), null);
+  assert.equal(all.searchParams.get('filters.postedDate'), null);
+  const none = new URL(buildDiceSearchUrl('iam', { maxAgeDays: Infinity }));
+  assert.equal(none.searchParams.get('filters.workplaceTypes'), null);
+  assert.equal(none.searchParams.get('filters.postedDate'), null);
+  assert.equal(none.searchParams.get('page'), null);
+});
+
+test('fetchDice: onPage watch hook sees every search page URL, and a throwing hook never breaks the fetch', async () => {
+  const { impl } = stubFetch();
+  const seen = [];
+  const out = await fetchDice('iam', { fetchImpl: impl, pages: 2, onPage: (url, q, p) => { seen.push(p + ':' + url); throw new Error('watch died'); } });
+  assert.ok(out.length > 0, 'jobs still returned despite hook throwing');
+  assert.equal(seen.length, 2);
+  assert.ok(seen[0].startsWith('1:https://www.dice.com/jobs?q=iam'));
+  assert.ok(seen[1].includes('page=2'));
 });
