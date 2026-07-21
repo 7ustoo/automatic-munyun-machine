@@ -134,6 +134,38 @@ export function normalizeDice(job) {
   });
 }
 
+// ---- search URL (pure) ----
+
+// v7.5: mirror the user's filters into Dice's own search params so page 1 is
+// already the RIGHT page 1. Without these, results come back nationwide and
+// all-workplace-types, and the client-side workplace filter guts them (the
+// "Dice only returned 2 jobs" bug — 3 remote jobs in 35 unfiltered results).
+// Params verified live: filters.workplaceTypes=Remote|Hybrid|On-Site (pipe-
+// joined), location=<display>&radius=30&radiusUnit=mi, filters.postedDate=
+// ONE|THREE|SEVEN, page=N. Dice bleeds a little across filters — the client
+// filter stays as backstop.
+export function buildDiceSearchUrl(q, { page = 1, workplaceTypes = [], location = '', maxAgeDays = null } = {}) {
+  const p = new URLSearchParams({ q: String(q || '').trim() });
+  const wt = (Array.isArray(workplaceTypes) ? workplaceTypes : [])
+    .map(w => ({ remote: 'Remote', hybrid: 'Hybrid', onsite: 'On-Site' })[String(w).toLowerCase()])
+    .filter(Boolean);
+  // A subset selection filters; all three (or none) means "no preference".
+  if (wt.length && wt.length < 3) p.set('filters.workplaceTypes', wt.join('|'));
+  // Location only helps when the user wants local (non-remote-only) results.
+  const loc = String(location || '').trim();
+  if (loc && wt.some(w => w !== 'Remote')) {
+    p.set('location', loc);
+    p.set('radius', '30');
+    p.set('radiusUnit', 'mi');
+  }
+  if (Number.isFinite(maxAgeDays)) {
+    const posted = maxAgeDays <= 1 ? 'ONE' : maxAgeDays <= 3 ? 'THREE' : maxAgeDays <= 7 ? 'SEVEN' : '';
+    if (posted) p.set('filters.postedDate', posted);
+  }
+  if (page > 1) p.set('page', String(page));
+  return `${DICE_SEARCH_URL}?${p.toString()}`;
+}
+
 // ---- network (best-effort) ----
 
 async function get(url, fetchImpl, timeoutMs = 20000) {
@@ -153,12 +185,17 @@ async function get(url, fetchImpl, timeoutMs = 20000) {
 // Fetch one search query from Dice. Enriches the top `jdTop` cards with the
 // full JD from their detail pages (small concurrency, best-effort — a failed
 // detail fetch leaves the card's summary text in place).
-export async function fetchDice(query, { fetchImpl = fetch, pages = 1, jdTop = DICE_JD_TOP } = {}) {
+export const DICE_PAGES = 3; // v7.5: paginate — page 1 alone caps at ~35 jobs
+
+export async function fetchDice(query, { fetchImpl = fetch, pages = DICE_PAGES, jdTop = DICE_JD_TOP, filters = {}, onPage } = {}) {
   const q = String(query || '').trim();
   if (!q) return [];
   const raw = [];
-  for (let p = 1; p <= Math.max(1, Math.min(3, pages)); p++) {
-    const url = `${DICE_SEARCH_URL}?q=${encodeURIComponent(q)}${p > 1 ? `&page=${p}` : ''}`;
+  for (let p = 1; p <= Math.max(1, Math.min(5, pages)); p++) {
+    const url = buildDiceSearchUrl(q, { ...filters, page: p });
+    // v7.5: watch-mode hook — daily-batch mirrors this URL in a visible
+    // browser page so "Watch" shows exactly what Dice is being asked.
+    try { await onPage?.(url, q, p); } catch { /* watch is cosmetic — never break the fetch */ }
     const html = await get(url, fetchImpl);
     if (!html) break;
     const jobs = parseDiceJobs(html);

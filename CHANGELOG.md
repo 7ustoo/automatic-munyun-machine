@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.5.0] — 2026-07-20
+
+### Fixed
+
+- **Dice now pulls real volume — the "2 jobs" bug.** Dice searches ignored your filters: page 1 came back nationwide with every workplace type, and the client-side workplace filter then discarded nearly all of it (a Remote-only user saw 3 remote jobs out of 35, surviving as 2 after dedup). Your workplace types, location (with a 30-mile radius, for local searches), and recency window now ride the Dice search URL itself (`filters.workplaceTypes`, `location`/`radius`, `filters.postedDate` — all verified live), and each term paginates up to 3 pages instead of 1. Same remote-only search now returns ~90+ matching jobs before scoring. The client-side filter stays as a backstop for Dice's occasional filter bleed.
+- **Watch now works for Dice scrapes.** Dice is fetched directly (no browser), so clicking Watch used to show nothing — on a Dice-only scrape no window ever appeared. Now, when Watch is on and any terms route to Dice, AMM opens a browser window and mirrors every Dice search page it requests, in order, as the fetch runs — you see exactly what Dice is being asked, page by page. Purely cosmetic: a failed mirror never affects the scrape, and the window closes when the Dice fetch finishes.
+
 ## [7.4.0] — 2026-07-20
 
 ### Changed
