@@ -96,6 +96,8 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
 	mux.HandleFunc("/api/jobs/open-all", d.guardPost(d.handleJobsOpenAll))
+	mux.HandleFunc("/api/exclusions", d.guardGet(d.handleExclusionsGet))       // v7.7: current batch's ✕ list
+	mux.HandleFunc("/api/job/exclude", d.guardPost(d.handleJobExclude))        // v7.7: toggle one job's ✕
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
 	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))         // v4.0
 	mux.HandleFunc("/api/config/backups", d.guardGet(d.handleConfigBackups))  // v4.0 (read-only)

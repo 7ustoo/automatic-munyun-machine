@@ -447,6 +447,14 @@
   tr.applied-row { opacity: .5; }
   tr.applied-row .j-title { text-decoration: line-through; text-decoration-color: var(--text-3); }
 
+  /* v7.7: ✕-excluded jobs — visible but clearly out of the send list */
+  tr.excluded-row { opacity: .45; }
+  tr.excluded-row .j-title { text-decoration: line-through; text-decoration-color: var(--red); }
+  .exclude-btn { color: var(--text-3); }
+  .exclude-btn:hover { color: var(--red); border-color: var(--red); }
+  .exclude-btn.on { color: var(--green); }
+  .exclude-btn.on:hover { color: var(--green); border-color: var(--green); }
+
   tr.why-row td {
     background: var(--surface-2); color: var(--text-2); font-size: 12px; padding: 10px 14px;
     box-shadow: inset 0 1px 0 var(--border);
@@ -1594,6 +1602,7 @@ const state = {
   sort: "rank",        // rank | match | title | company | yoe
   applied: new Set(),  // idx marked applied this session (survives re-renders)
   whyOpen: new Set(),  // idx with the Why row expanded (survives re-renders)
+  excluded: new Set(), // v7.7: idx ✕-excluded from exports/email/open-all (server-side, per batch)
   loadedOnce: false,
   lastGen: null,       // v3.0.1: last seen lastBatch.generatedAt (null = no baseline yet)
   showSalary: true,    // v4.6: show the parsed salary badge on job rows (Settings toggle, display.showSalary)
@@ -1954,6 +1963,11 @@ async function loadBatch() {
       state.__appliedKey = "amm-applied-" + (state.batchMeta.generatedAt || state.batchMeta.date || "x");
       state.applied = new Set((JSON.parse(localStorage.getItem(state.__appliedKey) || "[]")).map(String));
     } catch {}
+    // v7.7: pull the server-side ✕ list (auto-empty when a new batch lands).
+    try {
+      const ex = await (await fetch("/api/exclusions", { cache: "no-store" })).json();
+      state.excluded = new Set(ex.ok && Array.isArray(ex.excluded) ? ex.excluded : []);
+    } catch { state.excluded = new Set(); }
     state.loadedOnce = true;
     renderStats();
     renderJobs();
@@ -2101,7 +2115,8 @@ function renderJobs() {
     const pct = j.matchPct ?? 0;
     const band = matchClass(pct);
     const isApplied = state.applied.has(String(j.idx));
-    const main = `<tr data-idx="${j.idx}" class="job-row${isApplied ? " applied-row" : ""}">
+    const isExcluded = state.excluded.has(j.idx); // v7.7: ✕'d out of sends
+    const main = `<tr data-idx="${j.idx}" class="job-row${isApplied ? " applied-row" : ""}${isExcluded ? " excluded-row" : ""}">
       <td class="idx">#${j.idx}</td>
       <td class="jobcell">
         <div class="j-title" title="${escapeAttr(j.title || "")}">${escapeHTML(j.title || "—")}</div>
@@ -2116,6 +2131,7 @@ function renderJobs() {
         <button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>
         ${(j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
         <button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>
+        <button class="sm ghost exclude-btn${isExcluded ? " on" : ""}" data-act="exclude" data-idx="${j.idx}" title="${isExcluded ? "Excluded from Export, Email & Open All — click to restore" : "Exclude from Export, Email & Open All (e.g. a duplicate)"}" aria-label="${isExcluded ? "restore job " + j.idx : "exclude job " + j.idx}">${isExcluded ? "↩" : "✕"}</button>
       </td>
     </tr>`;
     const why = state.whyOpen.has(String(j.idx))
@@ -2126,8 +2142,10 @@ function renderJobs() {
     <thead><tr><th></th><th>Job</th><th>Match</th><th class="yoe">YOE</th><th class="src">Source</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
-  $("lb-foot").textContent = jobs.length === all.length
-    ? all.length + " jobs" : jobs.length + " of " + all.length + " jobs";
+  const exNote = state.excluded.size
+    ? ` · ${state.excluded.size} excluded (left out of Export, Email & Open All)` : "";
+  $("lb-foot").textContent = (jobs.length === all.length
+    ? all.length + " jobs" : jobs.length + " of " + all.length + " jobs") + exNote;
   // Stash full job objects for the "Why" expander (v4.0: journey + misses + AI).
   window.__batchById = {};
   for (const j of all) window.__batchById[j.idx] = j;
@@ -2217,6 +2235,29 @@ $("lb-body").addEventListener("click", async (ev) => {
     tr.after(row);
     state.whyOpen.add(String(idx));
     btn.setAttribute("aria-expanded", "true");
+    return;
+  }
+  // v7.7: ✕ exclude / ↩ restore — server-side so Export, Email & Open All all honor it.
+  if (act === "exclude") {
+    const n = parseInt(idx, 10);
+    const on = !state.excluded.has(n);
+    btn.disabled = true;
+    try {
+      const r = await postJSON("/api/job/exclude", { idx: String(n), excluded: String(on) });
+      if (r.ok) {
+        state.excluded = new Set(r.list || []);
+        renderJobs();
+        toast(on
+          ? `Job #${n} excluded — it won't be in exports, emails, or Open All.`
+          : `Job #${n} restored.`, "good");
+      } else {
+        toast(r.error || "Could not update", "bad");
+        btn.disabled = false;
+      }
+    } catch (e) {
+      toast("Could not update: " + e.message, "bad");
+      btn.disabled = false;
+    }
     return;
   }
   // save / applied

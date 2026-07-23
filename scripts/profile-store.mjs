@@ -146,7 +146,8 @@ export function paths(slug) {
     applications:       path.join(dir, 'applications.md'),
     queryStats:         path.join(dir, 'query-stats.json'),
     batchHistory:       path.join(dir, 'batch-history.json'), // v4.6: daily snapshots for Trends
-    batchArchiveDir:    path.join(dir, 'batch-archive')       // v7.2: full per-scrape snapshots (30-day retention)
+    batchArchiveDir:    path.join(dir, 'batch-archive'),      // v7.2: full per-scrape snapshots (30-day retention)
+    batchExclusions:    path.join(dir, 'batch-exclusions.json') // v7.7: per-batch "don't send" idx list
   };
 }
 

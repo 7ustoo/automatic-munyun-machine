@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.7.0] — 2026-07-21
+
+### Added
+
+- **✕ a job to keep it out of every send.** Each ranked job on the Jobs page now has an ✕ button: spot a duplicate or a job you don't want your VA touching, click ✕, and it's dropped from **Export (txt/csv/xlsx), the Email send, Open All, and the Telegram /export** — no more downloading the file and hand-editing it. Excluded jobs stay visible (grayed, struck through) with a ↩ restore button, and the table footer counts them. Exclusions live server-side per profile (`data/profiles/<profile>/batch-exclusions.json`), keyed to the batch — a fresh scrape always starts clean. Scrape-time auto-email is untouched (it sends before you've had a chance to review). Archived snapshots export exactly as delivered.
+
 ## [7.6.0] — 2026-07-20
 
 ### Changed

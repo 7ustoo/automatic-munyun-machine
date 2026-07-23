@@ -45,6 +45,7 @@ import { readDiceAuthCache } from './dice-session.mjs';
 import { normalizeEngines, normalizeScrapeSources } from './query-engines.mjs';
 import { loadExport } from './export-batch.mjs';
 import { listArchives, readArchive } from './batch-archive.mjs';
+import { readExclusions, writeExclusion } from './batch-exclusions.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
@@ -212,6 +213,27 @@ function jobsMode(mode) {
 function jobsClear() {
   cfgRW.set('queries', []);
   out({ ok: true, list: [] });
+}
+
+// v7.7: batch exclusions — the ✕ next to each ranked job. Keyed to the live
+// batch's generatedAt so a fresh scrape always starts with zero exclusions.
+function currentBatchStamp() {
+  try {
+    return JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8')).generatedAt || '';
+  } catch { return ''; }
+}
+function exclusionsGet() {
+  const stamp = currentBatchStamp();
+  out({ ok: true, excluded: stamp ? [...readExclusions(profilePaths().batchExclusions, stamp)] : [] });
+}
+function jobExclude(idx, excluded) {
+  const stamp = currentBatchStamp();
+  if (!stamp) return out({ ok: false, error: 'No batch yet — run a scrape first.' });
+  const n = parseInt(idx, 10);
+  if (!Number.isInteger(n) || n <= 0) return out({ ok: false, error: 'bad job index' });
+  const on = excluded === true || excluded === 'true';
+  const list = writeExclusion(profilePaths().batchExclusions, stamp, n, on);
+  out({ ok: true, idx: n, excluded: on, list });
 }
 
 // v7.3: route one search term to a source — 'both' (default), 'hcafe', 'dice'.
@@ -849,6 +871,9 @@ if (isMain) (async () => {
     case 'export':       return out(loadExport(a, b));
     // v7.2: previous scrapes (full-batch snapshots, 30-day retention).
     case 'archive-list': return out({ ok: true, archives: listArchives(profilePaths().batchArchiveDir) });
+    // v7.7: per-batch job exclusions ("don't send this one").
+    case 'exclusions-get': return exclusionsGet();
+    case 'job-exclude':    return jobExclude(a, b);
     case 'archive-get': {
       const batch = readArchive(profilePaths().batchArchiveDir, a);
       return out(batch ? { ok: true, batch } : { ok: false, error: 'That archived scrape is no longer available.' });

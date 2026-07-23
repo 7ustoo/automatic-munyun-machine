@@ -171,7 +171,24 @@ func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	opened, skipped, failed := openBatchJobs(batch.Jobs, openURL)
+	// v7.7: honor the dashboard's ✕ exclusions — never open a job the user
+	// took out of the batch.
+	jobs := batch.Jobs
+	if excluded := readBatchExclusions(d.installDir, batch.GeneratedAt); len(excluded) > 0 {
+		kept := jobs[:0:0]
+		for _, j := range jobs {
+			if !excluded[j.Idx] {
+				kept = append(kept, j)
+			}
+		}
+		jobs = kept
+	}
+	if len(jobs) == 0 {
+		writeJSONError(w, http.StatusOK, "Every job in this batch is excluded — restore one first")
+		return
+	}
+
+	opened, skipped, failed := openBatchJobs(jobs, openURL)
 	if opened == 0 {
 		if failed > 0 {
 			writeJSONError(w, http.StatusOK, "The default browser could not open the job links")
@@ -186,6 +203,35 @@ func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Reque
 		"skipped": skipped,
 		"failed":  failed,
 	})
+}
+
+// readBatchExclusions loads the active profile's ✕ list (v7.7). The sidecar
+// is keyed to the batch's generatedAt — a stamp mismatch (new scrape since
+// the exclusions were made) reads as empty, mirroring batch-exclusions.mjs.
+func readBatchExclusions(installDir, generatedAt string) map[int]bool {
+	out := map[int]bool{}
+	if generatedAt == "" {
+		return out
+	}
+	active := activeProfileSlug(installDir)
+	if active == "" {
+		return out
+	}
+	data, err := os.ReadFile(filepath.Join(installDir, "data", "profiles", active, "batch-exclusions.json"))
+	if err != nil {
+		return out
+	}
+	var raw struct {
+		BatchGeneratedAt string `json:"batchGeneratedAt"`
+		Excluded         []int  `json:"excluded"`
+	}
+	if json.Unmarshal(data, &raw) != nil || raw.BatchGeneratedAt != generatedAt {
+		return out
+	}
+	for _, idx := range raw.Excluded {
+		out[idx] = true
+	}
+	return out
 }
 
 func openBatchJobs(jobs []batchJob, opener func(string) error) (opened, skipped, failed int) {
@@ -632,6 +678,16 @@ func (d *dashboardServer) handleDiceAuth(w http.ResponseWriter, r *http.Request)
 
 func (d *dashboardServer) handleDiceAuthRefresh(w http.ResponseWriter, r *http.Request) {
 	d.relayDashboardAPI(w, 100*time.Second, "dice-auth-check")
+}
+
+// v7.7: batch exclusions — the ✕ next to each ranked job.
+func (d *dashboardServer) handleExclusionsGet(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "exclusions-get")
+}
+
+func (d *dashboardServer) handleJobExclude(w http.ResponseWriter, r *http.Request) {
+	b := readBody(r)
+	d.relayDashboardAPI(w, 15*time.Second, "job-exclude", b["idx"], b["excluded"])
 }
 
 // handleSetupInit (POST): body is the initial-config JSON blob. Read the raw

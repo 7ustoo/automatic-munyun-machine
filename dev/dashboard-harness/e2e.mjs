@@ -53,6 +53,15 @@ const csvRequest = await csvRequestPromise;
 if (csvRequest.postDataJSON().format !== 'csv') throw new Error('Jobs email menu did not request CSV');
 await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('.csv'));
 
+// v7.7: ✕ exclusion — click X on job #2, row grays out, footer shows the count, restore works.
+await page.click('button[data-act="exclude"][data-idx="2"]');
+await page.waitForSelector('tr.excluded-row[data-idx="2"]');
+await page.waitForFunction(() => document.querySelector('#lb-foot')?.textContent.includes('1 excluded'));
+const exBtn = page.locator('button[data-act="exclude"][data-idx="2"]');
+if ((await exBtn.textContent()) !== '↩') throw new Error('exclude button did not flip to restore');
+await exBtn.click();
+await page.waitForFunction(() => !document.querySelector('tr.excluded-row'));
+
 // v7.2: Previous scrapes — list renders, snapshot expands, downloads carry the id.
 await page.waitForSelector('#arch-body tr[data-arch]');
 if (await page.locator('#arch-body tr[data-arch]').count() !== 3) throw new Error('archive list did not render 3 previous scrapes');

@@ -32,6 +32,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { paths as profilePaths } from './profile-store.mjs';
 import { readArchive } from './batch-archive.mjs';
+import { readExclusions } from './batch-exclusions.mjs';
 import { buildXlsx } from './xlsx-writer.mjs';
 
 // ---- pure builders (unit-tested) ----
@@ -101,6 +102,10 @@ export function loadExport(format, archiveId) {
     if (!lb) return { ok: false, error: 'That archived scrape is no longer available.' };
   } else try {
     lb = JSON.parse(fs.readFileSync(profilePaths().lastBatch, 'utf8'));
+    // v7.7: drop jobs the user ✕-excluded on the dashboard. Live batch only —
+    // archived snapshots export exactly as they were delivered.
+    const excluded = readExclusions(profilePaths().batchExclusions, lb.generatedAt);
+    if (excluded.size) lb = { ...lb, jobs: (lb.jobs || []).filter(j => !excluded.has(j.idx)) };
   } catch {
     return { ok: false, error: 'No batch yet — run a scrape first.' };
   }
