@@ -91,12 +91,25 @@ const routes = (needsSetup, opts = {}) => ({
     { id: "batch-2026-07-05T08-00-00", date: "2026-07-05", generatedAt: "2026-07-05T08:00:00.000Z", sent: 91, avgPct: 55, strongCount: 12 },
   ] },
   "/api/archive/batch": () => ({ ok: true, batch: { date: "2026-07-06", generatedAt: "2026-07-06T14:30:00.000Z", jobs: liveJobs() } }),
+  // v7.7: batch exclusions (✕ on job rows). Stateful so e2e can toggle.
+  "/api/exclusions": () => ({ ok: true, excluded: [...stubExcluded].sort((a, b) => a - b) }),
 });
+
+// v7.7: in-memory exclusion state for the harness session.
+const stubExcluded = new Set();
 
 // POST endpoints reply generically so buttons can be exercised.
 const postReplies = {
   "/api/scrape": { ok: true },
   "/api/job/action": { ok: true },
+  // v7.7: toggle a job's ✕ (mirrors dashboard-api job-exclude).
+  "/api/job/exclude": body => {
+    const n = parseInt(body?.idx, 10);
+    if (Number.isInteger(n) && n > 0) {
+      if (body?.excluded === "true") stubExcluded.add(n); else stubExcluded.delete(n);
+    }
+    return { ok: true, idx: n, excluded: body?.excluded === "true", list: [...stubExcluded].sort((a, b) => a - b) };
+  },
   "/api/jobs/open-all": { ok: true, opened: 42, skipped: 0, failed: 0 },
   "/api/settings/set": { ok: true },
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
