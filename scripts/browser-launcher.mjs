@@ -109,12 +109,29 @@ export function detectBrowser({
   return null;
 }
 
+// v7.8: Playwright launches Chrome with `--enable-automation` by default. That
+// switch paints the "Chrome is being controlled by automated test software"
+// infobar AND flips navigator.webdriver to true — both of which Cloudflare
+// Turnstile reads directly. The result: hiring.cafe's "Verify you are human"
+// checkbox spins forever and re-challenges no matter how many times the user
+// clicks it, because the browser is self-identifying as a bot before the click
+// is ever evaluated. Dropping the switch (alongside the
+// --disable-blink-features=AutomationControlled every call site already passes)
+// lets the challenge actually clear and persist into the profile.
+//
+// Every Playwright launch site spreads browserLaunchOptions(), so setting it
+// here covers daily-batch, login-once, job-action, dice-login, and
+// dice-auth-probe in one place — per the "all launches go through
+// resolveBrowser()" rule in CLAUDE.md.
+export const IGNORE_DEFAULT_ARGS = ['--enable-automation'];
+
 // Launch-option fragment for a detection result — spread into
 // launchPersistentContext options.
 export function browserLaunchOptions(detection) {
-  if (!detection || detection.kind === 'bundled') return {};
-  if (detection.kind === 'channel') return { channel: detection.channel };
-  return { executablePath: detection.path };
+  const base = { ignoreDefaultArgs: [...IGNORE_DEFAULT_ARGS] };
+  if (!detection || detection.kind === 'bundled') return base;
+  if (detection.kind === 'channel') return { ...base, channel: detection.channel };
+  return { ...base, executablePath: detection.path };
 }
 
 // Where Playwright would look for its own downloaded Chromium. Throws in

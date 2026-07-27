@@ -79,8 +79,27 @@ test('linux: distro chromium uses executablePath (no channel name exists)', () =
 });
 
 test('browserLaunchOptions maps each kind correctly', () => {
-  assert.deepEqual(browserLaunchOptions({ kind: 'channel', channel: 'chrome' }), { channel: 'chrome' });
-  assert.deepEqual(browserLaunchOptions({ kind: 'executablePath', path: '/x' }), { executablePath: '/x' });
-  assert.deepEqual(browserLaunchOptions({ kind: 'bundled' }), {});
-  assert.deepEqual(browserLaunchOptions(null), {});
+  const IGN = ['--enable-automation'];
+  assert.deepEqual(browserLaunchOptions({ kind: 'channel', channel: 'chrome' }), { ignoreDefaultArgs: IGN, channel: 'chrome' });
+  assert.deepEqual(browserLaunchOptions({ kind: 'executablePath', path: '/x' }), { ignoreDefaultArgs: IGN, executablePath: '/x' });
+  assert.deepEqual(browserLaunchOptions({ kind: 'bundled' }), { ignoreDefaultArgs: IGN });
+  assert.deepEqual(browserLaunchOptions(null), { ignoreDefaultArgs: IGN });
+});
+
+// v7.8: the anti-bot regression. Cloudflare Turnstile loops forever when the
+// browser self-identifies via --enable-automation, so EVERY launch (including
+// the bundled-Chromium and null-detection fallbacks) must drop it.
+test('browserLaunchOptions always drops --enable-automation (Cloudflare loop guard)', () => {
+  for (const d of [{ kind: 'channel', channel: 'chrome' }, { kind: 'executablePath', path: '/x' }, { kind: 'bundled' }, null]) {
+    assert.ok(browserLaunchOptions(d).ignoreDefaultArgs?.includes('--enable-automation'),
+      `detection ${JSON.stringify(d)} must ignore --enable-automation`);
+  }
+});
+
+// The returned array must be a fresh copy — a caller mutating it (or Playwright
+// sorting it in place) must not poison the next launch.
+test('browserLaunchOptions returns a fresh ignoreDefaultArgs array each call', () => {
+  const a = browserLaunchOptions({ kind: 'bundled' });
+  a.ignoreDefaultArgs.push('--mutated');
+  assert.deepEqual(browserLaunchOptions({ kind: 'bundled' }).ignoreDefaultArgs, ['--enable-automation']);
 });

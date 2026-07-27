@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.8.0] — 2026-07-23
+
+### Fixed
+
+- **Cloudflare's "Verify you are human" checkbox no longer loops forever.** Clicking it would spin, reload, and re-challenge indefinitely — because the browser was self-identifying as automation *before* the click was ever evaluated. Two stacked signals, both removed:
+  1. Playwright launches Chrome with `--enable-automation` by default (the "Chrome is being controlled by automated test software" infobar), which also sets `navigator.webdriver = true`. Every launch site passed `--disable-blink-features=AutomationControlled` but never dropped this switch, so the two cancelled out. `browserLaunchOptions()` now returns `ignoreDefaultArgs: ['--enable-automation']` — one helper, inherited by all five launch sites (scrape, hiring.cafe login, job actions, Dice login, Dice probe). Verified: `navigator.webdriver` is now `false`.
+  2. Every launch pinned a hardcoded `Chrome/147` user agent while the installed Chrome had moved on (150 here). Modern Chrome also emits `Sec-CH-UA` client hints built from the real binary, so the pinned UA contradicted Chrome's own headers — precisely the mismatch anti-bot services flag. The override is gone; real Chrome now introduces itself, UA and client hints agreeing by construction.
+- The Dice auth probe ran headless, leaking `HeadlessChrome` in its user agent on top of the stale override. It now runs headful parked off-screen at `10000,10000` — the same trick unattended scrapes already used — so it stays invisible while the browser looks entirely ordinary.
+- New regression tests pin that no detection path (installed Chrome, Edge, bundled Chromium, or the null fallback) can reintroduce `--enable-automation`, and that the ignore list is a fresh array per call.
+
 ## [7.7.0] — 2026-07-21
 
 ### Added
