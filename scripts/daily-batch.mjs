@@ -313,8 +313,12 @@ async function launchBrowser() {
       windowPosition,
       '--window-size=1280,800'
     ],
-    viewport: { width: 1280, height: 800 },
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36'
+    viewport: { width: 1280, height: 800 }
+    // v7.8: no userAgent override. A hardcoded UA string goes stale as Chrome
+    // updates, and modern Chrome also sends Sec-CH-UA client-hint headers built
+    // from the real binary — so a pinned UA disagrees with its own headers,
+    // which is exactly the mismatch Cloudflare flags as a bot. The launch is
+    // headful real Chrome; letting it introduce itself is strictly more honest.
   });
 }
 

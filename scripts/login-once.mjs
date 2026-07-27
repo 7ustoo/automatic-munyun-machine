@@ -47,7 +47,8 @@ const ctx = await chromium.launchPersistentContext(profileDir, {
   ...browser.launchOptions,
   headless: false,
   args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--window-position=100,100', '--window-size=1280,800'],
-  userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+  // v7.8: no UA override — a pinned UA contradicts Chrome's own Sec-CH-UA
+  // client hints, which is what made Cloudflare's checkbox loop forever here.
   viewport: { width: 1280, height: 800 }
 });
 

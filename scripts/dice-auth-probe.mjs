@@ -24,9 +24,19 @@ try {
   const browser = await resolveBrowser();
   ctx = await chromium.launchPersistentContext(profileDir, {
     ...browser.launchOptions,
-    headless: true,
-    args: ['--no-sandbox', '--disable-blink-features=AutomationControlled'],
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+    // v7.8: headful-but-off-screen instead of headless. Headless Chrome puts
+    // "HeadlessChrome" in its own user agent, and the old fix for that was a
+    // hardcoded UA that then contradicted Chrome's Sec-CH-UA client hints —
+    // two bot signals stacked. Parking the window at 10000,10000 (the same
+    // trick daily-batch uses for unattended scrapes) keeps the probe invisible
+    // while the browser stays completely ordinary.
+    headless: false,
+    args: [
+      '--no-sandbox',
+      '--disable-blink-features=AutomationControlled',
+      '--window-position=10000,10000',
+      '--window-size=1280,800'
+    ],
     viewport: { width: 1280, height: 800 }
   });
   const page = ctx.pages()[0] || await ctx.newPage();
