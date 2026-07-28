@@ -8,6 +8,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.10.0] — 2026-07-28
+
+### Added
+
+- **hiring.cafe searches now pull the whole result set, straight from its own search API.** v7.9 fixed the pagination race but left a hard ceiling: hiring.cafe stops rendering a "Next" link long before the results end, so clicking through could never reach the rest. hiring.cafe's own UI doesn't click — it reads `/_next/data/<buildId>/index.json?searchState=…&page=N`, which serves any page directly, returns 40–95 jobs per page (the UI only paints 40), and reports both `ssrTotalCount` and an explicit `ssrIsLastPage` flag. AMM now walks that endpoint until the site itself says "last page."
+  - Measured on `cloud security` (Remote), same search, real scraper: **869 → 1,403 jobs (+61%)**, collected in ~13 seconds instead of minutes of clicking.
+  - Requests are issued from the already-open page, so they inherit the profile's Cloudflare clearance — no second browser, no extra challenge.
+  - If the API yields nothing (shape change, outage, unexpected payload), the run **falls back to the existing page-by-page scrape**, so this can only add jobs, never lose them.
+- **Better data per job, for free.** API hits carry real company names (the DOM heuristic frequently produced an empty string), structured years-of-experience (previously regex-guessed off a card line), true salary ranges, publish dates, workplace type, and `apply_url` — the direct ATS link, already resolved. Match text is now assembled from the title, company, requirements summary, tool list, and certifications rather than whatever happened to be rendered on the card, which is strictly better input for scoring.
+
+### Note
+
+`ssrTotalCount` still reports more matches than the API will serve (1,831 vs 1,403 reachable on the search above) — the remainder is capped server-side and can't be paged to. Splitting one broad search into narrower ones ("cloud security" → "cloud security engineer", "aws security") stays the way to reach beyond a single query's ceiling.
+
 ## [7.9.0] — 2026-07-28
 
 ### Fixed
