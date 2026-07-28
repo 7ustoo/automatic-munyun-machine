@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.11.0] — 2026-07-28
+
+### Fixed
+
+- **Reverted v7.10's search-API scraping — it shipped dead links and silently disabled JD scoring.** Every job in a v7.10 batch carried a hiring.cafe link instead of the real apply URL, and every one of those pages read "Expired Job." Nothing was actually expired: v7.10 built job URLs out of the API's *internal source id* (`workday___caci-wd1-external___senior-cloud-security_329147`), but hiring.cafe's real URLs use a client-generated slug (`cloud-security-engineer-avalara-durham-north-carolina-f41gq3dx834zm1wy`) whose hash appears nowhere in the API payload. Every generated URL was therefore invalid and served hiring.cafe's generic expired-job fallback — a page carrying no apply link and no description. That cascaded: the resolve pass returned nothing (empty `directUrl` on all 100 jobs) **and** the second-pass JD rescore was skipped batch-wide (`jdPct: null` on every job), so ranking quietly degraded to card text alone.
+- Restored the v7.9 page-walking scrape. Verified on a real run after the revert: **50/50 jobs carry genuine ATS apply URLs and 50/50 were JD-rescored.**
+- The API's `is_expired` flag is not a usable guard either — it read `false` on all 434 sampled hits.
+
+### Note
+
+The API path stays attractive (1,403 jobs vs 869 on the same search) but is only viable once a job's real hiring.cafe URL can be derived — it's needed both for apply-link resolution and for the full job description that second-pass scoring depends on. Parked rather than shipped at the cost of dead links and worse matching.
+
 ## [7.9.0] — 2026-07-28
 
 ### Fixed
