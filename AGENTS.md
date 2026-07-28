@@ -116,9 +116,9 @@ Do not claim hiring.cafe, Telegram, Gmail, or updater behavior is verified unles
 
 ## Branching and commits
 
-- Work on a feature or version branch, never directly on `main`.
-- The user merges branches through GitHub pull requests.
+- Work on a version branch named for the release (e.g. `v6.1`), never directly on `main`. Clean branch names only.
 - Do not commit or push unless explicitly requested.
+- When the user says "push", "ship", or "merge", execute the FULL release ritual unprompted: commit → push branch → open PR → wait for CI (fix failures, don't stop) → merge → tag `vX.Y.Z` and push the tag. The user never merges or tags manually. Merge-without-tag is a bug.
 - Do not include local runtime artifacts in commits.
 
 ## Documentation responsibilities
