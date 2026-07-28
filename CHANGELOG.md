@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.9.0] — 2026-07-28
+
+### Fixed
+
+- **hiring.cafe pagination stopped less than halfway through the results.** Every keyword now walks to the true end of its result set. The old loop slept a flat 2.5s after clicking Next, then checked **once** for the Next button — so a page that was still rendering looked exactly like the end of the results (short card count, no Next link) and the query quit silently. Measured on `iam` (Remote): hiring.cafe reports **899 jobs**, the scrape collected **398**. On `cloud security` (Remote): **1,824 available, 869 collected**. Roughly half the job supply was being dropped before scoring ever ran, and the log reported it as a clean finish.
+  - Page turns now wait for the results grid to *actually* change (anchored on the first card's link) instead of a wall-clock guess, then wait for the card count to hold steady across polls so a half-populated grid is never mistaken for a final short page.
+  - "No more pages" must now survive **5 checks across ~12 seconds** before it's believed; a short page and a zero-new-cards page each get a second read after a longer pause before they're allowed to end a query.
+  - Every query logs why it stopped (`"iam" complete: 552 jobs (Next stayed gone after 5 checks over ~12s — end of results)`), so a premature stop is visible instead of silent.
+  - `maxPagesPerQuery` default raised 50 → 300. It is a runaway guard, not a target — hiring.cafe stops offering a Next link at 15–25 pages, so the site's real end is what ends the loop. The old 50 sat close enough to real page counts to look like a legitimate stopping point.
+  - Verified end-to-end on the real scraper: the same `iam` search went **398 → 552 jobs (+39%)**.
+
+### Known limitation
+
+- hiring.cafe caps how deep its own pagination goes (the Next link disappears around page 15–25, and the exact point moves between runs), so a search with 1,824 matches cannot be fully walked by clicking Next — roughly 600–1,000 is reachable per query. Splitting one broad search into narrower ones ("cloud security" → "cloud security engineer", "cloud security architect", "aws security") gets under that ceiling and is the way to reach the rest.
+
 ## [7.8.0] — 2026-07-23
 
 ### Fixed
