@@ -5,7 +5,9 @@
  *      cookies live there); warmup probe verifies hiring.cafe is browsable.
  *   2. Runs EVERY configured hiring.cafe search, paginating
  *      each until its Next button is gone / no fresh cards (hard ceiling
- *      maxPagesPerQuery, default 50). v2.3: full scan is the default —
+ *      maxPagesPerQuery, default 300 — a runaway guard, not a target; v7.9
+ *      retries every stop condition so a slow render never ends a query early).
+ *      v2.3: full scan is the default —
  *      the old cross-query early stop (quit once fresh estimate ≥ 1.5 ×
  *      targetJobsPerBatch) only applies with scoring.searchAllQueries:false.
  *   3. Filters (clearance, skip-companies, drop-titles, max YOE), dedups,
@@ -445,7 +447,11 @@ async function _scrapeWith(ctx) {
   // for pages 2..MAX_PAGES_PER_QUERY — i.e. up to MAX_PAGES_PER_QUERY pages
   // total per query. Stops early if Next disappears/disables OR a new page
   // returns no fresh cards (already seen this query).
-  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 50;
+  // v7.9: raised 50 → 300. This is a runaway guard, NOT a target — hiring.cafe
+  // stops offering a Next link long before it (observed 15–25 pages), so the
+  // real end of the result set is what ends the loop. The old 50 was close
+  // enough to real page counts to look like a legitimate stopping point.
+  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 300;
 
   // v1.0.x: target-driven cross-query early stop. After each query's
   // pagination, we compute the running fresh-after-dedup count. If it
@@ -462,6 +468,64 @@ async function _scrapeWith(ctx) {
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
   let runningFreshEstimate = 0;
 
+  // v7.9: exhaustive pagination helpers.
+  //
+  // The old loop slept a flat 2.5s after clicking Next, then checked ONCE for
+  // the Next button. hiring.cafe re-renders its grid in place and is often
+  // slower than that, so a still-rendering page looked identical to the end of
+  // the results: a short card count and no Next button. Measured cost of that
+  // race — "iam" (Remote) reported 899 jobs on the site; the scrape collected
+  // 398. Waiting properly collected 560 from the same search.
+  //
+  // Everything below trades time for completeness, which is the correct trade
+  // for a batch that runs unattended at 7am.
+  const NEXT_SEL = 'a[aria-label*="next" i], button[aria-label*="next" i]';
+
+  // Wait until the grid actually turns over. Anchors on the first card's href
+  // instead of a wall-clock guess: the page has genuinely advanced only once
+  // that value changes.
+  const waitForPageTurn = async (prevFirstHref, timeoutMs = 20000) => {
+    try {
+      await page.waitForFunction(
+        (prev) => {
+          const first = document.querySelector('a[href^="/job/"]');
+          return !!first && first.getAttribute('href') !== prev;
+        },
+        prevFirstHref,
+        { timeout: timeoutMs, polling: 250 }
+      );
+      return true;
+    } catch { return false; }
+  };
+
+  // Wait for the card count to hold steady across consecutive polls, so we
+  // never extract a half-populated grid and mistake it for a final short page.
+  const waitForCardsSettled = async (timeoutMs = 12000) => {
+    const deadline = Date.now() + timeoutMs;
+    let last = -1, stableFor = 0;
+    while (Date.now() < deadline) {
+      const n = await page.evaluate(() => document.querySelectorAll('a[href^="/job/"]').length).catch(() => -1);
+      if (n > 0 && n === last) { if (++stableFor >= 2) return n; }
+      else { stableFor = 0; last = n; }
+      await page.waitForTimeout(400);
+    }
+    return last;
+  };
+
+  // Only declare "no more pages" after the button has stayed missing across
+  // several escalating waits (~12s total). A single miss is almost always a
+  // slow render, not the end of the result set.
+  const findNextButton = async (attempts = 5) => {
+    for (let t = 0; t < attempts; t++) {
+      const btn = page.locator(NEXT_SEL).first();
+      const visible = await btn.isVisible().catch(() => false);
+      const enabled = visible && await btn.isEnabled().catch(() => false);
+      if (visible && enabled) return btn;
+      if (t < attempts - 1) await page.waitForTimeout(1200 * (t + 1)); // 1.2s → 2.4s → 3.6s → 4.8s
+    }
+    return null;
+  };
+
   for (const [key, query] of HCAFE_QUERIES) {
     const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
     const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
@@ -474,8 +538,8 @@ async function _scrapeWith(ctx) {
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForSelector('a[href^="/job/"]', { timeout: 8000 }).catch(() => {});
-        await page.waitForTimeout(2000);
+        await page.waitForSelector('a[href^="/job/"]', { timeout: 15000 }).catch(() => {});
+        await waitForCardsSettled(); // v7.9: no fixed sleep — wait for the grid to stop growing
         firstPageRows = await page.evaluate(EXTRACT_FN);
         break;
       } catch (e) {
@@ -489,34 +553,65 @@ async function _scrapeWith(ctx) {
     }
     log(`  page 1 → ${firstPageRows.length} cards (running total: ${allRows.length})`);
 
-    // Pages 2..N — click Next until cap, button disappears, or no new cards.
+    // Pages 2..N — click Next to the true end of the result set. v7.9: every
+    // stop condition now has to survive a retry, so we only quit when the site
+    // has actually run out, never because a render was slow.
+    let stoppedBecause = `hit the ${MAX_PAGES_PER_QUERY}-page safety cap`;
     for (let pageNum = 2; pageNum <= MAX_PAGES_PER_QUERY; pageNum++) {
-      const nextBtn = page.locator('a[aria-label*="next" i], button[aria-label*="next" i]').first();
-      const visible = await nextBtn.isVisible().catch(() => false);
-      const enabled = visible && await nextBtn.isEnabled().catch(() => false);
-      if (!visible || !enabled) {
-        log(`  no more pages after ${pageNum - 1} (Next not available)`);
+      const nextBtn = await findNextButton();
+      if (!nextBtn) {
+        stoppedBecause = `Next stayed gone after 5 checks over ~12s — end of results`;
+        log(`  no more pages after ${pageNum - 1} (${stoppedBecause})`);
         break;
       }
       try {
+        const prevFirstHref = await page.evaluate(() => {
+          const a = document.querySelector('a[href^="/job/"]');
+          return a ? a.getAttribute('href') : null;
+        });
         await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await nextBtn.click({ timeout: 5000 });
-        await page.waitForTimeout(2500);
-        const pageRows = await page.evaluate(EXTRACT_FN);
+        await nextBtn.click({ timeout: 10000 });
+        // Wait for the grid to actually turn over, then for it to stop growing.
+        const turned = await waitForPageTurn(prevFirstHref);
+        await waitForCardsSettled();
+        let pageRows = await page.evaluate(EXTRACT_FN);
+        // A short page is the classic false-end. Give it one more settle pass
+        // before believing it.
+        if (pageRows.length < 40) {
+          await page.waitForTimeout(2500);
+          await waitForCardsSettled(6000);
+          const retryRows = await page.evaluate(EXTRACT_FN);
+          if (retryRows.length > pageRows.length) pageRows = retryRows;
+        }
         let newCards = 0;
         for (const r of pageRows) {
           if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); newCards++; }
         }
-        log(`  page ${pageNum} → ${pageRows.length} cards (${newCards} new, running total: ${allRows.length})`);
+        log(`  page ${pageNum} → ${pageRows.length} cards (${newCards} new, running total: ${allRows.length})${turned ? '' : ' [grid did not turn over]'}`);
         if (newCards === 0) {
-          log(`  stopping pagination — page ${pageNum} returned no new cards`);
-          break;
+          // Re-extract once after a longer pause before concluding we're looping
+          // on the same page — another slow-render false positive.
+          await page.waitForTimeout(3000);
+          await waitForCardsSettled(8000);
+          const secondLook = await page.evaluate(EXTRACT_FN);
+          let recovered = 0;
+          for (const r of secondLook) {
+            if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); recovered++; }
+          }
+          if (recovered === 0) {
+            stoppedBecause = `page ${pageNum} returned no new jobs on two consecutive reads`;
+            log(`  stopping pagination — ${stoppedBecause}`);
+            break;
+          }
+          log(`  page ${pageNum} recovered ${recovered} more on a second read (running total: ${allRows.length})`);
         }
       } catch (e) {
-        log(`  page ${pageNum} failed: ${e.message.split('\n')[0]} — stopping pagination`);
+        stoppedBecause = `page ${pageNum} errored: ${e.message.split('\n')[0]}`;
+        log(`  ${stoppedBecause} — stopping pagination`);
         break;
       }
     }
+    log(`  "${query}" complete: ${allRows.length} jobs (${stoppedBecause})`);
 
     results[key] = allRows;
 
