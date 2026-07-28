@@ -81,9 +81,19 @@ Scoring lives inline in `daily-batch.mjs` (v4.0 overhaul, three passes): (1) a c
 
 **Branding sentinel.** Task Scheduler / launchd / systemd entries are `munyun-bot`, `munyun-daily-batch`, `munyun-watchdog`, `munyun-batch-missed` (or the Mac/Linux platform-equivalent reverse-DNS / unit-name forms). Old `career-ops-*` migration block was removed in v1.1 — anyone still on v0.1 must `schtasks /delete` those by hand.
 
-## Branching
+## Branching and releasing — the full ritual, every time
 
-Always work on a feature/version branch (e.g. `v0.5`, `v0.6`). Do not commit directly to `main`; the user merges branches into main manually via GitHub PRs. The install one-liner clones from `main`.
+Always work on a version branch named for the release (e.g. `v6.1`, `v6.2`) — clean names only, never auto-generated ones. Never commit directly to `main`. The install one-liner clones from `main`.
+
+When the user says "push", "ship", "merge", or approves a change, that ALWAYS means the complete sequence, unprompted:
+
+1. Commit on the version branch with a clear message.
+2. Push the branch and open a PR to `main`.
+3. Wait for CI to pass. If CI fails, fix it and re-run — do not stop and report.
+4. Merge the PR.
+5. Tag the merge commit `vX.Y.Z` matching the branch/`package.json` version and push the tag.
+
+Do all five steps without being asked for each one. The user never merges or tags manually. Stopping after merge without tagging is a bug.
 
 ## Files worth knowing
 

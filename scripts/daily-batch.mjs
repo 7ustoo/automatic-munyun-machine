@@ -41,7 +41,6 @@ import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
-import { fetchHcafeSearch } from './sources/hcafe-api.mjs';
 import { fetchAllSources } from './sources/index.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
@@ -533,42 +532,6 @@ async function _scrapeWith(ctx) {
     log(`Scraping "${query}"…`);
     const seenInQuery = new Set();
     const allRows = [];
-
-    // v7.10: pull the whole result set from hiring.cafe's own search API
-    // before touching the DOM. Next-clicking can only reach part of a large
-    // result set (the site stops rendering a Next link long before the end),
-    // while the API paginates to an explicit last-page flag. If it yields
-    // nothing — API shape changed, offline, unexpected payload — we fall
-    // through to the DOM walk below, so this can only add jobs, never lose
-    // them.
-    let usedApi = false;
-    try {
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-      await page.waitForSelector('a[href^="/job/"]', { timeout: 15000 }).catch(() => {});
-      const api = await fetchHcafeSearch(page, searchState, { maxPages: MAX_PAGES_PER_QUERY, log });
-      if (api.cards.length) {
-        for (const c of api.cards) {
-          if (!seenInQuery.has(c.href)) { seenInQuery.add(c.href); allRows.push(c); }
-        }
-        usedApi = true;
-        log(`  "${query}" via API: ${allRows.length} jobs across ${api.pages} page(s)` +
-            `${api.totalCount != null ? ` (site reports ${api.totalCount} matches)` : ''} — ${api.stoppedBecause}`);
-      } else {
-        log(`  API returned nothing (${api.stoppedBecause}) — falling back to page scraping.`);
-      }
-    } catch (e) {
-      log(`  API path failed (${SCRUB(String(e.message || e)).split('\n')[0]}) — falling back to page scraping.`);
-    }
-
-    if (usedApi) {
-      results[key] = allRows;
-      for (const r of allRows) {
-        if (_crossQuerySeen.has(r.href)) continue;
-        _crossQuerySeen.add(r.href);
-        if (!_appliedSet.has(r.href) && !_blockedSet.has(r.href)) runningFreshEstimate++;
-      }
-      continue; // next keyword — no DOM pagination needed
-    }
 
     // Page 1 — initial navigation, retry up to 3 times on failure.
     let firstPageRows = [];
