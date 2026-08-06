@@ -25,7 +25,27 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
+
+// v8.1 (macOS .app): the bundle ships its own Chromium at
+// Contents/Resources/ms-playwright so AMM works on a Mac with only Safari
+// installed. Playwright locates it through PLAYWRIGHT_BROWSERS_PATH, which
+// nothing sets for a Finder launch or a launchd job — so set it here, the
+// single chokepoint every Playwright launch already routes through, instead
+// of plumbing the variable through the Go wrapper, launchd, and each helper
+// script separately. A caller-supplied value always wins.
+function useBundledBrowsersOnMac() {
+  if (process.platform !== 'darwin' || process.env.PLAYWRIGHT_BROWSERS_PATH) return;
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url)); // <bundle>/Contents/Resources/app/scripts
+    const resources = path.resolve(here, '..', '..');          // <bundle>/Contents/Resources
+    if (path.basename(resources) !== 'Resources') return;      // not a bundle — dev checkout
+    const browsers = path.join(resources, 'ms-playwright');
+    if (fs.existsSync(browsers)) process.env.PLAYWRIGHT_BROWSERS_PATH = browsers;
+  } catch { /* best-effort — fall back to Chrome/Edge detection below */ }
+}
+useBundledBrowsersOnMac();
 
 // Candidate install locations per platform. Detection is exists()-based
 // (not registry/PATH) so it's fast, dependency-free, and unit-testable.

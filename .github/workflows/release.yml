@@ -183,6 +183,12 @@ jobs:
         run: make build-mac
 
       - name: Build .dmg
+        # v8.1: builds a real AMM.app (universal binary + bundled Node +
+        # bundled Chromium) inside a drag-to-Applications dmg. With a
+        # Developer ID in secrets the app is properly signed; without one it
+        # is ad-hoc signed and users right-click → Open once.
+        env:
+          APPLE_SIGN_IDENTITY: ${{ secrets.APPLE_SIGN_IDENTITY }}
         run: bash scripts/build/mac.sh
 
       - name: Notarize .dmg (best-effort)
