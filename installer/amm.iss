@@ -21,7 +21,7 @@
 ; it pointing at the current release branch so local builds still produce
 ; a sensibly-named .exe.
 #ifndef MyAppVersion
-  #define MyAppVersion "7.12.0"
+  #define MyAppVersion "7.13.0"
 #endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
