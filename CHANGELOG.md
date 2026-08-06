@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.12.0] — 2026-07-28
+
+### Changed
+
+- **New logo: a golden dollar sign.** The old mark was an illustration — a money printer, a monitor, six cash stacks, a robot and a tagline — which turned to mush at the sizes it's actually used (a 30px sidebar mark, a 16px tray icon, a browser tab). The new mark is a single flat-gold `$` on a warm near-black tile: legible all the way down to 16px, and it drops `logo.png` from 399 KB to 18 KB.
+- The tray keeps its behavior — the gold `$` shows while AMM is healthy, and switches to a yellow or red `$` only when the heartbeat goes stale or the bot dies. Every status icon is now the same silhouette in a different color instead of unrelated colored dots.
+- All artwork regenerates from one source, `scripts/build/logo-svg.mjs`, via `npm run build:logos` — it writes `logo.png`, `logo.ico` (installer), `logo-tray.ico`, the four status icons, and `winres/logo-256.png` (the embedded AMM.exe icon). The `$` is drawn as vector paths rather than text on purpose: a text glyph would rasterize with whatever font the build machine has, so the icon would differ between a Windows dev box and CI on Ubuntu.
+
+### Fixed
+
+- The dashboard harness stubbed `/favicon.png` with an empty `204`, so its screenshots always showed a broken-image icon in the sidebar and it could never catch a missing or corrupt brand asset. It now serves the real `wrapper/logo.png`.
+
 ## [7.11.0] — 2026-07-28
 
 ### Fixed
