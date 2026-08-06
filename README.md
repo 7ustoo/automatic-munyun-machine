@@ -85,6 +85,16 @@ Download the correct file from the [latest GitHub release](https://github.com/7u
 
 Open the installer and follow the in-app setup.
 
+**macOS:** open the `.dmg` and drag **AMM** into **Applications**, then launch it
+from Launchpad or Applications. Everything AMM needs ships inside the app —
+you do not need Node.js, npm, or the Terminal. A green `$` appears in your menu
+bar and the setup panel opens automatically.
+
+> The first launch shows *"AMM can't be opened because Apple cannot check it."*
+> That's macOS Gatekeeper on an app without a paid Apple Developer signature.
+> **Right-click the app → Open → Open** once, and macOS remembers it from then
+> on. (Or: System Settings → Privacy & Security → "Open Anyway".)
+
 On Windows, AMM uses Microsoft's WebView2 runtime for its native dashboard
 window. Windows 10/11 commonly already includes it; the installer detects and
 provisions the free Evergreen runtime when needed.

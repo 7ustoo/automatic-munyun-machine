@@ -258,6 +258,14 @@ func bundledNode() string {
 	if err != nil {
 		return ""
 	}
+	// v8.1: inside a macOS .app the runtime ships at
+	// Contents/Resources/node/bin/node, not <install>/runtime/. Mac users are
+	// no more likely to have Node installed than Windows users were, so the
+	// bundle carries its own copy and this is what makes the app work on a
+	// machine with no developer tooling at all.
+	if p, ok := macBundledNode(exe); ok {
+		return p
+	}
 	name := "node"
 	if runtime.GOOS == "windows" {
 		name = "node.exe"

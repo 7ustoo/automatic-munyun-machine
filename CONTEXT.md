@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 8.0.0
-**Active release branch:** `v8.0`
+**Version:** 8.1.0
+**Active release branch:** `v8.1`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-20
 

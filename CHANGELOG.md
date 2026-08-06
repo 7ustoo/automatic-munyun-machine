@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [8.1.0] — 2026-08-06
+
+### Changed
+
+- **macOS now installs like a real Mac app.** The old `.dmg` contained a plain folder of source code — you dragged it somewhere yourself, double-clicked a `.command` that opened Terminal, and it only worked if you already had Node.js installed. There was no drag-to-Applications window because there was no app. Now the dmg opens with **AMM** and an **Applications** shortcut side by side: drag it across, double-click, done.
+- The bundle is fully self-contained — **no Node.js, no npm, no Terminal**, matching the guarantee the Windows installer already made by shipping its own `node.exe`. Inside: a universal Go binary (Apple Silicon + Intel via `lipo`), a universal Node runtime, `node_modules` preinstalled at build time, and Chromium, so it also works on a Mac with only Safari.
+- First launch puts a green `# Changelog
+
+All notable changes to Automatic Munyun Machine.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+---
+
+ in the menu bar and opens the setup panel automatically — the same dashboard setup Windows users get, instead of a text wizard in a Terminal window.
+
+### Fixed
+
+- `resolveInstallDir` walked up two directories from the executable, which is correct for `<install>/wrapper/dist/AMM` but lands on `Contents/` inside an app bundle, where macOS requires the binary to live at `Contents/MacOS/`. It would have fallen through to `cwd` — `/` for a Finder launch — and the app would not have started. It now resolves the bundle payload directly (`wrapper/macbundle.go`, unit-tested on every CI platform since the logic is pure path handling).
+- Playwright is pointed at the bundled Chromium from `browser-launcher.mjs`, the single chokepoint every launch already routes through, rather than plumbing `PLAYWRIGHT_BROWSERS_PATH` through the wrapper, launchd, and each helper script separately.
+
+
 ## [8.0.0] — 2026-08-06
 
 ### Changed

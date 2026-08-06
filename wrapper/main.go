@@ -272,6 +272,14 @@ func resolveInstallDir(override string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// v8.1 (macOS): inside a .app bundle the executable MUST live at
+	// Contents/MacOS/, so the "up two directories" rule below lands on
+	// Contents/ instead of the payload and we'd fall through to cwd — which
+	// is "/" for a Finder launch. The JS payload ships at
+	// Contents/Resources/app/, so resolve there directly.
+	if dir, ok := macAppPayloadDir(exe); ok {
+		return dir, nil
+	}
 	// <install>/wrapper/dist/AMM.exe  →  <install>
 	exeDir := filepath.Dir(exe)
 	installDir := filepath.Dir(filepath.Dir(exeDir))
