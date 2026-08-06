@@ -142,7 +142,18 @@ function serve(port, needsSetup, opts) {
       res.end("<!doctype html><title>Gmail connected</title><p>Gmail connected. Return to AMM.</p><script>if(window.opener)setTimeout(()=>window.close(),100)</script>");
       return;
     }
-    if (path === "/favicon.png" || path === "/favicon.ico") { res.writeHead(204); res.end(); return; }
+    // v7.12: serve the real embedded logo instead of 204-ing it. The wrapper
+    // serves this route from wrapper/logo.png in production; stubbing it empty
+    // meant the harness rendered a broken-image icon in the sidebar and could
+    // never catch a missing or corrupt brand asset.
+    if (path === "/favicon.png" || path === "/favicon.ico") {
+      try {
+        const png = readFileSync(new URL("../../wrapper/logo.png", import.meta.url));
+        res.writeHead(200, { "content-type": "image/png", "cache-control": "no-store" });
+        res.end(png);
+      } catch { res.writeHead(204); res.end(); }
+      return;
+    }
     if (R[path]) {
       const body = typeof R[path] === "function" ? R[path]() : R[path];
       res.writeHead(200, { "content-type": "application/json" }); res.end(JSON.stringify(body)); return;
