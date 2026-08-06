@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [8.0.0] — 2026-08-06
+
+### Changed
+
+- **Rebrand.** The README now opens with a terminal-style wordmark — `$ Automatic-Munyun-Machine` — where the shell prompt doubles as the brand mark, since the logo is itself a dollar sign. Green lands on "Munyun", the hyphens drop back so the three words separate, and a cursor block closes the line. Replaces the external GitHub attachment that used to sit at the top of the README with an image committed to the repo (`docs/banner.png`).
+- The banner regenerates from a single source (`scripts/build/banner-svg.mjs`) via `npm run build:banner`, rasterized at 2x through the same Playwright pipeline that builds the icons. It ships as a PNG rather than inline SVG on purpose: GitHub renders SVG text with each visitor's own fonts, so a vector banner would look different for everyone. The cursor block is positioned from the wordmark's *measured* width at render time — monospace advance widths differ per font, so a hardcoded position drifts on any machine with a different mono installed.
+
 ## [7.13.0] — 2026-08-06
 
 ### Changed

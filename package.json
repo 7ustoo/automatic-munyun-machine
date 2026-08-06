@@ -1,6 +1,6 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "7.13.0",
+  "version": "8.0.0",
   "description": "Local-first desktop job search: 50–200 daily matches ranked against your resume.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",
@@ -20,7 +20,8 @@
     "build:logos": "node scripts/build/make-logos.mjs",
     "test:ui": "node dev/dashboard-harness/run-all.mjs",
     "test:e2e": "node dev/dashboard-harness/run-e2e.mjs",
-    "test:gmail-live": "node dev/live-gmail-e2e.mjs"
+    "test:gmail-live": "node dev/live-gmail-e2e.mjs",
+    "build:banner": "node scripts/build/make-banner.mjs"
   },
   "keywords": [
     "job-search",
