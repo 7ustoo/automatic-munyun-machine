@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [7.13.0] — 2026-08-06
+
+### Changed
+
+- **The dollar sign is green now, not gold.** Same mark, same geometry — only the glyph color and the tile background changed (the tile went from a warm near-black to a neutral one, which suits green). The green is the exact green the dashboard already uses for strong-match meters, so the icon and the product now read as one system. Regenerated everywhere from the single SVG source: taskbar, tray, installer, browser tab, and the sidebar mark.
+
 ## [7.12.0] — 2026-07-28
 
 ### Changed

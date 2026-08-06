@@ -20,14 +20,15 @@
 // exactly what made the old logo read as AI-generated, and gradients turn to
 // mud at 16px anyway.
 export const PALETTE = {
-  gold:   '#E3B341', // healthy / brand — the default mark
+  // v7.13: the brand mark is green — the same green the dashboard already uses
+  // for "strong match" meters, so the icon and the product read as one thing.
+  brand:  '#3FB950', // healthy / brand — the default mark
   yellow: '#D9A62E', // stale heartbeat
   red:    '#F85149', // dead bot
-  gray:   '#8B949E', // paused / stopped
-  green:  '#3FB950'  // kept for the legacy "running, Telegram off" state
+  gray:   '#8B949E'  // paused / stopped
 };
 
-export const TILE_BG = '#14120C'; // warm near-black; keeps gold legible on any taskbar
+export const TILE_BG = '#0D1117'; // neutral near-black; keeps green legible on any taskbar
 
 /**
  * @param {string} glyph  fill color for the $ (see PALETTE)
@@ -35,7 +36,7 @@ export const TILE_BG = '#14120C'; // warm near-black; keeps gold legible on any 
  * @param {boolean} [opts.tile=true]  draw the rounded background tile
  * @returns {string} standalone SVG markup
  */
-export function logoSvg(glyph = PALETTE.gold, { tile = true } = {}) {
+export function logoSvg(glyph = PALETTE.brand, { tile = true } = {}) {
   const bg = tile
     ? `<rect width="48" height="48" rx="11" fill="${TILE_BG}"/>`
     : '';
@@ -57,11 +58,13 @@ export function logoSvg(glyph = PALETTE.gold, { tile = true } = {}) {
 </svg>`;
 }
 
-// The variants that get shipped as icon files.
+// The variants that get shipped as icon files. `green` is the legacy
+// "running, Telegram off" state icon that icons.go still embeds — now the
+// same artwork as the brand mark, since the brand mark itself is green.
 export const VARIANTS = {
-  logo:   PALETTE.gold,
+  logo:   PALETTE.brand,
   yellow: PALETTE.yellow,
   red:    PALETTE.red,
   gray:   PALETTE.gray,
-  green:  PALETTE.green
+  green:  PALETTE.brand
 };
