@@ -673,6 +673,7 @@ function recordQueryStats(byQuery) {
 // non-word char never matches, so those terms previously scored zero.
 import { escRx, termRegex } from './term-match.mjs';
 import { recencyMaxDays, withinRecency } from './job-recency.mjs';
+import { excludedTitleCategory } from './job-title-filters.mjs';
 
 // Build filter regexes from config.json
 const DROP_TITLE_PATTERNS = (CFG.filters?.dropTitlePatterns || []).map(p => p.replace(/\s+/g, '\\s+'));
@@ -978,9 +979,14 @@ function filterAndDedupe(byQuery, extraCards = []) {
   const maxAgeDays = recencyMaxDays(CFG.filters?.maxJobAge);
   let droppedClearance = 0;
   let droppedStale = 0;
+  let droppedManagement = 0;
+  let droppedSales = 0;
   const kept = all.filter(r => {
     if (r.yoe !== null && r.yoe > maxYoe) return false;
     if (r.title && DROP_TITLE.test(r.title)) return false;
+    const titleCategory = excludedTitleCategory(r.title, CFG.filters);
+    if (titleCategory === 'management') { droppedManagement++; return false; }
+    if (titleCategory === 'sales') { droppedSales++; return false; }
     if (r.company && SKIP_CO.test(r.company)) return false;
     if (!withinRecency(r.postedAge, maxAgeDays)) { droppedStale++; return false; }
     if (filterClearance) {
@@ -989,7 +995,7 @@ function filterAndDedupe(byQuery, extraCards = []) {
     }
     return true;
   });
-  return { all, kept, droppedClearance, droppedStale };
+  return { all, kept, droppedClearance, droppedStale, droppedManagement, droppedSales };
 }
 
 function loadAppliedHrefs() {
@@ -1228,6 +1234,8 @@ function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
   const filterBits = [];
   if (stats.droppedClearance) filterBits.push(`${stats.droppedClearance} clearance`);
+  if (stats.droppedManagement) filterBits.push(`${stats.droppedManagement} management/lead`);
+  if (stats.droppedSales)      filterBits.push(`${stats.droppedSales} sales`);
   if (stats.skippedApplied)   filterBits.push(`${stats.skippedApplied} applied`);
   if (stats.skippedSeen)      filterBits.push(`${stats.skippedSeen} previously seen`);
   const tail = filterBits.length ? ` · filtered: ${filterBits.join(', ')}` : '';
@@ -1277,6 +1285,8 @@ function buildBatchTxt(top, directUrls, weather, stats) {
   lines.push(weather.replace(/[^\x20-\x7E°]/g, '').trim());
   const filterBits = [];
   if (stats.droppedClearance) filterBits.push(`${stats.droppedClearance} clearance`);
+  if (stats.droppedManagement) filterBits.push(`${stats.droppedManagement} management/lead`);
+  if (stats.droppedSales)      filterBits.push(`${stats.droppedSales} sales`);
   if (stats.skippedApplied)   filterBits.push(`${stats.skippedApplied} applied`);
   if (stats.skippedSeen)      filterBits.push(`${stats.skippedSeen} previously seen`);
   const tail = filterBits.length ? ` · filtered: ${filterBits.join(', ')}` : '';
@@ -1493,8 +1503,8 @@ if (IS_CLI) (async () => {
       : [];
     if (watchCtx) { try { await watchChain; await watchCtx.close(); } catch {} }
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
-    const { all, kept, droppedClearance, droppedStale } = filterAndDedupe(byQuery, atsCards);
-    log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance}, droppedStale=${droppedStale})`);
+    const { all, kept, droppedClearance, droppedStale, droppedManagement, droppedSales } = filterAndDedupe(byQuery, atsCards);
+    log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance}, droppedManagement=${droppedManagement}, droppedSales=${droppedSales}, droppedStale=${droppedStale})`);
     const applied = loadAppliedHrefs();
     const blockedSeen = loadBlockedSeen(); // decayed: jobs > freshness window are no longer blocked
     const blockAll = new Set([...applied, ...blockedSeen]);
@@ -1602,6 +1612,8 @@ if (IS_CLI) (async () => {
       raw: all.length,
       keptAfterFilter: kept.length,
       droppedClearance,
+      droppedManagement,
+      droppedSales,
       afterDedup: fresh.length,
       scored: fresh.length,
       droppedBelowFloor,
@@ -1624,6 +1636,8 @@ if (IS_CLI) (async () => {
       raw: all.length,
       kept: kept.length,
       droppedClearance,
+      droppedManagement,
+      droppedSales,
       skippedApplied,
       skippedSeen,
       hcafeAuthed,
@@ -1640,7 +1654,7 @@ if (IS_CLI) (async () => {
 
     // Keep the detailed disk archive, but deliver the compact apply-links
     // file requested for handoff: number, title, and direct apply URL only.
-    const txtStats = { raw: all.length, droppedClearance, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
+    const txtStats = { raw: all.length, droppedClearance, droppedManagement, droppedSales, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
     let deliveryTxtPath = null;
     try {
       const archiveTxtPath = writeBatchTxt(top, directUrls, weather, txtStats);

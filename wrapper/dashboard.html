@@ -1504,6 +1504,10 @@
           <div class="set-row"><label>Daily scrape time</label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
           <div class="set-row"><label>Drop gov-clearance jobs</label>
             <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
+          <div class="set-row"><label>Drop management &amp; tech-lead titles</label>
+            <select id="set-management-titles"><option value="false">No</option><option value="true">Yes</option></select></div>
+          <div class="set-row"><label>Drop sales titles</label>
+            <select id="set-sales-titles"><option value="false">No</option><option value="true">Yes</option></select></div>
           <div class="set-row"><label>Application forms</label>
             <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
           <div class="set-row"><label>Job recency</label>
@@ -2329,6 +2333,8 @@ async function loadSettings() {
     $("set-show-salary").value = String(state.showSalary);
     $("set-time").value = s.scheduleTime;
     $("set-clearance").value = String(s.filterClearance);
+    $("set-management-titles").value = String(s.filterManagementTitles === true);
+    $("set-sales-titles").value = String(s.filterSalesTitles === true);
     $("set-forms").value = s.applicationFormEase;
     $("set-recency").value = s.maxJobAge || "any";
     $("set-mode").value = s.searchMode;
@@ -2407,6 +2413,8 @@ $("set-batch-size").addEventListener("change", e => saveSetting("scoring.targetJ
 $("set-show-salary").addEventListener("change", e => { state.showSalary = e.target.value === "true"; saveSetting("display.showSalary", e.target.value); renderJobs(); });
 $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.target.value));
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
+$("set-management-titles").addEventListener("change", e => saveSetting("filters.filterManagementTitles", e.target.value));
+$("set-sales-titles").addEventListener("change", e => saveSetting("filters.filterSalesTitles", e.target.value));
 $("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));
 $("set-recency").addEventListener("change", e => saveSetting("filters.maxJobAge", e.target.value));
 // v5.0: workplace type (array → JSON string; body values must be strings) + location.

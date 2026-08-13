@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [8.2.0] — 2026-08-12
+
+### Added
+
+- **Opt-in job-category filters.** Settings now has independent switches to drop management/tech-lead titles and sales titles before scoring. The filters are profile-scoped, apply to every job source, and recognize common variants such as Engineering Manager, Director, Head of, Technical Lead, Account Executive, SDR/BDR, and Business Development while avoiding substring false positives such as Salesforce Engineer.
+
 ## [8.1.0] — 2026-08-06
 
 ### Changed
