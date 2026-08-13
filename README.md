@@ -142,7 +142,7 @@ The dashboard walks you through:
 
 Fresh installs start with no profession-specific searches or company filters. Your searches are built from your resume, so AMM does not assume your career field.
 
-After setup, use **Settings** for workplace type, location, batch size, and advanced filters. Gmail and company-board sources can be connected from the main dashboard.
+After setup, use **Settings** for workplace type, location, batch size, and advanced filters. You can independently drop management/tech-lead titles and sales titles before scoring. Gmail and company-board sources can be connected from the main dashboard.
 
 ## How it works
 

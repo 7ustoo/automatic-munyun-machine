@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 8.1.0
-**Active release branch:** `v8.1`
+**Version:** 8.2.0
+**Active release branch:** `v8.2`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-20
 
@@ -16,6 +16,9 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v8.2.0 adds profile-scoped switches that drop management/technical-lead titles
+and sales titles before scoring across every configured job source.
 
 v6.2.0 lets users choose `.txt`, `.csv`, or `.xlsx` for each manual dashboard
 email send. Both the Jobs toolbar and System email card pass the selection
@@ -138,6 +141,8 @@ Important v5 defaults:
 - `user.salaryFloorUsd: 0`
 - `user.maxYoeAcceptable: 100`
 - `filters.filterClearance: false`
+- `filters.filterManagementTitles: false`
+- `filters.filterSalesTitles: false`
 - `filters.skipCompanies: []`
 - `filters.dropTitlePatterns: []`
 - `search.workplaceTypes: ["Remote"]`

@@ -30,6 +30,10 @@
   "filters": {
     "filterClearance": false,
     "_filterClearanceComment": "Default off (v5.0) — when on, drops jobs requiring a security clearance OR US citizenship. That is the right filter only for some users, so a fresh install includes everything and you opt in from Settings.",
+    "filterManagementTitles": false,
+    "_filterManagementTitlesComment": "When on, drops manager, supervisor, director, head, executive, team-lead, and technical-lead job titles before scoring. Profile-scoped and off by default; toggle from Settings.",
+    "filterSalesTitles": false,
+    "_filterSalesTitlesComment": "When on, drops sales, account executive/manager, business development, SDR/BDR, customer success, and revenue-operations job titles before scoring. Profile-scoped and off by default; toggle from Settings.",
     "applicationFormEase": "all",
     "_applicationFormEaseValues": "all (default) | simple (only Simple Apps - no account creation) | long (only Time Consuming Apps)",
     "maxJobAge": "any",
