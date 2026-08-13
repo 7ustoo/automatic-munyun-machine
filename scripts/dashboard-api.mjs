@@ -448,7 +448,7 @@ function setupHcafeLoginStart() {
       cwd: ROOT,
       detached: true,
       stdio: 'ignore',
-      windowsHide: false
+      windowsHide: true
     });
     child.unref();
     const pidPath = path.join(ROOT, 'data', 'hcafe-login.pid');
@@ -526,7 +526,7 @@ function diceLoginStart() {
   try {
     const scriptPath = path.join(ROOT, 'scripts', 'dice-login.mjs');
     if (!fs.existsSync(scriptPath)) return out({ ok: false, error: 'dice-login.mjs missing — corrupt install?' });
-    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false });
+    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true });
     child.unref();
     const pidPath = path.join(ROOT, 'data', 'dice-login.pid');
     fs.mkdirSync(path.dirname(pidPath), { recursive: true });

@@ -264,6 +264,14 @@ Confirm Telegram is enabled in **System**, validate the bot token and chat, then
 
 Enter the file path manually or use the dashboard upload. Headless sessions may not support a native file picker.
 
+### A PowerShell or command window flashes on Windows
+
+Update AMM to the latest release. Background jobs run through the native
+`AMM.exe` launcher, so the scheduled batch, five-minute watchdog, missed-batch
+check, notifications, and browser sign-in helpers do not create terminal
+windows. The Windows installer automatically replaces older scheduled-task
+definitions during an upgrade.
+
 ### Need more help?
 
 Check the [open issues](https://github.com/7ustoo/automatic-munyun-machine/issues) or create one with your OS, AMM version, and the relevant log excerpt. Remove personal details and tokens before posting logs.

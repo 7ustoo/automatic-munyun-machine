@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 8.2.0
-**Active release branch:** `v8.2`
+**Version:** 8.3.0
+**Active release branch:** `v8.3`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-20
 
@@ -16,6 +16,10 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v8.3.0 removes random Windows terminal flashes by routing scheduled background
+jobs through console-free one-shot modes in the native wrapper and migrating
+legacy Task Scheduler definitions during upgrade.
 
 v8.2.0 adds profile-scoped switches that drop management/technical-lead titles
 and sales titles before scoring across every configured job source.
@@ -51,6 +55,7 @@ dashboard host.
 
 ```text
 OS scheduler / login item
+        +-- Windows one-shot jobs use `AMM.exe --scheduled-task=<job>` and a hidden Node child
         │
         ▼
 Go wrapper (wrapper/)

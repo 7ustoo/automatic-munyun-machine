@@ -21,7 +21,9 @@ func notifyOS(title, message string) {
 		if _, err := os.Stat(pwsh); err != nil {
 			pwsh = "powershell.exe"
 		}
-		_ = exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-Command", winToastScript(title, message)).Run()
+		cmd := exec.Command(pwsh, "-NoProfile", "-NonInteractive", "-Command", winToastScript(title, message))
+		applyChildHideWindow(cmd)
+		_ = cmd.Run()
 	case "darwin":
 		script := "display notification " + strconv.Quote(message) + " with title " + strconv.Quote(title)
 		_ = exec.Command("osascript", "-e", script).Run()
