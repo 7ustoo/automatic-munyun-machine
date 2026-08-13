@@ -9,7 +9,6 @@
 $ErrorActionPreference = 'Stop'
 
 $ROOT = Split-Path -Parent $PSScriptRoot
-$RUN_BATCH_CMD = Join-Path $ROOT 'scripts\run-daily-batch.cmd'
 # v1.2: the bot is now launched via the AMM.exe wrapper (Go binary at
 # wrapper/dist/AMM.exe) instead of start-bot.cmd's minimized cmd window.
 # The wrapper owns the system tray icon + supervises the node child.
@@ -62,7 +61,12 @@ $dayEnums = $days | ForEach-Object { [System.DayOfWeek]$_ }
 # Daily batch at scheduled time, scheduled days.
 # v2.3: 45-min ceiling (was 20) — full-scan searches every keyword to the end,
 # which takes longer than the old early-stop on heavy-supply days.
-$action7  = New-ScheduledTaskAction -Execute $RUN_BATCH_CMD
+if (Test-Path $WRAPPER_EXE) {
+  $action7 = New-ScheduledTaskAction -Execute $WRAPPER_EXE -Argument '--scheduled-task=daily' -WorkingDirectory $ROOT
+} else {
+  $RUN_BATCH_CMD = Join-Path $ROOT 'scripts\run-daily-batch.cmd'
+  $action7 = New-ScheduledTaskAction -Execute $RUN_BATCH_CMD -WorkingDirectory $ROOT
+}
 $trigger7 = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayEnums -At $time
 $set7     = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 45)
 Register-ScheduledTask -TaskName 'munyun-daily-batch' -Action $action7 -Trigger $trigger7 -Settings $set7 -Description "AMM daily 100-job batch ($time, $($days -join ','))" -Force | Out-Null
@@ -87,12 +91,16 @@ Register-ScheduledTask -TaskName 'munyun-bot' -Action $actionB -Trigger $trigger
 Write-Host "[OK] Registered: munyun-bot (At logon, auto-restart on crash) → $BOT_LAUNCHER"
 
 # Watchdog every 5 minutes — restarts the bot if its heartbeat is stale.
-# Runs `node scripts/watchdog.mjs` via cmd.exe so it inherits PATH; the
-# script itself uses absolute %SystemRoot% paths for the binaries it spawns.
+# v8.3: installed builds route through GUI-subsystem AMM.exe so neither Task
+# Scheduler nor the Node child can create a console window.
 $nodeExe = (Get-Command node -ErrorAction SilentlyContinue).Source
 if (-not $nodeExe) { $nodeExe = 'node' }
 $WATCHDOG_SCRIPT = Join-Path $ROOT 'scripts\watchdog.mjs'
-$actionW   = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$WATCHDOG_SCRIPT`"" -WorkingDirectory $ROOT
+if (Test-Path $WRAPPER_EXE) {
+  $actionW = New-ScheduledTaskAction -Execute $WRAPPER_EXE -Argument '--scheduled-task=watchdog' -WorkingDirectory $ROOT
+} else {
+  $actionW = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$WATCHDOG_SCRIPT`"" -WorkingDirectory $ROOT
+}
 $triggerW  = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 5)
 $setW      = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2) -MultipleInstances IgnoreNew
 Register-ScheduledTask -TaskName 'munyun-watchdog' -Action $actionW -Trigger $triggerW -Settings $setW -Description "AMM bot watchdog (every 5 min; restarts on stale heartbeat)" -Force | Out-Null
@@ -104,7 +112,11 @@ $BATCH_MISSED_SCRIPT = Join-Path $ROOT 'scripts\batch-missed-watcher.mjs'
 $batchHour = [int]($time.Split(':')[0])
 $batchMin  = [int]($time.Split(':')[1])
 $missedTime = ('{0:D2}:{1:D2}' -f (($batchHour + 1) % 24), $batchMin)
-$actionM  = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$BATCH_MISSED_SCRIPT`"" -WorkingDirectory $ROOT
+if (Test-Path $WRAPPER_EXE) {
+  $actionM = New-ScheduledTaskAction -Execute $WRAPPER_EXE -Argument '--scheduled-task=batch-missed' -WorkingDirectory $ROOT
+} else {
+  $actionM = New-ScheduledTaskAction -Execute $nodeExe -Argument "`"$BATCH_MISSED_SCRIPT`"" -WorkingDirectory $ROOT
+}
 $triggerM = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayEnums -At $missedTime
 $setM     = New-ScheduledTaskSettingsSet -StartWhenAvailable -DontStopIfGoingOnBatteries -AllowStartIfOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 2)
 Register-ScheduledTask -TaskName 'munyun-batch-missed' -Action $actionM -Trigger $triggerM -Settings $setM -Description "AMM batch-missed alert ($missedTime, $($days -join ','))" -Force | Out-Null

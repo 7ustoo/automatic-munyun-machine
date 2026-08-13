@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [8.3.0] — 2026-08-12
+
+### Fixed
+
+- **No more random PowerShell or command-window flashes on Windows.** The daily batch, five-minute watchdog, and missed-batch check no longer let Task Scheduler launch `.cmd` or `node.exe` console processes directly. They now enter a one-shot mode in the GUI-subsystem `AMM.exe`, which starts the existing JavaScript helpers with `CREATE_NO_WINDOW`. Windows toast PowerShell, dashboard hiring.cafe/Dice sign-in, and Telegram re-auth child processes are hidden too; Chromium remains visible when sign-in is requested. The installer silently re-registers tasks on upgrade so existing users receive the corrected launch definitions automatically.
+
 ## [8.2.0] — 2026-08-12
 
 ### Added

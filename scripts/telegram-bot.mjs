@@ -814,13 +814,12 @@ async function handleMessage(msg) {
     return reply(chatId, `❌ Could not resume (exit ${r.code}).\n<pre>${escHtml((r.output || '').slice(0, 200))}</pre>`);
   }
   // /reauth — spawn login-once on the user's machine. Cross-platform:
-  // on Win32 we route through the .cmd wrapper (preserves the visible
-  // window contract); on Mac/Linux we exec node directly.
+  // Chromium stays visible, but the Node launcher never needs a console.
   if (/^\/?reauth\b/.test(text)) {
     reply(chatId, '🔓 Opening Cloudflare warmup window on your computer. Wait for it to finish — no sign-in required.');
     if (IS_WIN32) {
-      spawn(CMD_EXE, ['/c', path.join(ROOT, 'scripts', 'login-once.cmd')], {
-        cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: false
+      spawn(process.execPath, [path.join(ROOT, 'scripts', 'login-once.mjs')], {
+        cwd: ROOT, detached: true, stdio: 'ignore', windowsHide: true
       }).unref();
     } else {
       spawn(process.execPath, [path.join(ROOT, 'scripts', 'login-once.mjs')], {

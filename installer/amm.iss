@@ -21,7 +21,7 @@
 ; it pointing at the current release branch so local builds still produce
 ; a sensibly-named .exe.
 #ifndef MyAppVersion
-  #define MyAppVersion "8.2.0"
+  #define MyAppVersion "8.3.0"
 #endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
@@ -161,6 +161,14 @@ begin
   Result := FileExists(ExpandConstant('{app}\.env'));
 end;
 
+// v8.3: upgrades must rewrite legacy scheduled actions that launch cmd.exe or
+// node.exe directly. Fresh installs have no config yet; dashboard setup owns
+// their initial task registration.
+function HasConfig(): Boolean;
+begin
+  Result := FileExists(ExpandConstant('{app}\config.json'));
+end;
+
 // v2.4: stop a RUNNING AMM before copying files. Windows locks executables
 // that are running, so upgrades over a live install silently failed to
 // replace wrapper\dist\AMM.exe — the tray kept running the OLD binary until
@@ -189,6 +197,16 @@ Filename: "{app}\runtime\MicrosoftEdgeWebView2Setup.exe"; \
   WorkingDir: "{app}"; \
   StatusMsg: "Installing the Microsoft WebView2 Runtime for AMM's native window…"; \
   Check: NeedsWebView2; \
+  Flags: runhidden waituntilterminated
+
+; v8.3: migrate existing Task Scheduler entries to AMM.exe's console-free
+; one-shot mode on every upgrade. The script is idempotent and preserves the
+; active profile's configured time and days.
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; \
+  Parameters: "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""{app}\scripts\setup-tasks.ps1"""; \
+  WorkingDir: "{app}"; \
+  StatusMsg: "Updating AMM background tasks..."; \
+  Check: HasConfig; \
   Flags: runhidden waituntilterminated
 
 ; Post-install. v2.0.1: npm install is GONE — node_modules ships inside the

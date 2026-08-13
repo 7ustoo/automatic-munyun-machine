@@ -71,6 +71,10 @@ var (
 	flagWindowHost  = flag.Bool("window-host", false, "Internal: host the native dashboard window")
 	flagWindowURL   = flag.String("window-url", "", "Internal: loopback dashboard URL for --window-host")
 	flagWindowReady = flag.String("window-ready-file", "", "Internal: native window startup handshake path")
+	// v8.3: Task Scheduler launches the GUI-subsystem wrapper for one-shot
+	// background work instead of launching cmd.exe/node.exe directly. That
+	// keeps scheduled jobs completely console-free on Windows.
+	flagScheduledTask = flag.String("scheduled-task", "", "Internal: run daily, watchdog, or batch-missed without starting the tray")
 )
 
 func main() {
@@ -79,6 +83,14 @@ func main() {
 	if *flagVersion {
 		fmt.Printf("AMM tray wrapper v%s (%s/%s)\n", AMMVersion, runtime.GOOS, runtime.GOARCH)
 		os.Exit(0)
+	}
+
+	if *flagScheduledTask != "" {
+		installDir, err := resolveInstallDir(*flagInstallDir)
+		if err != nil {
+			os.Exit(2)
+		}
+		os.Exit(runScheduledHelper(installDir, *flagScheduledTask))
 	}
 
 	// Native window children deliberately bypass logging setup, the
