@@ -85,19 +85,19 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	// DNS-rebinding page can't read the user's job data / resume keywords / VA
 	// email. No CSRF token needed to read; the Host check is the gate.
 	mux.HandleFunc("/api/status", d.guardGet(d.handleStatus))
-	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))       // GET: full ranked batch (all jobs + matched)
-	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory))   // GET: daily snapshots → Trends + leaderboard (v4.6)
-	mux.HandleFunc("/api/settings", d.guardGet(d.handleSettings)) // GET: editable knobs + search terms
-	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))     // GET ?format=txt|csv[&archive=id]: number·title·apply-link export (v2.4, archives v7.2)
-	mux.HandleFunc("/api/archive", d.guardGet(d.handleArchiveList))       // GET: previous scrapes index (v7.2)
-	mux.HandleFunc("/api/archive/batch", d.guardGet(d.handleArchiveGet))  // GET ?id=: one archived batch's jobs (v7.2)
-	mux.HandleFunc("/api/jobs-txt", d.guardGet(d.handleExport))   // legacy alias (pre-v2.4 bookmark) → txt export
+	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))              // GET: full ranked batch (all jobs + matched)
+	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory))          // GET: daily snapshots → Trends + leaderboard (v4.6)
+	mux.HandleFunc("/api/settings", d.guardGet(d.handleSettings))        // GET: editable knobs + search terms
+	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))            // GET ?format=txt|csv[&archive=id]: number·title·apply-link export (v2.4, archives v7.2)
+	mux.HandleFunc("/api/archive", d.guardGet(d.handleArchiveList))      // GET: previous scrapes index (v7.2)
+	mux.HandleFunc("/api/archive/batch", d.guardGet(d.handleArchiveGet)) // GET ?id=: one archived batch's jobs (v7.2)
+	mux.HandleFunc("/api/jobs-txt", d.guardGet(d.handleExport))          // legacy alias (pre-v2.4 bookmark) → txt export
 	// v2.1 state-changing endpoints — all gated by guardPost (token + Host).
 	mux.HandleFunc("/api/scrape", d.guardPost(d.handleScrape))
 	mux.HandleFunc("/api/job/action", d.guardPost(d.handleJobAction))
 	mux.HandleFunc("/api/jobs/open-all", d.guardPost(d.handleJobsOpenAll))
-	mux.HandleFunc("/api/exclusions", d.guardGet(d.handleExclusionsGet))       // v7.7: current batch's ✕ list
-	mux.HandleFunc("/api/job/exclude", d.guardPost(d.handleJobExclude))        // v7.7: toggle one job's ✕
+	mux.HandleFunc("/api/exclusions", d.guardGet(d.handleExclusionsGet)) // v7.7: current batch's ✕ list
+	mux.HandleFunc("/api/job/exclude", d.guardPost(d.handleJobExclude))  // v7.7: toggle one job's ✕
 	mux.HandleFunc("/api/settings/set", d.guardPost(d.handleSettingsSet))
 	mux.HandleFunc("/api/score/mute", d.guardPost(d.handleScoreMute))         // v4.0
 	mux.HandleFunc("/api/config/backups", d.guardGet(d.handleConfigBackups))  // v4.0 (read-only)
@@ -497,18 +497,28 @@ type lastBatchInfo struct {
 }
 
 type batchJob struct {
-	Idx       int      `json:"idx"`
-	Title     string   `json:"title"`
-	Company   string   `json:"company"`
-	Yoe       *int     `json:"yoe"`
-	MatchPct  int      `json:"matchPct"`
-	Score     int      `json:"score"`
-	Query     string   `json:"q"`
-	Matched   []string `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
-	DirectURL string   `json:"directUrl"`
-	ViewURL   string   `json:"viewjobUrl"`
-	SalaryK   int      `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
-	Src       string   `json:"src"`     // v7.3: job source (hcafe/dice/greenhouse/lever/ashby)
+	Idx              int             `json:"idx"`
+	Title            string          `json:"title"`
+	Company          string          `json:"company"`
+	Yoe              *int            `json:"yoe"`
+	MatchPct         int             `json:"matchPct"`
+	Score            int             `json:"score"`
+	Query            string          `json:"q"`
+	Matched          []string        `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
+	DirectURL        string          `json:"directUrl"`
+	ViewURL          string          `json:"viewjobUrl"`
+	SalaryK          int             `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
+	Src              string          `json:"src"`     // v7.3: job source (hcafe/dice/greenhouse/lever/ashby)
+	CardPct          *int            `json:"cardPct,omitempty"`
+	JDPct            *int            `json:"jdPct,omitempty"`
+	AIPct            *int            `json:"aiPct,omitempty"`
+	AIReason         string          `json:"aiReason,omitempty"`
+	AISub            json.RawMessage `json:"aiSub,omitempty"`
+	Missing          []string        `json:"missing"`
+	CoveragePct      *int            `json:"coveragePct,omitempty"`
+	RolePct          *int            `json:"rolePct,omitempty"`
+	RequirementCount int             `json:"requirementCount"`
+	MatchConfidence  *int            `json:"matchConfidence,omitempty"`
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the
@@ -657,17 +667,28 @@ func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
 	jobs := make([]batchJob, 0, n)
 	for i := 0; i < n; i++ {
 		var j struct {
-			Idx       int      `json:"idx"`
-			Title     string   `json:"title"`
-			Company   string   `json:"company"`
-			Yoe       *int     `json:"yoe"`
-			MatchPct  int      `json:"matchPct"`
-			Score     float64  `json:"score"`
-			Query     string   `json:"q"`
-			Matched   []string `json:"matched"`
-			DirectURL string   `json:"directUrl"`
-			ViewURL   string   `json:"viewjobUrl"`
-			SalaryK   int      `json:"salaryK"`
+			Idx              int             `json:"idx"`
+			Title            string          `json:"title"`
+			Company          string          `json:"company"`
+			Yoe              *int            `json:"yoe"`
+			MatchPct         int             `json:"matchPct"`
+			Score            float64         `json:"score"`
+			Query            string          `json:"q"`
+			Matched          []string        `json:"matched"`
+			DirectURL        string          `json:"directUrl"`
+			ViewURL          string          `json:"viewjobUrl"`
+			SalaryK          int             `json:"salaryK"`
+			Src              string          `json:"src"`
+			CardPct          *int            `json:"cardPct"`
+			JDPct            *int            `json:"jdPct"`
+			AIPct            *int            `json:"aiPct"`
+			AIReason         string          `json:"aiReason"`
+			AISub            json.RawMessage `json:"aiSub"`
+			Missing          []string        `json:"missing"`
+			CoveragePct      *int            `json:"coveragePct"`
+			RolePct          *int            `json:"rolePct"`
+			RequirementCount int             `json:"requirementCount"`
+			MatchConfidence  *int            `json:"matchConfidence"`
 		}
 		if err := json.Unmarshal(raw[i], &j); err != nil {
 			continue
@@ -675,18 +696,32 @@ func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
 		if j.Matched == nil {
 			j.Matched = []string{}
 		}
+		if j.Missing == nil {
+			j.Missing = []string{}
+		}
 		jobs = append(jobs, batchJob{
-			Idx:       j.Idx,
-			Title:     j.Title,
-			Company:   j.Company,
-			Yoe:       j.Yoe,
-			MatchPct:  j.MatchPct,
-			Score:     int(j.Score),
-			Query:     j.Query,
-			Matched:   j.Matched,
-			DirectURL: j.DirectURL,
-			ViewURL:   j.ViewURL,
-			SalaryK:   j.SalaryK,
+			Idx:              j.Idx,
+			Title:            j.Title,
+			Company:          j.Company,
+			Yoe:              j.Yoe,
+			MatchPct:         j.MatchPct,
+			Score:            int(j.Score),
+			Query:            j.Query,
+			Matched:          j.Matched,
+			DirectURL:        j.DirectURL,
+			ViewURL:          j.ViewURL,
+			SalaryK:          j.SalaryK,
+			Src:              j.Src,
+			CardPct:          j.CardPct,
+			JDPct:            j.JDPct,
+			AIPct:            j.AIPct,
+			AIReason:         j.AIReason,
+			AISub:            j.AISub,
+			Missing:          j.Missing,
+			CoveragePct:      j.CoveragePct,
+			RolePct:          j.RolePct,
+			RequirementCount: j.RequirementCount,
+			MatchConfidence:  j.MatchConfidence,
 		})
 	}
 	return jobs

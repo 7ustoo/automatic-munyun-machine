@@ -5,12 +5,12 @@
  * dashboard Settings picker offers exactly these values; the API validator and
  * the scraper both clamp the stored config through `clampBatchSize` so a
  * hand-edited `config.json` can never make the apply-URL resolve pass visit an
- * unbounded number of job pages (each delivered job's page is visited during
- * resolution, and — when signed in — marked Viewed on the hiring.cafe account).
+ * unbounded number of job pages. Description evaluation has its own safety
+ * ceiling and stops as soon as the requested qualifying supply is found.
  */
 
 export const BATCH_SIZE_OPTIONS = [50, 100, 150, 200];
-export const DEFAULT_BATCH_SIZE = 100;
+export const DEFAULT_BATCH_SIZE = 200;
 
 /**
  * Coerce any stored/typed value to one of BATCH_SIZE_OPTIONS.

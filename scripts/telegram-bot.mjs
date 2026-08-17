@@ -419,7 +419,7 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 /yoe N               → set max years of experience
 /salary N            → set salary floor in $K (e.g. /salary 120)
 /floor N             → minimum match-% to include in batch (default 25)
-/batchsize N         → jobs per batch: 50, 100, 150, or 200 (default 100)
+/batchsize N         → strong matches per batch: 50, 100, 150, or 200 (default 200)
 /clearance on/off    → toggle gov clearance filter
 /forms all/simple/long → application form filter (Easy Apply etc.)
 /skip &lt;company&gt;      → never show this company again
@@ -586,13 +586,13 @@ function buildDiagnoseMessage() {
   try { seen = JSON.parse(fs.readFileSync(profilePaths().seenJobs, 'utf8')); } catch {}
   lines.push('');
   lines.push(`<b>Seen-jobs memory</b>`);
-  // v4.3: which dedup mode is active. Signed in + knob on → hiring.cafe
-  // hides Saved/Applied/Viewed server-side (syncs across computers); the
-  // local store below is the fallback/safety net. Knob off → account dedup
+  // Signed in + knob on → hiring.cafe hides Saved/Applied. Viewed stays visible
+  // because AMM may inspect more descriptions than it delivers. The local
+  // store is authoritative for delivered jobs. Knob off → account filtering
   // never runs regardless of sign-in state, so don't claim it does.
   const hcAuth = readHcafeAuthCache();
   const DEDUP_LINE = {
-    account: `  Dedup: hiring.cafe account (signed in) — seen jobs sync across your computers`,
+    account: `  Dedup: hiring.cafe Saved/Applied + local delivered-only memory`,
     'local-disabled': `  Dedup: local (account dedup disabled in settings)`,
     'signed-out': `  Dedup: local only — sign in to hiring.cafe from the dashboard (System page) to sync across devices`,
     unknown: `  Dedup: local (hiring.cafe sign-in status unknown — check the dashboard's System page)`,
@@ -921,7 +921,7 @@ async function handleMessage(msg) {
   }
 
   // /floor N — set minimum match-percent threshold (jobs below this are
-  // dropped before the top-100 cut). v1.0 E3. Default 25%; lower to 0 to
+  // delivered after full-description evaluation). v8.4 default 70; lower it to
   // include filler when supply is low; raise to 50+ to be picky.
   const floorM = text.match(/^\/?floor\s+(\d{1,3})\b/);
   if (floorM) {
@@ -929,7 +929,7 @@ async function handleMessage(msg) {
     cfgRW.set('scoring.matchFloorPercent', n);
     return reply(chatId, n === 0
       ? `✅ Match floor set to <b>0%</b> — every scored job will surface (filler included).`
-      : `✅ Match floor set to <b>${n}%</b>. Jobs scoring below this are dropped before the top-100 cut.`);
+      : `✅ Strong-match floor set to <b>${n}%</b>. AMM will keep checking descriptions until the batch is full or the candidate pool runs out.`);
   }
 
   // /batchsize N — v4.5: how many ranked jobs make the final batch. Snaps to
@@ -1141,9 +1141,11 @@ async function handleMessage(msg) {
         `<b>${job.matchPct}% match: ${escHtml(job.title)}</b>`,
         `<i>${escHtml(job.company)}</i>`,
         '',
-        `<b>Raw score:</b> ${job.score}`,
+        job.coveragePct != null ? `<b>Requirements covered:</b> ${job.coveragePct}% (${job.requirementCount || 0} recognized)` : '',
+        job.rolePct != null ? `<b>Role fit:</b> ${job.rolePct}%` : '',
         `<b>Search query that found it:</b> ${escHtml(job.q)}`,
-        job.matched.length ? `<b>Matched keywords (${job.matched.length}):</b>\n${job.matched.map(escHtml).join(' · ')}` : '<i>No CV keywords matched — score is from search relevance only.</i>',
+        (job.matched || []).length ? `<b>Resume evidence (${job.matched.length}):</b>\n${job.matched.map(escHtml).join(' · ')}` : '<i>No recognized resume evidence.</i>',
+        (job.missing || []).length ? `<b>Missing requirements:</b> ${job.missing.map(escHtml).join(' · ')}` : '',
         '',
         `<a href="${escHtmlAttr(job.directUrl || job.viewjobUrl)}">Open job →</a>`
       ];
@@ -1605,8 +1607,9 @@ async function handleCallback(cq) {
         '',
         `<b>${escHtml(job.title || '')}</b> @ ${escHtml(job.company || '')}`,
         '',
-        `<b>Matched terms:</b> ${matched}`,
-        `<b>Raw score:</b> ${job.score}`
+        `<b>Resume evidence:</b> ${matched}`,
+        job.coveragePct != null ? `<b>Requirements covered:</b> ${job.coveragePct}%` : '',
+        job.rolePct != null ? `<b>Role fit:</b> ${job.rolePct}%` : ''
       ].join('\n'));
     } catch (e) {
       return reply(chatId, `❌ ${escHtml(e.message)}`);

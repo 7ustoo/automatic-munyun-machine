@@ -3,9 +3,8 @@
 // Extracted from job-action.mjs (the sign-in probe) and dashboard-api.mjs (the
 // data/hcafe-auth.json cache) so the scraper, the job actioner, and the
 // dashboard API all share one probe and one cache. Signed-in state is what
-// gates account-based dedup: when authed, the scrape sends
-// searchState.hideJobTypes and hiring.cafe hides Saved/Applied/Viewed jobs
-// server-side, so dedup follows the user's account across computers.
+// gates account-based Saved/Applied filtering. Viewed is deliberately excluded
+// so ranking a description cannot hide a job AMM never delivered.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';

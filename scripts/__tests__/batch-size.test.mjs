@@ -8,7 +8,7 @@ test('the four offered options pass through unchanged', () => {
 
 test('options list and default are the expected values', () => {
   assert.deepEqual(BATCH_SIZE_OPTIONS, [50, 100, 150, 200]);
-  assert.equal(DEFAULT_BATCH_SIZE, 100);
+  assert.equal(DEFAULT_BATCH_SIZE, 200);
 });
 
 test('missing / garbage values fall back to the default', () => {

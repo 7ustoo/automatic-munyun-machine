@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [8.4.0] — 2026-08-17
+
+### Changed
+
+- **Matching now measures requirement coverage instead of piling up repeated keywords.** Job titles are checked against the resume and target searches, concrete requirements become a bounded denominator, repeated buzzwords count once, and an explicitly required missing certification prevents a misleading strong score. The dashboard explains requirement coverage, role fit, resume evidence, and gaps.
+- **AMM keeps evaluating full descriptions until it fills the requested strong-match batch or runs out of candidates.** The old fixed `batch size + 30` shortlist could stop while good jobs remained below it. Description evaluation now proceeds in chunks with a 3,000-job default safety ceiling, and only jobs clearing the final match floor are delivered. New-install defaults are 200 jobs and a 70% strong-match floor.
+- Resume scans now retain up to 100,000 characters locally and record per-term evidence instead of truncating the candidate after 8,000 characters. Optional Smart Match receives a larger, more complete resume and job-description window.
+
+### Fixed
+
+- **Unshown hiring.cafe jobs no longer get hidden as Viewed.** Signed-in searches still exclude jobs the user deliberately Saved or Applied to, but never exclude Viewed jobs. AMM's local profile memory records only the jobs actually delivered, so descriptions inspected during ranking remain eligible for later batches.
+
 ## [8.3.0] — 2026-08-12
 
 ### Fixed
@@ -1077,7 +1089,10 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.2.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.4.0...HEAD
+[8.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.3.0...v8.4.0
+[8.3.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.2.0...v8.3.0
+[8.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.1.0...v8.2.0
 [6.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.1.0...v6.2.0
 [6.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v6.0.0...v6.1.0
 [6.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v5.2.0...v6.0.0

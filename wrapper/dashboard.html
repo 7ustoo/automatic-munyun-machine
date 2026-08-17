@@ -1484,7 +1484,7 @@
             <h2>Application</h2>
             <div class="stat-row"><span class="k">Version</span><span class="v" id="sys-version">—</span></div>
             <div class="stat-row"><span class="k">Install folder</span><span class="v"><code id="install-dir">—</code></span></div>
-            <div class="stat-row"><span class="k">Data</span><span class="v">Local only — nothing leaves this computer</span></div>
+            <div class="stat-row"><span class="k">Data</span><span class="v">Local by default — optional AI and delivery send only what they need</span></div>
             <button class="sm" id="update-check-btn" style="margin-top:10px"><svg class="ic"><use href="#i-refresh"/></svg>Check for updates</button>
           </div>
         </div>
@@ -1496,8 +1496,8 @@
           <h2>Matching &amp; schedule</h2>
           <div class="set-row"><label>Max years of experience</label><input type="text" id="set-yoe" class="num" /></div>
           <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
-          <div class="set-row"><label>Match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
-          <div class="set-row"><label>Jobs per batch</label>
+          <div class="set-row"><label>Strong-match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
+          <div class="set-row"><label>Strong matches per batch</label>
             <select id="set-batch-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option><option value="200">200</option></select></div>
           <div class="set-row"><label>Show salary on jobs</label>
             <select id="set-show-salary"><option value="true">Yes</option><option value="false">No</option></select></div>
@@ -2022,8 +2022,9 @@ function renderStats() {
 // funnel object carried in last-batch.json (passed through /api/batch).
 function funnelLineJS(f) {
   const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
-  const aboveFloor = Math.max(0, (f.afterDedup || 0) - (f.droppedBelowFloor || 0));
-  return `${f.raw || 0} raw → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${aboveFloor} above ${f.matchFloorPercent || 0}% floor → ${f.sent || 0} delivered`;
+  const checked = f.descriptionEvaluated ?? f.scored ?? 0;
+  const aboveFloor = f.qualifyingMatches ?? Math.max(0, checked - (f.droppedBelowFloor || 0));
+  return `${f.raw || 0} raw → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} descriptions checked → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
 }
 
 function visibleJobs() {
@@ -2047,15 +2048,16 @@ function visibleJobs() {
   return out;
 }
 
-// v4.0: the Why panel — score journey (card → description → AI → final),
-// matched terms, the job's asks your resume lacks (+search / mute), and the
-// Smart match reason when AI rerank ran.
+// Score journey + requirement coverage. The percentage now reflects bounded
+// job requirements instead of an unbounded keyword sum.
 function whyRowHTML(idx) {
   const j = (window.__batchById || {})[idx] || {};
   const kws = j.matched || [];
   const parts = [];
   const jr = [`<span class="jpill">Card scan <b>${j.cardPct ?? j.matchPct ?? 0}%</b></span>`];
   if (j.jdPct != null) jr.push('<span class="jarrow">→</span>', `<span class="jpill">Full description <b>${j.jdPct}%</b></span>`);
+  if (j.coveragePct != null) jr.push('<span class="jarrow">·</span>', `<span class="jpill">Requirements covered <b>${j.coveragePct}%</b></span>`);
+  if (j.rolePct != null) jr.push('<span class="jarrow">·</span>', `<span class="jpill">Role fit <b>${j.rolePct}%</b></span>`);
   if (j.aiPct != null) jr.push('<span class="jarrow">→</span>', `<span class="jpill">AI check <b>${j.aiPct}%</b></span>`);
   jr.push('<span class="jarrow">→</span>', `<span class="jpill final">Final <b>${j.matchPct ?? 0}%</b></span>`);
   parts.push(`<div class="why-journey">${jr.join("")}</div>`);
@@ -2081,7 +2083,7 @@ function renderJobs() {
     $("lb-body").innerHTML = `<div class="empty">
       <div class="e-icon">💼</div>
       <div class="e-title">No batch yet</div>
-      <div class="e-sub">Pull your first 100 ranked jobs from hiring.cafe — scored against your resume. Takes 1–2 minutes. New here? Walk through setup or take a quick tour first.</div>
+      <div class="e-sub">Pull up to 200 strong matches — checked against your resume and the full job requirements. New here? Walk through setup or take a quick tour first.</div>
       <div class="row" style="justify-content:center; margin-top:6px">
         <button class="primary" id="empty-scrape">⟳ Scrape now</button>
         <button class="sm" id="empty-setup">Set up AMM</button>
@@ -2328,7 +2330,7 @@ async function loadSettings() {
     $("set-yoe").value = s.maxYoeAcceptable;
     $("set-salary").value = s.salaryFloorUsd;
     $("set-floor").value = s.matchFloorPercent;
-    $("set-batch-size").value = String(s.targetJobsPerBatch || 100);
+    $("set-batch-size").value = String(s.targetJobsPerBatch || 200);
     state.showSalary = s.showSalary !== false;
     $("set-show-salary").value = String(state.showSalary);
     $("set-time").value = s.scheduleTime;

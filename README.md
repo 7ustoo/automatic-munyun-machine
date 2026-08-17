@@ -2,7 +2,7 @@
 
 > Your resume in. Your best job matches out.
 
-**AMM** is a local-first desktop app that finds jobs, ranks them against your resume, and gives you a focused batch of **50–200 matches**. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
+**AMM** is a local-first desktop app that finds jobs, checks their requirements against your resume, and gives you up to **200 strong matches**. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
 
 **Free · Private · Windows, macOS, and Linux · Built for any profession**
 
@@ -25,7 +25,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - **Stop repeating the same searches.** AMM runs them on your schedule.
 - **See the strongest matches first.** Every job includes a match score and explanation.
 - **Apply faster.** AMM resolves direct employer application links.
-- **Keep control.** Choose 50, 100, 150, or 200 jobs per batch and tune every search or filter.
+- **Keep control.** Choose a 50, 100, 150, or 200 strong-match target and tune every search or filter.
 - **Keep your data local.** Your resume, history, settings, and browser session stay on your computer.
 
 ## Features
@@ -64,7 +64,7 @@ The desktop dashboard is the primary app. Extra delivery channels are optional:
 
 ### Explainable matching
 
-AMM first scores the job card, then fetches and scores the full description. It checks role-family fit, handles ambiguous terms, and uses salary only as a tie-breaker. You can inspect the score journey and missing terms for every job.
+AMM uses the job card for a broad first pass, then keeps reading full descriptions until it fills the requested batch or runs out of candidates. The final score measures how much of the job's recognized requirements the resume covers and whether the title fits the user's target roles. Repeated buzzwords count once. Every job explains requirement coverage, role fit, resume evidence, and missing requirements.
 
 An optional bring-your-own Anthropic key can add a final Claude rerank. It is off by default.
 
@@ -165,7 +165,7 @@ Schedule or “Scrape now”
 
 The native Go wrapper runs the local dashboard and supervises background work. On Windows it embeds that dashboard in an AMM-owned WebView2 window, so the taskbar and pinned shortcut belong to `AMM.exe` instead of Chrome. Node.js and Playwright handle job collection, resume parsing, scoring, and delivery. The dashboard binds to `127.0.0.1`, not your local network or the public internet.
 
-When signed into hiring.cafe, AMM asks the account to hide saved, applied, and viewed jobs. When signed out, AMM uses its local seen-job history.
+When signed into hiring.cafe, AMM asks the account to hide saved and applied jobs—but not merely viewed jobs. Delivered-job history stays local and profile-scoped, so a description inspected during ranking is not lost when the job was never shown.
 
 ---
 
