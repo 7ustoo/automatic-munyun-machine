@@ -77,7 +77,7 @@ function settingsGet() {
       filterSalesTitles: cfg.filters?.filterSalesTitles === true,
       applicationFormEase: cfg.filters?.applicationFormEase || 'all',
       skipCompanies: cfg.filters?.skipCompanies || [], // v4.6: blocked-companies UI
-      matchFloorPercent: cfg.scoring?.matchFloorPercent ?? 25,
+      matchFloorPercent: cfg.scoring?.matchFloorPercent ?? 70,
       targetJobsPerBatch: clampBatchSize(cfg.scoring?.targetJobsPerBatch),
       showSalary: cfg.display?.showSalary !== false, // v4.6: default on
       scheduleTime: cfg.schedule?.time || '07:00',

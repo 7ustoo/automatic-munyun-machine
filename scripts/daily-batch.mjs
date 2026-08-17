@@ -12,8 +12,9 @@
  *      targetJobsPerBatch) only applies with scoring.searchAllQueries:false.
  *   3. Filters (clearance, skip-companies, drop-titles, max YOE), dedups,
  *      subtracts applied + previously-seen, scores against the parsed CV.
- *   4. Slices top targetJobsPerBatch (default 100) above matchFloorPercent.
- *   5. Resolves each viewjob URL to its direct ATS URL via 5-page browser
+ *   4. Evaluates full descriptions in chunks until up to 200 jobs clear the
+ *      user's final match floor or the candidate supply is exhausted.
+ *   5. Resolves viewjob URLs to direct ATS URLs via a 5-page browser
  *      pool (Cloudflare blocks plain Node fetch; browser nav works).
  *   6. Pulls weather from open-meteo (lat/lon/city are user-configurable).
  *   7. Writes the local batch, then optionally sends Telegram/email handoffs.
@@ -41,6 +42,7 @@ import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
+import { matchRequirements } from './requirement-matcher.mjs';
 import { fetchAllSources } from './sources/index.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
@@ -48,13 +50,13 @@ import { fetchAllSources } from './sources/index.mjs';
 // 'unknown' can't arise here (the scrape always has a fresh boolean), but map
 // it defensively to the signed-out wording so a stray null never prints blank.
 const DEDUP_NOTE = {
-  account: '✓ hiring.cafe account dedup — seen jobs sync across your computers.',
+  account: '✓ Saved/applied jobs sync from hiring.cafe; delivered-job memory is local so unshown jobs stay available.',
   'local-disabled': 'Seen-job memory: local (account dedup disabled in settings).',
   'signed-out': '⚠ Not signed in to hiring.cafe — seen-job memory is local to this computer. Sign in from the dashboard (System page) to sync.',
   unknown: '⚠ Not signed in to hiring.cafe — seen-job memory is local to this computer. Sign in from the dashboard (System page) to sync.',
 };
 const DEDUP_TXT = {
-  account: 'Dedup: hiring.cafe account (signed in) — seen jobs sync across computers',
+  account: 'Dedup: hiring.cafe Saved/Applied + local delivered-only memory',
   'local-disabled': 'Dedup: local (account dedup disabled in settings)',
   'signed-out': 'Dedup: local only — sign in to hiring.cafe from the dashboard to sync across computers',
   unknown: 'Dedup: local only — sign in to hiring.cafe from the dashboard to sync across computers',
@@ -129,6 +131,10 @@ function loadParsedCV() {
   return JSON.parse(fs.readFileSync(p, 'utf8'));
 }
 const CV = loadParsedCV();
+const CV_DICTIONARY = (() => {
+  try { return JSON.parse(fs.readFileSync(path.join(__dirname, 'cv-keywords.json'), 'utf8')); }
+  catch { return {}; }
+})();
 
 // ---------- helpers ----------
 function log(line) {
@@ -350,8 +356,9 @@ async function checkBrowsable(page) {
 
 // v4.3: searchState builder, extracted pure so tests can pin the contract.
 // hideJobTypes is hiring.cafe's server-side account filter: it hides jobs the
-// signed-in account has Saved / Applied to / Viewed, so dedup follows the
-// user's account across computers. It only takes effect for signed-in
+// signed-in account has Saved / Applied to. Viewed is deliberately excluded:
+// opening a description for ranking must never burn a job the user did not
+// receive. Delivered-only dedup lives in the local profile store.
 // sessions (the reason v1.0.x removed it — back then the scrape ran unauth),
 // so we send it ONLY when this run has verified an authenticated session;
 // sending it signed-out is a silent no-op but would misrepresent the mode.
@@ -377,7 +384,7 @@ export function buildSearchState(term, { formEaseFilter = null, accountDedup = f
   const wantsLocal = wt.some(w => w !== 'Remote');
   const searchQuery = (loc && wantsLocal) ? `${term} ${loc}` : term;
   const s = { searchQuery, workplaceTypes: wt };
-  if (accountDedup) s.hideJobTypes = ['Saved', 'Applied', 'Viewed'];
+  if (accountDedup) s.hideJobTypes = ['Saved', 'Applied'];
   if (formEaseFilter) s.applicationFormEase = formEaseFilter;
   return s;
 }
@@ -415,8 +422,8 @@ async function _scrapeWith(ctx) {
   // /status / /diagnose should not display "auth OK" as if everything's fine.
 
   // v4.3: account-based dedup. If the persistent profile is signed in to
-  // hiring.cafe, ask the server to hide Saved/Applied/Viewed jobs — dedup
-  // that lives on the account and follows the user to any computer. The
+  // hiring.cafe, ask the server to hide Saved/Applied jobs. Viewed is not
+  // hidden because the ranker may inspect more descriptions than it delivers.
   // probe (~5s, one /saved navigation on the already-open page) also
   // refreshes the dashboard's data/hcafe-auth.json pill on every run.
   const ACCOUNT_DEDUP = SCORING.accountDedup !== false; // default on
@@ -429,7 +436,7 @@ async function _scrapeWith(ctx) {
       hcafeAuthed = await isSignedIn(page);
       writeHcafeAuthCache(hcafeAuthed);
       log(hcafeAuthed
-        ? '✓ signed in to hiring.cafe — account dedup active (server hides Saved/Applied/Viewed)'
+        ? '✓ signed in to hiring.cafe — saved/applied account dedup active; delivered-job memory stays local'
         : 'not signed in to hiring.cafe — local seen-jobs fallback (sign in from the dashboard to sync dedup across computers)');
     } catch (e) {
       log(`hiring.cafe sign-in probe failed (transient: ${SCRUB(e.message || e).split('\n')[0]}) — running this batch signed-out; auth cache left untouched`);
@@ -692,7 +699,8 @@ const CV_TITLES     = CV.titles     || [];
 const CV_CERTS      = CV.certs      || [];
 const CV_SKILLS     = CV.skills     || [];
 const CV_COMPLIANCE = CV.compliance || [];
-// v7.0: raw resume text (first 8KB, stored by resume-parser since v4.0) —
+// Raw resume text (up to 100K on newly parsed resumes; older profiles may still
+// carry the legacy 8K copy) —
 // feeds the Smart match rerank so the model reads the actual resume, not
 // just the keyword arrays. Empty string on older cv-parsed.json files.
 const CV_RAW        = typeof CV.raw === 'string' ? CV.raw : '';
@@ -734,7 +742,13 @@ const SALARY_PENALTY= SCORING.salaryPenalty     ?? -10;
 // until the user sets a floor in setup. `?? 90000` only applies if the field is
 // entirely absent (legacy configs); config.example ships 0.
 export const SALARY_FLOOR_K = Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
-const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 25;
+const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 70;
+const TARGET_TERMS = (CFG.queries || []).map(q => q.term).filter(Boolean);
+const DESCRIPTION_CHUNK = Math.max(50, Math.min(250, DELIVER_COUNT));
+const MAX_DESCRIPTION_EVALUATIONS = Math.max(
+  DELIVER_COUNT,
+  Math.min(5000, Number(SCORING.maxDescriptionEvaluations) || 3000),
+);
 const TF_CAP        = 3; // count term occurrences up to this many times
 
 // v4.0: optional AI rerank (off by default; configured from the dashboard
@@ -897,6 +911,18 @@ function scoreToPercent(s) {
   if (s >= 10) return Math.round(50 + (s - 10) * 2.5);
   if (s >= 5)  return Math.round(30 + (s - 5) * 4);
   return Math.max(0, Math.round(s * 7));
+}
+
+function requirementScore(job, text, fallbackPercent = 0) {
+  return matchRequirements({
+    jobTitle: job.title || '',
+    text,
+    cv: CV,
+    dictionary: CV_DICTIONARY,
+    targetTerms: TARGET_TERMS,
+    mutedTerms: [...MUTED],
+    fallbackPercent,
+  });
 }
 
 // v4.0: percentage bands for the FULL-DESCRIPTION rescore. JD text is ~4-5×
@@ -1186,6 +1212,12 @@ function escHtmlAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g
 // (2) any query has 3+ consecutive zero-card days → likely typo, suggest /jobs remove + /jobs add
 function buildSupplyBanner({ funnel, byQuery }) {
   const warnings = [];
+  if ((funnel.sent ?? 0) < (funnel.targetJobsPerBatch ?? 0) && (funnel.afterDedup ?? 0) >= 30) {
+    const unchecked = funnel.unevaluatedCandidates || 0;
+    warnings.push(unchecked > 0
+      ? `⚠️ <b>Found ${funnel.sent} strong matches after checking ${funnel.descriptionEvaluated} descriptions.</b> ${unchecked} lower-ranked candidates remain available for another run.`
+      : `⚠️ <b>Found ${funnel.sent} strong matches after checking all ${funnel.descriptionEvaluated} candidates.</b> AMM did not pad the batch with weaker jobs.`);
+  }
   if (funnel.afterDedup < 30) {
     warnings.push(`⚠️ <b>Limited supply today: ${funnel.afterDedup} fresh jobs</b> (typical: 50–80).`);
     const tips = [];
@@ -1227,8 +1259,9 @@ export function findDryQueries(stats, minRuns = 3) {
 function funnelLine(f) {
   if (!f) return '';
   const seen = Math.max(0, (f.keptAfterFilter ?? 0) - (f.afterDedup ?? 0));
-  const aboveFloor = Math.max(0, (f.afterDedup ?? 0) - (f.droppedBelowFloor ?? 0));
-  return `${f.raw ?? 0} raw → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% floor → ${f.sent ?? 0} delivered`;
+  const checked = f.descriptionEvaluated ?? f.scored ?? 0;
+  const aboveFloor = f.qualifyingMatches ?? Math.max(0, checked - (f.droppedBelowFloor ?? 0));
+  return `${f.raw ?? 0} raw → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${checked} descriptions checked → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% → ${f.sent ?? 0} delivered`;
 }
 function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
@@ -1371,6 +1404,10 @@ function writeBatchTsv(top, directUrls, funnel) {
       aiReason: r.aiReason || '',
       aiSub: r.aiSub || null,   // v7.0: {skills, seniority, role} rubric subscores
       missing: r.missing || [],
+      coveragePct: r.coveragePct ?? null,
+      rolePct: r.rolePct ?? null,
+      requirementCount: r.requirementCount ?? 0,
+      matchConfidence: r.matchConfidence ?? null,
       salaryK: r.salaryK || 0,
       src: r.source || 'hcafe', // v7.3: where the job came from (hcafe/dice/greenhouse/lever/ashby)
       directUrl: directUrls[i] || '',
@@ -1513,78 +1550,101 @@ if (IS_CLI) (async () => {
     const skippedSeen    = kept.filter(r => !applied.has(r.href) && blockedSeen.has(r.href)).length;
     log(`afterDedup=${fresh.length} (skipped ${kept.length - fresh.length}: ${skippedApplied} applied + ${skippedSeen} previously seen, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
-    // Pass 1 — score every fresh job on its CARD text (cheap shortlist).
+    // Pass 1 — cheap recall ranking on every card. The legacy raw score stays
+    // as a secondary signal, but the displayed percentage is normalized
+    // requirement coverage so long keyword-heavy cards cannot saturate it.
     for (const r of fresh) {
       const s = scoreJob(r);
+      const legacyPct = scoreToPercent(s.score);
+      const req = requirementScore(r, r.cardText || '', legacyPct);
       r.score = s.score;
-      r.matched = s.matched;
+      r.matched = req.matched.length ? req.matched : s.matched;
+      r.missing = req.missing;
       r.salaryK = s.salaryK;
-      r.matchPct = scoreToPercent(s.score);
+      r.matchPct = req.matchPct;
       r.cardPct = r.matchPct;
+      r.coveragePct = req.coveragePct;
+      r.rolePct = req.rolePct;
+      r.requirementCount = req.requirementCount;
+      r.matchConfidence = req.confidencePct;
+      r.__rankScore = 0.7 * req.matchPct + 0.3 * legacyPct;
     }
-    fresh.sort((a, b) => b.score - a.score);
-    // v1.0 E3: match floor — drop jobs below threshold BEFORE slicing,
-    // so the bot never ships 0% filler to fill out the batch.
-    const aboveFloor = fresh.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
-    const droppedBelowFloor = fresh.length - aboveFloor.length;
-    // v4.0: shortlist WIDER than the final batch — the full-description
-    // rescore below re-ranks, so borderline card-scores get a second chance.
+    fresh.sort((a, b) => b.__rankScore - a.__rankScore);
+    // A card is only a preview, so it may order candidates but never eliminate
+    // one. Unfamiliar titles and sparse cards still get a description-level
+    // chance within the per-run evaluation safety ceiling.
+    const candidatePool = fresh;
     const JD_RESCORE = SCORING.jdRescore !== false; // default on
-    // Over-fetch a fixed +30 headroom when JD-rescoring so borderline card
-    // scores can be re-ranked into the final top-N (at DELIVER_COUNT=100 this
-    // is 130, matching pre-v4.5 behavior). Bounds extra page resolves.
-    const shortlist = aboveFloor.slice(0, JD_RESCORE ? DELIVER_COUNT + 30 : DELIVER_COUNT);
-    log(`card-scored: top=${shortlist[0]?.matchPct ?? 0}% (floor=${MATCH_FLOOR_PCT}%, dropped ${droppedBelowFloor} below) — resolving ${shortlist.length} job pages…`);
-    const resolved = await resolveAll(shortlist);
-    log(`resolved=${resolved.filter(r => r?.directUrl).length}/${shortlist.length} apply URLs`);
-
-    // Pass 2 — v4.0: rescore each shortlisted job on the REAL posting text
-    // captured during URL resolution (title + description + requirements
-    // summary). Short page text (< 400 chars) = load failure → keep the card
-    // score. Final % blends card 40% / description 60%.
+    // Pass 2 — evaluate descriptions in chunks until the requested number of
+    // jobs truly clears the final floor. No fixed +30 cutoff: if the first
+    // group is weak, keep digging instead of padding the batch or stopping.
+    const evaluated = [];
+    let cursor = 0;
     let jdScored = 0;
-    for (let i = 0; i < shortlist.length; i++) {
-      const r = shortlist[i];
-      r.__direct = resolved[i]?.directUrl || '';
-      const jd = resolved[i]?.jdText || '';
-      r.__jd = jd; // v5.0: keep the JD on the row so pass-3 AI rerank survives the sort below
-      if (!JD_RESCORE || jd.length < 400) continue;
-      const s2 = scoreJob({ title: r.title, cardText: jd });
-      r.jdPct = jdScoreToPercent(s2.score);
-      if (s2.matched.length) r.matched = s2.matched;
-      if (s2.salaryK) r.salaryK = s2.salaryK;
-      r.matchPct = Math.round(0.4 * r.cardPct + 0.6 * r.jdPct);
-      r.missing = missingTerms((r.title || '') + '\n' + jd);
-      jdScored++;
+    let resolvedCount = 0;
+    while (cursor < candidatePool.length && cursor < MAX_DESCRIPTION_EVALUATIONS) {
+      const remainingBudget = MAX_DESCRIPTION_EVALUATIONS - cursor;
+      const firstSize = Math.min(DELIVER_COUNT + 50, MAX_DESCRIPTION_EVALUATIONS);
+      const take = Math.min(cursor === 0 ? firstSize : DESCRIPTION_CHUNK, remainingBudget);
+      const chunk = candidatePool.slice(cursor, cursor + take);
+      if (!chunk.length) break;
+      const resolved = await resolveAll(chunk);
+      for (let i = 0; i < chunk.length; i++) {
+        const r = chunk[i];
+        r.__direct = resolved[i]?.directUrl || '';
+        if (r.__direct) resolvedCount++;
+        const jd = resolved[i]?.jdText || '';
+        r.__jd = jd;
+        if (JD_RESCORE && jd.length >= 400) {
+          const s2 = scoreJob({ title: r.title, cardText: jd });
+          const req = requirementScore(r, jd, jdScoreToPercent(s2.score));
+          r.jdPct = req.matchPct;
+          r.matchPct = req.matchPct;
+          r.coveragePct = req.coveragePct;
+          r.rolePct = req.rolePct;
+          r.requirementCount = req.requirementCount;
+          r.matchConfidence = req.confidencePct;
+          r.matched = req.matched.length ? req.matched : s2.matched;
+          r.missing = req.missing;
+          if (s2.salaryK) r.salaryK = s2.salaryK;
+          jdScored++;
+        }
+        evaluated.push(r);
+      }
+      cursor += chunk.length;
+      const qualifying = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT).length;
+      log(`description pass: evaluated=${evaluated.length}, resolved=${resolvedCount}, qualifying=${qualifying}/${DELIVER_COUNT}`);
+      if (qualifying >= DELIVER_COUNT) break;
     }
-    if (JD_RESCORE) log(`description-rescored ${jdScored}/${shortlist.length}`);
+    const unevaluatedCandidates = Math.max(0, candidatePool.length - evaluated.length);
+    if (JD_RESCORE) log(`description-rescored ${jdScored}/${evaluated.length}; ${unevaluatedCandidates} candidates remain available for a later batch`);
 
     // Pass 3 — v4.0: optional AI rerank of the top candidates (opt-in via
     // scoring.ai in Settings). Fail-open: any error leaves keyword scores.
     if (AI_CFG.enabled && AI_CFG.apiKey) {
       try {
-        shortlist.sort(compareJobs);
+        evaluated.sort(compareJobs);
         // v5.0 fix: use r.__jd (stashed pre-sort) — resolved[] is aligned to the
         // PRE-sort order, so resolved[shortlist.indexOf(r)] fed each job another
         // job's description once the sort reordered the shortlist.
-        // v7.0: fuller JD text per candidate (900 → 2200 chars) — the model
+        // Fuller JD text per candidate — the model
         // can't judge requirements it never sees.
-        const candidates = shortlist.slice(0, 40).map((r, i) => ({
+        const candidates = evaluated.slice(0, 40).map((r, i) => ({
           n: i, title: r.title, company: r.company,
-          text: (r.__jd || r.cardText || '').slice(0, 2200)
+          text: (r.__jd || r.cardText || '').slice(0, 3500)
         }));
         // v7.0: include the real resume text when the parser stored it —
         // the single biggest accuracy lever. Keywords stay as a supplement.
         const cvSummary = {
           titles: CV_TITLES.slice(0, 8), certs: CV_CERTS.slice(0, 8),
           skills: CV_SKILLS.slice(0, 25), compliance: CV_COMPLIANCE.slice(0, 8),
-          ...(CV_RAW ? { resumeText: CV_RAW.slice(0, 6000) } : {})
+          ...(CV_RAW ? { resumeText: CV_RAW.slice(0, 16000) } : {})
         };
         const ratings = await aiRerank({ apiKey: AI_CFG.apiKey, model: AI_CFG.model, cvSummary, candidates });
         const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
         let applied2 = 0;
         for (const rt of ratings || []) {
-          const r = shortlist[rt.n];
+          const r = evaluated[rt.n];
           if (!r || typeof rt.fit !== 'number') continue;
           r.aiPct = clamp100(rt.fit);
           r.aiReason = String(rt.reason || '').slice(0, 180);
@@ -1604,8 +1664,11 @@ if (IS_CLI) (async () => {
       }
     }
 
-    shortlist.sort(compareJobs);
-    const top = shortlist.slice(0, DELIVER_COUNT);
+    evaluated.sort(compareJobs);
+    const aboveFloor = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
+    const top = aboveFloor.slice(0, DELIVER_COUNT);
+    const droppedBelowFloor = fresh.length - candidatePool.length
+      + evaluated.filter(r => r.matchPct < MATCH_FLOOR_PCT).length;
     const directUrls = top.map(r => r.__direct || null);
     log(`final: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%`);
     const funnel = {
@@ -1618,6 +1681,10 @@ if (IS_CLI) (async () => {
       scored: fresh.length,
       droppedBelowFloor,
       matchFloorPercent: MATCH_FLOOR_PCT,
+      descriptionEvaluated: evaluated.length,
+      descriptionScored: jdScored,
+      unevaluatedCandidates,
+      qualifyingMatches: aboveFloor.length,
       // v4.5: the user's chosen batch size — `sent` may be lower when supply
       // (fresh jobs above the floor) runs out before reaching it.
       targetJobsPerBatch: DELIVER_COUNT,
@@ -1625,8 +1692,8 @@ if (IS_CLI) (async () => {
       topPct: top[0]?.matchPct ?? 0,
       medianPct: top[Math.floor(top.length / 2)]?.matchPct ?? 0,
       bottomPct: top[top.length - 1]?.matchPct ?? 0,
-      // v4.3: which dedup mode produced this batch — true when the scrape ran
-      // signed-in and hiring.cafe hid Saved/Applied/Viewed server-side.
+      // True when Saved/Applied account filtering was available. Viewed jobs
+      // are deliberately never hidden; delivered-job dedup remains local.
       accountDedup: hcafeAuthed
     };
     writeBatchTsv(top, directUrls, funnel);
@@ -1707,13 +1774,9 @@ if (IS_CLI) (async () => {
 
     // Only persist seen-jobs *after* successful Telegram delivery —
     // so a failed run doesn't burn jobs we never actually surfaced.
-    // v4.3 caveat: when signed in, this invariant only protects the LOCAL
-    // store. hiring.cafe marks every job page the resolve pass visits as
-    // Viewed on the account (server-side, at visit time, no unmark API) —
-    // so a run that fails after resolveAll() still hides the ~130
-    // shortlisted jobs from future signed-in scrapes. Accepted tradeoff
-    // (same mechanism that makes delivered-job marking free); the local
-    // 60-day decay does not apply to the account's memory.
+    // v8.4: searchState no longer hides Viewed jobs. hiring.cafe may still
+    // record description visits, but those visits cannot remove undelivered
+    // candidates from tomorrow's scrape. Only `top` enters local memory.
     saveSeenStore(blockedSeen, top);
     log(`Persisted seen-jobs.json (${top.length} new, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 

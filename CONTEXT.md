@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 8.3.0
-**Active release branch:** `v8.3`
+**Version:** 8.4.0
+**Active release branch:** `v8.4`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-07-20
 
@@ -16,6 +16,11 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v8.4.0 replaces unbounded keyword accumulation with requirement-coverage and
+role-fit scoring, adaptively evaluates descriptions until the strong-match
+target is filled, defaults new installs to 200 matches, and stops hiding
+Viewed jobs so candidates inspected but not delivered stay available.
 
 v8.3.0 removes random Windows terminal flashes by routing scheduled background
 jobs through console-free one-shot modes in the native wrapper and migrating
@@ -93,8 +98,9 @@ The wrapper is a thin native shell. Business logic stays in JavaScript helpers t
 3. Searches every configured query and configured company source.
 4. Applies workplace, location, recency, company, title, clearance, form, and experience filters.
 5. Deduplicates against hiring.cafe account state when signed in and local seen-job state as a fallback.
-6. Scores cards against parsed resume terms.
-7. Fetches real job descriptions, validates role-family fit, and rescores.
+6. Uses cards for a broad recall ranking against the resume and target roles.
+7. Fetches and requirement-scores descriptions in chunks until the requested
+   number clear the final floor or the candidate supply is exhausted.
 8. Optionally invokes Claude reranking.
 9. Resolves direct application URLs.
 10. Writes `last-batch.json`, exports, scrape status, and batch history atomically. v7.2: also archives the full batch to `data/profiles/<profile>/batch-archive/` (`scripts/batch-archive.mjs`, 30-day retention, non-fatal) — the dashboard's "Previous scrapes" section lists these via `GET /api/archive`, serves one via `GET /api/archive/batch?id=`, and downloads one via `GET /api/export?format=…&archive=<id>`.

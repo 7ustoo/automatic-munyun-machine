@@ -43,6 +43,23 @@ function findHits(text, dictionary) {
   return hits;
 }
 
+function buildEvidence(text, categories) {
+  const out = {};
+  for (const [category, terms] of Object.entries(categories)) {
+    out[category] = [];
+    for (const term of terms) {
+      const matches = [...text.matchAll(termRegex(term, 'gi'))];
+      if (!matches.length) continue;
+      out[category].push({
+        term,
+        mentions: matches.length,
+        firstAt: matches[0].index ?? 0,
+      });
+    }
+  }
+  return out;
+}
+
 export async function readResumeText(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const buf = fs.readFileSync(filePath);
@@ -90,16 +107,23 @@ export async function parseResume(filePath) {
   const text = await readResumeText(filePath);
   const clusterScores = scoreClusters(text, dict.clusters);
   const primaryClusters = pickPrimaryClusters(clusterScores, 2);
-  return {
-    sourceFile: path.resolve(filePath),
-    parsedAt: new Date().toISOString(),
+  const categories = {
     titles: findHits(text, dict.titles),
     certs: findHits(text, dict.certs),
     skills: findHits(text, dict.skills),
     compliance: findHits(text, dict.compliance),
+  };
+  return {
+    sourceFile: path.resolve(filePath),
+    parsedAt: new Date().toISOString(),
+    ...categories,
     primaryClusters,
     clusterScores,
-    raw: text.slice(0, 8000) // first 8KB of raw text for debugging / future use
+    // Keep the complete practical resume locally. The old 8K cut routinely
+    // removed education and older roles, which made requirement checks and
+    // opt-in Smart Match judge an incomplete candidate.
+    raw: text.slice(0, 100000),
+    evidence: buildEvidence(text, categories),
   };
 }
 

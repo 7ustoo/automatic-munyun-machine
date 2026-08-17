@@ -1,6 +1,7 @@
 // v4.3: pins buildSearchState (daily-batch.mjs) — the searchState contract
 // for hiring.cafe scrape URLs. The high-stakes rule: hideJobTypes (the
-// account-side Saved/Applied/Viewed filter, probed working on 2026-07-09)
+// account-side Saved/Applied filter. Viewed is intentionally excluded so a
+// description inspected for ranking cannot burn an undelivered job.
 // is sent ONLY when the run verified a signed-in session. Sending it
 // unauth is a silent no-op server-side but would misreport the dedup mode;
 // omitting it authed re-delivers already-seen jobs on every machine.
@@ -15,9 +16,9 @@ test('default: query + Remote only — no account filter, no form-ease', () => {
   });
 });
 
-test('accountDedup adds exactly Saved/Applied/Viewed', () => {
+test('accountDedup adds Saved/Applied but never Viewed', () => {
   const s = buildSearchState('grc analyst', { accountDedup: true });
-  assert.deepEqual(s.hideJobTypes, ['Saved', 'Applied', 'Viewed']);
+  assert.deepEqual(s.hideJobTypes, ['Saved', 'Applied']);
   assert.equal(s.searchQuery, 'grc analyst');
   assert.deepEqual(s.workplaceTypes, ['Remote']);
   assert.ok(!('applicationFormEase' in s));
@@ -39,7 +40,7 @@ test('both filters combine', () => {
   assert.deepEqual(s, {
     searchQuery: 'it auditor',
     workplaceTypes: ['Remote'],
-    hideJobTypes: ['Saved', 'Applied', 'Viewed'],
+    hideJobTypes: ['Saved', 'Applied'],
     applicationFormEase: ['TimeConsuming'],
   });
 });

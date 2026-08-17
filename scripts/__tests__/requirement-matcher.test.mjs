@@ -1,0 +1,71 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {
+  buildRequirementCatalog,
+  extractRequirements,
+  matchRequirements,
+  roleFitPercent,
+} from '../requirement-matcher.mjs';
+
+const dictionary = {
+  titles: ['Cloud Security Engineer', 'Security Engineer', 'Account Executive'],
+  certs: ['CISSP', 'Security+'],
+  skills: ['AWS', 'Azure', 'Terraform', 'Kubernetes', 'Python'],
+  compliance: ['SOC 2'],
+};
+const cv = {
+  titles: ['Cloud Security Engineer'],
+  certs: ['Security+'],
+  skills: ['AWS', 'Terraform', 'Python'],
+  compliance: ['SOC 2'],
+};
+
+test('catalog deduplicates terms and keeps weighted categories', () => {
+  const catalog = buildRequirementCatalog({ ...dictionary, skills: ['AWS', 'aws'] });
+  assert.equal(catalog.filter(x => x.key === 'aws').length, 1);
+  assert.equal(catalog.find(x => x.key === 'cissp').category, 'certs');
+});
+
+test('nested aliases in the same phrase count as one requirement', () => {
+  const reqs = extractRequirements('Cloud Security Engineer wanted', dictionary);
+  assert.deepEqual(reqs.filter(r => r.category === 'titles').map(r => r.term), ['Cloud Security Engineer']);
+});
+
+test('role fit recognizes target titles but rejects unrelated sales roles', () => {
+  assert.ok(roleFitPercent('Senior Cloud Security Engineer', cv.titles) >= 90);
+  assert.equal(roleFitPercent('Account Executive', cv.titles), 0);
+});
+
+test('requirement coverage does not reward repeated buzzwords', () => {
+  const once = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: 'Required: AWS, Terraform, Azure, Kubernetes and CISSP.',
+    cv, dictionary,
+  });
+  const repeated = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: 'Required: AWS AWS AWS, Terraform Terraform, Azure, Kubernetes and CISSP.',
+    cv, dictionary,
+  });
+  assert.equal(repeated.matchPct, once.matchPct);
+  assert.equal(repeated.coveragePct, once.coveragePct);
+});
+
+test('missing required certification prevents a strong score', () => {
+  const result = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: 'CISSP is required. AWS and Terraform experience required.',
+    cv, dictionary,
+  });
+  assert.ok(result.matchPct < 70);
+  assert.ok(result.missing.includes('CISSP'));
+});
+
+test('unrelated title cannot become strong from body keyword overlap', () => {
+  const result = matchRequirements({
+    jobTitle: 'Account Executive',
+    text: 'AWS Terraform Python SOC 2 AWS Terraform Python',
+    cv, dictionary,
+  });
+  assert.ok(result.matchPct < 50);
+});
