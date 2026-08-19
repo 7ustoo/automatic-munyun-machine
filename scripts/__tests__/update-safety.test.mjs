@@ -43,6 +43,15 @@ test('self-update snapshots config before handing off to the installer', () => {
   assert.ok(src.indexOf("snapshotConfig('pre-update')") < src.indexOf('amm-update-'), 'snapshot precedes the updater script');
 });
 
+test('silent Windows updates force-close only applications locking AMM files', () => {
+  const updater = fs.readFileSync(path.join(ROOT, 'scripts', 'self-update.mjs'), 'utf8');
+  const installer = fs.readFileSync(path.join(ROOT, 'installer', 'amm.iss'), 'utf8');
+  assert.ok(updater.includes('/FORCECLOSEAPPLICATIONS'), 'updater must override legacy installer close behavior');
+  assert.match(installer, /^CloseApplications=force$/m, 'new installers must force-close AMM file holders');
+  assert.match(installer, /^RestartApplications=no$/m, 'installer must leave relaunch ownership to the updater');
+  assert.ok(updater.includes('if not "%AMM_INSTALL_EXIT%"=="0" goto update_failed'), 'failed installs must not use the success relaunch path');
+});
+
 test('pickLatestSnapshot picks the newest valid config snapshot', () => {
   assert.equal(pickLatestSnapshot([]), null);
   assert.equal(pickLatestSnapshot(null), null);
