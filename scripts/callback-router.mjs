@@ -160,6 +160,7 @@ export function writeCallbackTable(items) {
       url: i.viewjobUrl || i.url,
       title: i.title || '',
       company: i.company || '',
+      location: i.location || '',
       directUrl: i.directUrl || '',
       matchPct: i.matchPct ?? 0,
       score: i.score ?? 0,

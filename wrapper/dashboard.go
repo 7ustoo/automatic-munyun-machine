@@ -78,7 +78,7 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", d.handleIndex)
+	mux.HandleFunc("/", d.guardGet(d.handleIndex))
 	mux.HandleFunc("/favicon.png", d.handleFavicon) // v2.2: AMM icon in the app window
 	mux.HandleFunc("/favicon.ico", d.handleFavicon)
 	// v5.0: read-only GETs are wrapped in guardGet (loopback-Host check) so a
@@ -138,18 +138,18 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/profile/switch", d.guardPost(d.handleProfileSwitch))
 	// v2.7: dashboard-native first-run setup. Geocode + hcafe-login/status are
 	// read-only; hcafe-login/start + init + finalize mutate disk (POST + CSRF).
-	mux.HandleFunc("/api/setup/geocode", d.handleSetupGeocode)
-	mux.HandleFunc("/api/setup/hcafe-login/status", d.handleSetupHcafeLoginStatus)
+	mux.HandleFunc("/api/setup/geocode", d.guardGet(d.handleSetupGeocode))
+	mux.HandleFunc("/api/setup/hcafe-login/status", d.guardGet(d.handleSetupHcafeLoginStatus))
 	mux.HandleFunc("/api/setup/hcafe-login/start", d.guardPost(d.handleSetupHcafeLoginStart))
 	// v4.1: persistent hiring.cafe sign-in status on the main dashboard.
 	// GET reads the cached status (instant, no browser); POST runs the live
 	// Playwright probe and refreshes the cache.
-	mux.HandleFunc("/api/hcafe/auth", d.handleHcafeAuth)
+	mux.HandleFunc("/api/hcafe/auth", d.guardGet(d.handleHcafeAuth))
 	mux.HandleFunc("/api/hcafe/auth/refresh", d.guardPost(d.handleHcafeAuthRefresh))
 	// v7.3: Dice sign-in — same flow as hcafe (visible window + probe + cache).
-	mux.HandleFunc("/api/setup/dice-login/status", d.handleDiceLoginStatus)
+	mux.HandleFunc("/api/setup/dice-login/status", d.guardGet(d.handleDiceLoginStatus))
 	mux.HandleFunc("/api/setup/dice-login/start", d.guardPost(d.handleDiceLoginStart))
-	mux.HandleFunc("/api/dice/auth", d.handleDiceAuth)
+	mux.HandleFunc("/api/dice/auth", d.guardGet(d.handleDiceAuth))
 	mux.HandleFunc("/api/dice/auth/refresh", d.guardPost(d.handleDiceAuthRefresh))
 	mux.HandleFunc("/api/setup/init", d.guardPost(d.handleSetupInit))
 	mux.HandleFunc("/api/setup/finalize", d.guardPost(d.handleSetupFinalize))
@@ -157,6 +157,10 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	d.srv = &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      2 * time.Minute,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	go func() {
@@ -497,28 +501,31 @@ type lastBatchInfo struct {
 }
 
 type batchJob struct {
-	Idx              int             `json:"idx"`
-	Title            string          `json:"title"`
-	Company          string          `json:"company"`
-	Yoe              *int            `json:"yoe"`
-	MatchPct         int             `json:"matchPct"`
-	Score            int             `json:"score"`
-	Query            string          `json:"q"`
-	Matched          []string        `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
-	DirectURL        string          `json:"directUrl"`
-	ViewURL          string          `json:"viewjobUrl"`
-	SalaryK          int             `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
-	Src              string          `json:"src"`     // v7.3: job source (hcafe/dice/greenhouse/lever/ashby)
-	CardPct          *int            `json:"cardPct,omitempty"`
-	JDPct            *int            `json:"jdPct,omitempty"`
-	AIPct            *int            `json:"aiPct,omitempty"`
-	AIReason         string          `json:"aiReason,omitempty"`
-	AISub            json.RawMessage `json:"aiSub,omitempty"`
-	Missing          []string        `json:"missing"`
-	CoveragePct      *int            `json:"coveragePct,omitempty"`
-	RolePct          *int            `json:"rolePct,omitempty"`
-	RequirementCount int             `json:"requirementCount"`
-	MatchConfidence  *int            `json:"matchConfidence,omitempty"`
+	Idx                int             `json:"idx"`
+	Title              string          `json:"title"`
+	Company            string          `json:"company"`
+	Yoe                *int            `json:"yoe"`
+	MatchPct           int             `json:"matchPct"`
+	Score              int             `json:"score"`
+	Query              string          `json:"q"`
+	Matched            []string        `json:"matched"` // v2.1: CV keywords that matched — powers "Why"
+	DirectURL          string          `json:"directUrl"`
+	ViewURL            string          `json:"viewjobUrl"`
+	SalaryK            int             `json:"salaryK"` // v4.6: parsed salary in $K (0 = unknown); shown on the dashboard
+	Src                string          `json:"src"`     // v7.3: job source (hcafe/dice/greenhouse/lever/ashby)
+	CardPct            *int            `json:"cardPct,omitempty"`
+	JDPct              *int            `json:"jdPct,omitempty"`
+	AIPct              *int            `json:"aiPct,omitempty"`
+	AIReason           string          `json:"aiReason,omitempty"`
+	AISub              json.RawMessage `json:"aiSub,omitempty"`
+	Missing            []string        `json:"missing"`
+	CoveragePct        *int            `json:"coveragePct,omitempty"`
+	RolePct            *int            `json:"rolePct,omitempty"`
+	RequirementCount   int             `json:"requirementCount"`
+	MatchConfidence    *int            `json:"matchConfidence,omitempty"`
+	YearsRequired      int             `json:"yearsRequired,omitempty"`
+	CareerYears        int             `json:"careerYears,omitempty"`
+	DescriptionQuality string          `json:"descriptionQuality,omitempty"`
 }
 
 // dashboardJobLimit caps how many jobs from last-batch.json appear on the
@@ -667,28 +674,31 @@ func parseBatchJobs(raw []json.RawMessage, limit int) []batchJob {
 	jobs := make([]batchJob, 0, n)
 	for i := 0; i < n; i++ {
 		var j struct {
-			Idx              int             `json:"idx"`
-			Title            string          `json:"title"`
-			Company          string          `json:"company"`
-			Yoe              *int            `json:"yoe"`
-			MatchPct         int             `json:"matchPct"`
-			Score            float64         `json:"score"`
-			Query            string          `json:"q"`
-			Matched          []string        `json:"matched"`
-			DirectURL        string          `json:"directUrl"`
-			ViewURL          string          `json:"viewjobUrl"`
-			SalaryK          int             `json:"salaryK"`
-			Src              string          `json:"src"`
-			CardPct          *int            `json:"cardPct"`
-			JDPct            *int            `json:"jdPct"`
-			AIPct            *int            `json:"aiPct"`
-			AIReason         string          `json:"aiReason"`
-			AISub            json.RawMessage `json:"aiSub"`
-			Missing          []string        `json:"missing"`
-			CoveragePct      *int            `json:"coveragePct"`
-			RolePct          *int            `json:"rolePct"`
-			RequirementCount int             `json:"requirementCount"`
-			MatchConfidence  *int            `json:"matchConfidence"`
+			Idx                int             `json:"idx"`
+			Title              string          `json:"title"`
+			Company            string          `json:"company"`
+			Yoe                *int            `json:"yoe"`
+			MatchPct           int             `json:"matchPct"`
+			Score              float64         `json:"score"`
+			Query              string          `json:"q"`
+			Matched            []string        `json:"matched"`
+			DirectURL          string          `json:"directUrl"`
+			ViewURL            string          `json:"viewjobUrl"`
+			SalaryK            int             `json:"salaryK"`
+			Src                string          `json:"src"`
+			CardPct            *int            `json:"cardPct"`
+			JDPct              *int            `json:"jdPct"`
+			AIPct              *int            `json:"aiPct"`
+			AIReason           string          `json:"aiReason"`
+			AISub              json.RawMessage `json:"aiSub"`
+			Missing            []string        `json:"missing"`
+			CoveragePct        *int            `json:"coveragePct"`
+			RolePct            *int            `json:"rolePct"`
+			RequirementCount   int             `json:"requirementCount"`
+			MatchConfidence    *int            `json:"matchConfidence"`
+			YearsRequired      int             `json:"yearsRequired"`
+			CareerYears        int             `json:"careerYears"`
+			DescriptionQuality string          `json:"descriptionQuality"`
 		}
 		if err := json.Unmarshal(raw[i], &j); err != nil {
 			continue

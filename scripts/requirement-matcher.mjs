@@ -17,6 +17,7 @@ const TITLE_STOP = new Set([
 ]);
 const REQUIRED_RX = /\b(required|must|minimum|need(?:ed)?|qualification|you have|at least)\b/i;
 const PREFERRED_RX = /\b(preferred|nice to have|bonus|ideally|desired|plus)\b/i;
+const STRICT_YEARS_RX = /\b(?:(?:at least|minimum(?: of)?|must have|requires?)\s+(\d{1,2})\+?\s+years?|(?:(\d{1,2})\+?\s+years?(?:\s+of\s+experience)?\s+(?:is\s+)?(?:required|minimum)))\b/i;
 
 function cleanTerm(term) {
   return String(term || '').trim();
@@ -67,9 +68,28 @@ export function buildRequirementCatalog(dictionary = {}) {
 }
 
 function requirementContext(text, index, length) {
-  const around = text.slice(Math.max(0, index - 110), Math.min(text.length, index + length + 110));
-  if (REQUIRED_RX.test(around)) return 'required';
-  if (PREFERRED_RX.test(around)) return 'preferred';
+  const left = Math.max(
+    text.lastIndexOf('.', index - 1), text.lastIndexOf(';', index - 1),
+    text.lastIndexOf('\n', index - 1), text.lastIndexOf('•', index - 1),
+    index - 160,
+  );
+  const endings = ['.', ';', '\n', '•']
+    .map(mark => text.indexOf(mark, index + length))
+    .filter(pos => pos >= 0);
+  const right = Math.min(text.length, endings.length ? Math.min(...endings) : index + length + 160);
+  const clause = text.slice(Math.max(0, left + 1), right);
+  const localTerm = index - Math.max(0, left + 1);
+  const nearest = (rx) => {
+    const flags = rx.flags.includes('g') ? rx.flags : rx.flags + 'g';
+    const probe = new RegExp(rx.source, flags);
+    let best = Infinity;
+    for (const m of clause.matchAll(probe)) best = Math.min(best, Math.abs((m.index ?? 0) - localTerm));
+    return best;
+  };
+  const requiredDistance = nearest(REQUIRED_RX);
+  const preferredDistance = nearest(PREFERRED_RX);
+  if (requiredDistance < preferredDistance) return 'required';
+  if (preferredDistance < Infinity) return 'preferred';
   return 'stated';
 }
 
@@ -113,6 +133,9 @@ export function matchRequirements({
   // synonyms (for example IAM Engineer vs Identity Engineer).
   const concreteRequirements = requirements.filter(r => r.category !== 'titles');
   const rolePct = roleFitPercent(jobTitle, cv.titles || [], targetTerms);
+  const yearsMatch = STRICT_YEARS_RX.exec(`${jobTitle}\n${text}`);
+  const yearsRequired = Number(yearsMatch?.[1] || yearsMatch?.[2] || 0);
+  const careerYears = Number(cv.careerYears || 0);
   let totalWeight = 0;
   let matchedWeight = 0;
   const matched = [];
@@ -120,7 +143,14 @@ export function matchRequirements({
   for (const req of concreteRequirements) {
     totalWeight += req.weighted;
     if (resumeTerms.has(req.key)) {
-      matchedWeight += req.weighted;
+      const ev = cv.experienceEvidence?.[req.key];
+      // A demonstrated skill is stronger evidence than a bare skills-list
+      // mention. Older parsed resumes have no evidence map and remain fully
+      // compatible instead of being penalized.
+      const evidenceFactor = ev && ['skills', 'compliance'].includes(req.category)
+        ? (ev.demonstratedMentions > 0 ? 1 : 0.8)
+        : 1;
+      matchedWeight += req.weighted * evidenceFactor;
       matched.push(req.term);
     } else {
       missing.push(req);
@@ -145,6 +175,9 @@ export function matchRequirements({
   if (missing.some(r => r.category === 'certs' && r.context === 'required')) {
     matchPct = Math.min(matchPct, 69);
   }
+  if (yearsRequired && careerYears && careerYears < yearsRequired) {
+    matchPct = Math.min(matchPct, 69);
+  }
 
   return {
     matchPct: Math.max(0, Math.min(99, matchPct)),
@@ -152,6 +185,8 @@ export function matchRequirements({
     rolePct,
     confidencePct,
     requirementCount: concreteRequirements.length,
+    yearsRequired,
+    careerYears,
     matched: matched.slice(0, 20),
     missing: missing
       .sort((a, b) => b.weighted - a.weighted)

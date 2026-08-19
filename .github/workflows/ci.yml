@@ -44,7 +44,7 @@ jobs:
       matrix:
         os: [windows-latest, macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 8
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
@@ -84,8 +84,18 @@ jobs:
       - name: Install GTK headers (Linux only)
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
+          if dpkg-query -W -f='${Status}\n' libgtk-3-dev libayatana-appindicator3-dev 2>/dev/null | grep -c 'install ok installed' | grep -q '^2$'; then
+            echo "GTK headers are already installed on the runner."
+            exit 0
+          fi
+          sudo tee /etc/apt/apt.conf.d/99amm-ci-network >/dev/null <<'EOF'
+          Acquire::ForceIPv4 "true";
+          Acquire::Retries "2";
+          Acquire::http::Timeout "20";
+          Acquire::https::Timeout "20";
+          EOF
+          sudo timeout --signal=KILL 180s apt-get update -qq
+          sudo timeout --signal=KILL 300s apt-get install -y gcc libgtk-3-dev libayatana-appindicator3-dev
 
       - name: Run Go wrapper tests
         working-directory: wrapper
@@ -122,13 +132,25 @@ jobs:
     name: Dashboard E2E (Chromium)
     needs: test
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5
         with: { node-version: 20, cache: npm }
       - run: npm ci
-      - name: Install Chromium and system dependencies
-        run: npx playwright install --with-deps chromium
+      - name: Bound Ubuntu package-network retries
+        run: |
+          sudo tee /etc/apt/apt.conf.d/99amm-ci-network >/dev/null <<'EOF'
+          Acquire::ForceIPv4 "true";
+          Acquire::Retries "3";
+          Acquire::http::Timeout "30";
+          Acquire::https::Timeout "30";
+          EOF
+      - name: Install Chromium system dependencies
+        run: |
+          timeout --kill-after=10s 300s npx playwright install-deps chromium || \
+            echo "Dependency refresh timed out; validating the runner's preinstalled libraries instead."
+      - name: Install Chromium
+        run: npx playwright install chromium
       - name: Exercise dashboard and mocked Gmail OAuth flow
         run: npm run test:e2e

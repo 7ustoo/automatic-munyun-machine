@@ -55,6 +55,8 @@ import {
 import { beginOAuth, completeOAuth } from './gmail-oauth.mjs';
 import { geocode } from './geocode.mjs';
 import { registerSchedulerForPlatform } from './scheduler-register.mjs';
+import { readLocalSecrets, scrubLegacyAiKeysFromSnapshots, setLocalSecret } from './secret-store.mjs';
+import { recordAppliedJob } from './application-ledger.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -66,6 +68,16 @@ function out(obj) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 // explicit so the UI never has to understand the full profile structure.
 function settingsGet() {
   const cfg = cfgRW.read();
+  const secrets = readLocalSecrets();
+  // One-time migration: old releases stored the Smart Match key inside the
+  // profile config, which also copied it into config snapshots.
+  const legacyAiKey = String(cfg.scoring?.ai?.apiKey || '').trim();
+  if (legacyAiKey) {
+    if (!secrets.AMM_AI_KEY) setLocalSecret('AMM_AI_KEY', legacyAiKey);
+    cfgRW.set('scoring.ai.apiKey', '');
+    scrubLegacyAiKeysFromSnapshots();
+    secrets.AMM_AI_KEY = secrets.AMM_AI_KEY || legacyAiKey;
+  }
   const delivery = emailDeliveryStatus(readEmailEnv());
   out({
     ok: true,
@@ -98,7 +110,7 @@ function settingsGet() {
       // v4.0: Smart match (AI) — the key itself is NEVER returned, only
       // whether one is stored. Plus muted terms + a thin-CV signal.
       aiEnabled: !!cfg.scoring?.ai?.enabled,
-      aiHasKey: !!(cfg.scoring?.ai?.apiKey),
+      aiHasKey: !!secrets.AMM_AI_KEY,
       aiModel: cfg.scoring?.ai?.model || 'claude-opus-4-8',
       mutedTerms: cfg.scoring?.mutedTerms || [],
       // v4.3: email-to-VA. The app password is NEVER returned — only whether
@@ -162,6 +174,9 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'scoring.ai.apiKey') {
     value = String(value || '').trim();
     if (value && !/^[\x21-\x7e]{20,200}$/.test(value)) return out({ ok: false, error: 'that does not look like an API key' });
+    setLocalSecret('AMM_AI_KEY', value);
+    cfgRW.set('scoring.ai.apiKey', '');
+    return out({ ok: true, path: dotPath, value: value ? '<stored securely>' : '' });
   }
   if (dotPath === 'scoring.ai.model') {
     value = String(value || '').trim();
@@ -323,12 +338,11 @@ async function jobAction(action, idxRaw) {
   try { job = loadBatchJob(idx); } catch { return out({ ok: false, error: 'No batch on disk yet — run a scrape first.' }); }
   if (!job) return out({ ok: false, error: `Job #${idx} not in the latest batch.` });
   const url = job.viewjobUrl || ('https://hiring.cafe/viewjob/' + job.id);
-  // v2.4: never hand an arbitrary string from last-batch.json to a child
-  // process — the batch is built from scraped page content. viewjob URLs
-  // have exactly one shape; anything else is refused.
-  if (!/^https:\/\/hiring\.cafe\/viewjob\/[A-Za-z0-9_-]+$/.test(url)) {
-    return out({ ok: false, error: 'Job has a malformed hiring.cafe URL — re-run a scrape.' });
-  }
+  const hcafeUrl = /^https:\/\/hiring\.cafe\/(?:viewjob|job)\/[A-Za-z0-9_-]+$/.test(url);
+  let safeUrl = false;
+  try { safeUrl = new URL(url).protocol === 'https:'; } catch {}
+  if (!safeUrl) return out({ ok: false, error: 'Job has a malformed URL — re-run a scrape.' });
+  if (action === 'save' && !hcafeUrl) return out({ ok: false, error: 'Saving on the source site is available for hiring.cafe jobs only.' });
 
   // "applied" always records locally so the job is deduped from future
   // batches, even if hiring.cafe isn't signed in.
@@ -341,8 +355,11 @@ async function jobAction(action, idxRaw) {
       // file for dedup; Telegram /applied appends to it too) — same
       // proper-lockfile discipline as config.json.
       await withFileLock(apps, () => { fs.appendFileSync(apps, line); });
+      await recordAppliedJob(profilePaths().appliedJobs, job, url);
     } catch (e) { /* local log best-effort */ }
   }
+
+  if (!hcafeUrl) return out({ ok: true, local: true, hcafe: false, output: 'Recorded locally.' });
 
   const r = await spawnJobAction(action, url);
   // hiring.cafe action succeeds only when signed in; not fatal for "applied".

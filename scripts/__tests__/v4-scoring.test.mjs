@@ -6,7 +6,7 @@ import {
   termAllowedInText, AMBIGUOUS_TERM_CONTEXT, OFF_FAMILY_RX, FAMILY_PENALTY,
   jdScoreToPercent, salaryRank, compareJobs, SALARY_FLOOR_K,
 } from '../daily-batch.mjs';
-import { buildPrompt, DEFAULT_AI_MODEL, RATINGS_SCHEMA } from '../ai-rerank.mjs';
+import { buildPrompt, candidateBatches, DEFAULT_AI_MODEL, RATINGS_SCHEMA } from '../ai-rerank.mjs';
 
 test('ambiguous guard: Palo Alto the city does NOT count', () => {
   assert.equal(termAllowedInText('Palo Alto', 'Marketing Manager — Palo Alto, CA · $120k'), false);
@@ -93,4 +93,11 @@ test('ratings schema requires rubric subscores', () => {
     assert.ok(req.includes(k), `schema requires ${k}`);
   }
   assert.equal(RATINGS_SCHEMA.properties.ratings.items.additionalProperties, false);
+});
+
+test('Smart Match batches all candidates instead of stopping at 40', () => {
+  const jobs = Array.from({ length: 205 }, (_, n) => ({ n }));
+  const batches = candidateBatches(jobs, 40);
+  assert.deepEqual(batches.map(b => b.length), [40, 40, 40, 40, 40, 5]);
+  assert.deepEqual(batches.flat(), jobs);
 });

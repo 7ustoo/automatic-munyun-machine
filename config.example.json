@@ -65,12 +65,11 @@
     "accountDedup": true,
     "_accountDedupComment": "When signed in, hiring.cafe hides Saved/Applied jobs. Viewed is never hidden because AMM may inspect a description without delivering it. Delivered-only memory remains local and profile-scoped.",
     "_percentBands": "score 30+ \u2192 90-100%; 20-29 \u2192 75-89%; 10-19 \u2192 50-74%; 5-9 \u2192 30-49%; 0-4 \u2192 0-29%",
-    "_aiComment": "v4.0: jdRescore = rescore shortlisted jobs on the full posting text (default true). mutedTerms = terms the scorer must ignore (set from the dashboard Why panel). ai = optional Smart match rerank: paste your own Anthropic API key in the dashboard Settings; off by default; key stays local in this file.",
+    "_aiComment": "v9.0: jdRescore evaluates full posting text. Smart Match runs in 40-job API request batches across every evaluated candidate until the target is filled; the request size is not a total-job ceiling. The API key is stored in the local .env secret file, outside config backups.",
     "jdRescore": true,
     "mutedTerms": [],
     "ai": {
       "enabled": false,
-      "apiKey": "",
       "model": "claude-opus-4-8"
     }
   },

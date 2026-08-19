@@ -69,3 +69,41 @@ test('unrelated title cannot become strong from body keyword overlap', () => {
   });
   assert.ok(result.matchPct < 50);
 });
+
+test('required and preferred labels stay scoped to their own clauses', () => {
+  const reqs = extractRequirements('CISSP preferred. AWS is required.', dictionary);
+  assert.equal(reqs.find(r => r.term === 'CISSP').context, 'preferred');
+  assert.equal(reqs.find(r => r.term === 'AWS').context, 'required');
+});
+
+test('strict years requirement caps a resume with less career evidence', () => {
+  const result = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: 'Must have 10 years of experience. AWS and Terraform are required.',
+    cv: { ...cv, careerYears: 6 }, dictionary,
+  });
+  assert.equal(result.yearsRequired, 10);
+  assert.ok(result.matchPct < 70);
+});
+
+test('trailing required wording also identifies a strict years gap', () => {
+  const result = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: '10+ years of experience required. AWS and Terraform.',
+    cv: { ...cv, careerYears: 6 }, dictionary,
+  });
+  assert.equal(result.yearsRequired, 10);
+  assert.ok(result.matchPct < 70);
+});
+
+test('demonstrated skill evidence outranks a bare skills-list mention', () => {
+  const listed = matchRequirements({
+    jobTitle: 'Cloud Security Engineer', text: 'Required: AWS and Terraform.',
+    cv: { ...cv, experienceEvidence: { aws: { demonstratedMentions: 0 }, terraform: { demonstratedMentions: 0 } } }, dictionary,
+  });
+  const demonstrated = matchRequirements({
+    jobTitle: 'Cloud Security Engineer', text: 'Required: AWS and Terraform.',
+    cv: { ...cv, experienceEvidence: { aws: { demonstratedMentions: 2 }, terraform: { demonstratedMentions: 1 } } }, dictionary,
+  });
+  assert.ok(demonstrated.matchPct > listed.matchPct);
+});

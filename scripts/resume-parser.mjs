@@ -60,6 +60,96 @@ function buildEvidence(text, categories) {
   return out;
 }
 
+const ACTION_RX = /\b(architected|automated|built|configured|created|deployed|designed|developed|directed|implemented|improved|integrated|led|managed|migrated|operated|owned|reduced|secured|supported|administered)\b/i;
+
+function contextAround(text, index, length, radius = 140) {
+  return text.slice(Math.max(0, index - radius), Math.min(text.length, index + length + radius))
+    .replace(/\s+/g, ' ').trim();
+}
+
+export function buildExperienceEvidence(text, categories) {
+  const out = {};
+  for (const terms of Object.values(categories)) {
+    for (const term of terms) {
+      const matches = [...text.matchAll(termRegex(term, 'gi'))];
+      if (!matches.length) continue;
+      const contexts = matches.slice(0, 4).map(m => contextAround(text, m.index ?? 0, m[0].length));
+      let statedYears = 0;
+      for (const context of contexts) {
+        for (const m of context.matchAll(/\b(\d{1,2})\+?\s+years?\b/gi)) {
+          statedYears = Math.max(statedYears, Number(m[1]) || 0);
+        }
+      }
+      out[term.toLowerCase()] = {
+        term,
+        mentions: matches.length,
+        demonstratedMentions: contexts.filter(c => ACTION_RX.test(c)).length,
+        statedYears,
+        contexts,
+      };
+    }
+  }
+  return out;
+}
+
+export function extractEmployment(text, nowYear = new Date().getFullYear(), knownTitles = []) {
+  const lines = String(text || '').split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+  const roles = [];
+  const dateRx = /\b((?:19|20)\d{2})\b\s*(?:-|–|—|to)\s*(present|current|now|(?:19|20)\d{2})\b/i;
+  for (let i = 0; i < lines.length; i++) {
+    const m = dateRx.exec(lines[i]);
+    if (!m) continue;
+    const startYear = Number(m[1]);
+    const endYear = /present|current|now/i.test(m[2]) ? nowYear : Number(m[2]);
+    if (!startYear || !endYear || endYear < startYear || endYear - startYear > 50) continue;
+    const inline = lines[i].replace(m[0], '').replace(/^[\s|,·-]+|[\s|,·-]+$/g, '');
+    const nearby = [inline, lines[i - 1] || '', lines[i - 2] || ''].join(' ').toLowerCase();
+    if (knownTitles.length && !knownTitles.some(title => nearby.includes(String(title).toLowerCase()))) continue;
+    roles.push({
+      title: inline || lines[i - 1] || '',
+      organization: inline ? (lines[i - 1] || '') : (lines[i - 2] || ''),
+      startYear,
+      endYear,
+      current: /present|current|now/i.test(m[2]),
+      years: Math.max(0, endYear - startYear),
+    });
+  }
+  return roles.slice(0, 20);
+}
+
+export function calculateCareerYears(employment = []) {
+  const ranges = employment
+    .map(r => [Number(r.startYear), Number(r.endYear)])
+    .filter(([start, end]) => start > 1900 && end >= start)
+    .sort((a, b) => a[0] - b[0]);
+  if (!ranges.length) return 0;
+  let total = 0;
+  let [start, end] = ranges[0];
+  for (const [nextStart, nextEnd] of ranges.slice(1)) {
+    if (nextStart <= end) end = Math.max(end, nextEnd);
+    else { total += end - start; start = nextStart; end = nextEnd; }
+  }
+  return Math.max(0, total + end - start);
+}
+
+export function enrichParsedResume(parsed = {}) {
+  const raw = String(parsed.raw || '');
+  if (!raw) return parsed;
+  const categories = {
+    titles: parsed.titles || [], certs: parsed.certs || [],
+    skills: parsed.skills || [], compliance: parsed.compliance || [],
+  };
+  const employment = Array.isArray(parsed.employment)
+    ? parsed.employment
+    : extractEmployment(raw, new Date().getFullYear(), categories.titles);
+  return {
+    ...parsed,
+    employment,
+    careerYears: Number.isFinite(parsed.careerYears) ? parsed.careerYears : calculateCareerYears(employment),
+    experienceEvidence: parsed.experienceEvidence || buildExperienceEvidence(raw, categories),
+  };
+}
+
 export async function readResumeText(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const buf = fs.readFileSync(filePath);
@@ -113,7 +203,9 @@ export async function parseResume(filePath) {
     skills: findHits(text, dict.skills),
     compliance: findHits(text, dict.compliance),
   };
-  return {
+  const employment = extractEmployment(text, new Date().getFullYear(), categories.titles);
+  const careerYears = calculateCareerYears(employment);
+  return enrichParsedResume({
     sourceFile: path.resolve(filePath),
     parsedAt: new Date().toISOString(),
     ...categories,
@@ -124,7 +216,10 @@ export async function parseResume(filePath) {
     // opt-in Smart Match judge an incomplete candidate.
     raw: text.slice(0, 100000),
     evidence: buildEvidence(text, categories),
-  };
+    employment,
+    careerYears,
+    experienceEvidence: buildExperienceEvidence(text, categories),
+  });
 }
 
 export function writeParsedCV(parsed, profileSlug) {

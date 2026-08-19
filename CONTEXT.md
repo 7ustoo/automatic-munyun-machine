@@ -2,10 +2,10 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 8.4.0
-**Active release branch:** `v8.4`
+**Version:** 9.0.0
+**Active release branch:** `v9.0`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-07-20
+**Last refreshed:** 2026-08-19
 
 ## Product
 
@@ -16,6 +16,13 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v9.0.0 removes Smart Match's 40-job total ceiling, lazily loads a full Dice
+description for every evaluated candidate, structures resume employment and
+skill evidence, deduplicates the same opening across sources, makes the supply
+funnel explicit, hardens local dashboard/upload handling, and moves the AI key
+outside config snapshots. Applied jobs also use a profile-scoped identity ledger
+so cross-source URL changes do not bring the same opening back.
 
 v8.4.0 replaces unbounded keyword accumulation with requirement-coverage and
 role-fit scoring, adaptively evaluates descriptions until the strong-match

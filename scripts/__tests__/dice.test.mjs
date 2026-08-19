@@ -216,3 +216,12 @@ test('fetchDice: v7.6 pagination stops when a page adds nothing new (repeat-page
   // page 1 → 2 new; page 2 (same fixture) → 0 new → stop. No 20-page runaway.
   assert.equal(calls, 2);
 });
+
+test('fetchDice: every returned card can lazily load its full description', async () => {
+  const { impl } = stubFetch();
+  const cards = await fetchDice('iam', { fetchImpl: impl, pages: 2, jdTop: 0 });
+  assert.equal(typeof cards[1].__loadDescription, 'function');
+  const full = await cards[1].__loadDescription();
+  assert.ok(full.startsWith('Great IAM job.'));
+  assert.equal(cards[1].jdText, full);
+});
