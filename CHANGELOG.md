@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [9.0.2] — 2026-08-19
+
+### Fixed
+
+- One-click Windows updates no longer abort with installer exit code 5 when AMM's scheduled watchdog is holding the bundled Node runtime open. The updater now force-closes only processes locking AMM files, captures a detailed installer log, and avoids claiming success when installation fails.
+
 ## [9.0.1] — 2026-08-19
 
 ### Fixed
@@ -1117,7 +1123,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.1...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.2...HEAD
+[9.0.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.1...v9.0.2
 [9.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.0...v9.0.1
 [9.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.4.0...v9.0.0
 [8.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.3.0...v8.4.0

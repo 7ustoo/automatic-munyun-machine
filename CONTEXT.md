@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 9.0.1
-**Active release branch:** `v9.0.1`
+**Version:** 9.0.2
+**Active release branch:** `v9.0.2`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-08-19
 
@@ -16,6 +16,9 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v9.0.2 repairs one-click Windows updates when scheduled AMM helpers hold the
+bundled runtime open, and records installer diagnostics for future failures.
 
 v9.0.1 includes the v9.0 matching improvements and makes macOS DMG packaging
 resilient to transient Finder mount contention during release builds.

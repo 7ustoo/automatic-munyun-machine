@@ -149,6 +149,7 @@ async function apply() {
   // temp so it isn't clobbered by the in-place upgrade.
   const ammExe = path.join(ROOT, 'wrapper', 'dist', 'AMM.exe');
   const logPath = path.join(ROOT, 'data', 'update', 'update.log');
+  const installerLogPath = path.join(ROOT, 'data', 'update', 'installer.log');
   const bat = [
     '@echo off',
     'echo [%date% %time%] AMM auto-update starting >> "' + logPath + '"',
@@ -162,8 +163,14 @@ async function apply() {
     // FRESH copy next to the real one and relaunched it: no config.json, no
     // .env, no data/profiles — which looked exactly like "the update deleted
     // my profiles". The data was never touched; the wrong copy was running.
-    '"' + dest + '" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="' + ROOT + '" >> "' + logPath + '" 2>&1',
-    'echo [%date% %time%] installer exit %errorlevel% >> "' + logPath + '"',
+    // Scheduled watchdog/batch helpers are independent of the wrapper and
+    // may still hold runtime/node.exe open. Force-close only the processes
+    // Restart Manager identifies as locking this install's files. Without
+    // this, silent Inno Setup aborts with exit code 5.
+    '"' + dest + '" /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /FORCECLOSEAPPLICATIONS /DIR="' + ROOT + '" /LOG="' + installerLogPath + '" >> "' + logPath + '" 2>&1',
+    'set "AMM_INSTALL_EXIT=%errorlevel%"',
+    'echo [%date% %time%] installer exit %AMM_INSTALL_EXIT% >> "' + logPath + '"',
+    'if not "%AMM_INSTALL_EXIT%"=="0" goto update_failed',
     // Relaunch the freshly-installed AMM. --after-update tells it to wait for
     // its own dashboard to actually start serving, then open the app window —
     // so the update ends with the dashboard popping back up, not just a tray
@@ -171,7 +178,12 @@ async function apply() {
     // a few seconds to release before launching.
     'ping 127.0.0.1 -n 4 >nul',
     'start "" "' + ammExe + '" --after-update',
-    'echo [%date% %time%] relaunched AMM (--after-update) >> "' + logPath + '"'
+    'echo [%date% %time%] relaunched AMM (--after-update) >> "' + logPath + '"',
+    'exit /b 0',
+    ':update_failed',
+    'echo [%date% %time%] update failed; reopening existing AMM >> "' + logPath + '"',
+    'ping 127.0.0.1 -n 3 >nul',
+    'start "" "' + ammExe + '"'
   ].join('\r\n');
   const batPath = path.join(os.tmpdir(), 'amm-update-' + process.pid + '.cmd');
   fs.writeFileSync(batPath, bat);

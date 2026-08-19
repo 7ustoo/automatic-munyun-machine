@@ -21,7 +21,7 @@
 ; it pointing at the current release branch so local builds still produce
 ; a sensibly-named .exe.
 #ifndef MyAppVersion
-  #define MyAppVersion "9.0.1"
+  #define MyAppVersion "9.0.2"
 #endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
@@ -56,6 +56,13 @@ WizardStyle=modern
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
+; Scheduled AMM helpers can hold runtime\node.exe open independently of the
+; tray wrapper. In silent mode the default Restart Manager behavior aborts
+; with exit code 5 when such a helper does not exit politely. Restart Manager
+; only targets processes locking this install's files, so force-closing those
+; processes is scoped to AMM and lets the upgrade continue safely.
+CloseApplications=force
+RestartApplications=no
 UninstallDisplayIcon={app}\wrapper\logo.ico
 UninstallFilesDir={app}
 ; v2.0.1: brand the setup .exe itself (title-bar + Explorer icon).

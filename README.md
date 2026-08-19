@@ -272,6 +272,15 @@ check, notifications, and browser sign-in helpers do not create terminal
 windows. The Windows installer automatically replaces older scheduled-task
 definitions during an upgrade.
 
+### Update now closes and reopens the old version
+
+Versions before 9.0.2 could leave the scheduled watchdog running during a
+silent Windows upgrade. That process kept the bundled Node runtime locked, so
+the installer exited without replacing AMM. Install 9.0.2 or newer once from
+the GitHub Releases page; subsequent **Update now** upgrades handle these
+background processes automatically. Installer diagnostics are saved locally
+under `data/update/installer.log`.
+
 ### Need more help?
 
 Check the [open issues](https://github.com/7ustoo/automatic-munyun-machine/issues) or create one with your OS, AMM version, and the relevant log excerpt. Remove personal details and tokens before posting logs.
