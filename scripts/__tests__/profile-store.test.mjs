@@ -64,7 +64,7 @@ test('renameProfile() is a no-op when oldSlug === newSlug', () => {
 test('PROFILE_DATA_FILES enumerates per-profile data files only', () => {
   // These files MUST be per-profile. heartbeat / auth-state / bot-offset are
   // intentionally NOT here (machine-shared).
-  for (const f of ['cv-parsed.json', 'seen-jobs.json', 'last-batch.json', 'applications.md']) {
+  for (const f of ['cv-parsed.json', 'seen-jobs.json', 'last-batch.json', 'applications.md', 'applied-jobs.json']) {
     assert.ok(_internals.PROFILE_DATA_FILES.includes(f), `${f} should be per-profile`);
   }
   assert.ok(!_internals.PROFILE_DATA_FILES.includes('heartbeat.json'), 'heartbeat is shared');

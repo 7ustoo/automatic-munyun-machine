@@ -7,7 +7,7 @@
  * URL). Pure and fixture-testable.
  */
 
-export function normalizeCard({ source, title, company, location = '', url = '', jd = '', postedAt = '', workplaceType = '' }) {
+export function normalizeCard({ source, title, company, location = '', url = '', jd = '', postedAt = '', workplaceType = '', descriptionComplete = true }) {
   title = String(title || '').trim();
   url = String(url || '').trim();
   if (!title || !url) return null;
@@ -28,7 +28,8 @@ export function normalizeCard({ source, title, company, location = '', url = '',
     postedAt: String(postedAt || ''),
     cardText,
     jdText,
-    __ats: true
+    __ats: true,
+    __descriptionComplete: descriptionComplete === true,
   };
 }
 

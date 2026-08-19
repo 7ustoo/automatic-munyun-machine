@@ -1523,17 +1523,17 @@
           <div class="hint">Changes save instantly. The search-style toggle lives on the Resume page, next to the suggestions it shapes.</div>
         </div>
 
-        <!-- v4.0: Smart match (AI) — optional rerank of the top jobs. -->
+        <!-- v9.0: Smart Match participates in the full target-fill loop. -->
         <div class="card">
           <h2>Smart match (AI) <span class="pill" id="ai-pill">off</span></h2>
-          <div class="muted-sm">Optional: after keyword scoring, the top ~40 jobs get a second opinion from Claude — a true fit score and a one-line reason in each job's <b>Why</b> panel. Uses your own Anthropic API key; one small call per scrape; everything else keeps working without it.</div>
+          <div class="muted-sm">Optional: every job whose description AMM evaluates gets a second opinion from Claude before the batch decides whether it has enough strong matches. Requests are grouped into 40-job batches, but there is no 40-job total limit. More evaluated jobs can mean more API usage.</div>
           <div class="set-row" style="margin-top:8px"><label>Enable Smart match</label>
             <select id="set-ai-enabled"><option value="false">Off</option><option value="true">On</option></select></div>
           <div class="set-row"><label>Anthropic API key</label>
-            <input type="text" id="set-ai-key" class="num" style="width:230px" placeholder="sk-ant-…" autocomplete="off" spellcheck="false" /></div>
+            <input type="password" id="set-ai-key" class="num" style="width:230px" placeholder="sk-ant-…" autocomplete="new-password" spellcheck="false" /></div>
           <div class="set-row"><label>Model</label>
             <input type="text" id="set-ai-model" class="num" style="width:230px" autocomplete="off" spellcheck="false" /></div>
-          <div class="hint">The key is stored only in your local <code>config.json</code> and is never displayed again after saving. Muted terms: <span id="muted-count">0</span>.</div>
+          <div class="hint">The key is stored in your private local secret file, excluded from config backups, and is never displayed again after saving. Muted terms: <span id="muted-count">0</span>.</div>
         </div>
       </section>
 
@@ -2024,7 +2024,17 @@ function funnelLineJS(f) {
   const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
   const checked = f.descriptionEvaluated ?? f.scored ?? 0;
   const aboveFloor = f.qualifyingMatches ?? Math.max(0, checked - (f.droppedBelowFloor || 0));
-  return `${f.raw || 0} raw → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} descriptions checked → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
+  const duplicates = f.droppedDuplicates || 0;
+  const unique = f.uniqueBeforeFilter ?? Math.max(0, (f.raw || 0) - duplicates);
+  const full = f.fullDescriptions ?? f.descriptionScored ?? 0;
+  const smart = f.smartMatchEvaluated ? ` · ${f.smartMatchEvaluated} Smart Match` : "";
+  let result = `${f.raw || 0} raw → ${unique} unique (−${duplicates} duplicates) → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart}) → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
+  if ((f.sent || 0) < (f.targetJobsPerBatch || 0)) {
+    result += f.descriptionCeilingReached
+      ? ` · safety ceiling reached; ${f.unevaluatedCandidates || 0} not evaluated`
+      : " · all candidates evaluated; no strong matches held back";
+  }
+  return result;
 }
 
 function visibleJobs() {
@@ -2058,6 +2068,8 @@ function whyRowHTML(idx) {
   if (j.jdPct != null) jr.push('<span class="jarrow">→</span>', `<span class="jpill">Full description <b>${j.jdPct}%</b></span>`);
   if (j.coveragePct != null) jr.push('<span class="jarrow">·</span>', `<span class="jpill">Requirements covered <b>${j.coveragePct}%</b></span>`);
   if (j.rolePct != null) jr.push('<span class="jarrow">·</span>', `<span class="jpill">Role fit <b>${j.rolePct}%</b></span>`);
+  if (j.yearsRequired) jr.push('<span class="jarrow">·</span>', `<span class="jpill">Experience <b>${j.careerYears || "?"}/${j.yearsRequired} yr</b></span>`);
+  if (j.descriptionQuality) jr.push('<span class="jarrow">·</span>', `<span class="jpill">Description <b>${escapeHTML(j.descriptionQuality)}</b></span>`);
   if (j.aiPct != null) jr.push('<span class="jarrow">→</span>', `<span class="jpill">AI check <b>${j.aiPct}%</b></span>`);
   jr.push('<span class="jarrow">→</span>', `<span class="jpill final">Final <b>${j.matchPct ?? 0}%</b></span>`);
   parts.push(`<div class="why-journey">${jr.join("")}</div>`);

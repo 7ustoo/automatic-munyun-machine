@@ -22,7 +22,7 @@
 import { normalizeCard } from './normalize.mjs';
 
 export const DICE_SEARCH_URL = 'https://www.dice.com/jobs';
-export const DICE_JD_TOP = 12;       // detail-page JD fetches per query (cap)
+export const DICE_JD_TOP = 0;        // v9: descriptions load lazily when evaluated
 const JD_CONCURRENCY = 3;
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36';
 
@@ -130,7 +130,8 @@ export function normalizeDice(job) {
     url: job.detailsPageUrl,
     jd: String(job.summary || '') + salaryNote,
     postedAt: job.postedDate || '',
-    workplaceType: workplace
+    workplaceType: workplace,
+    descriptionComplete: false,
   });
 }
 
@@ -182,7 +183,7 @@ async function get(url, fetchImpl, timeoutMs = 20000) {
   finally { clearTimeout(t); }
 }
 
-// Fetch one search query from Dice. Enriches the top `jdTop` cards with the
+// Fetch one search query from Dice. Every card receives a lazy detail loader;
 // full JD from their detail pages (small concurrency, best-effort — a failed
 // detail fetch leaves the card's summary text in place).
 // v7.6: walk EVERY result page, not a fixed count. The loop stops itself when
@@ -212,18 +213,27 @@ export async function fetchDice(query, { fetchImpl = fetch, pages = DICE_MAX_PAG
     }
     if (!fresh) break; // exhausted — this page added nothing new
   }
-  // JD enrichment: Dice relevance-sorts results, so the head of the list is
-  // where full-JD scoring pays off most.
+  // Every Dice card carries a lazy full-description loader. daily-batch calls
+  // it only for candidates it actually evaluates, avoiding both the old
+  // 12-description accuracy ceiling and hundreds of unnecessary requests.
+  for (const card of cards) {
+    card.__loadDescription = async () => {
+      const html = await get(card.href, fetchImpl);
+      if (!html) return card.jdText || '';
+      const jd = parseDiceDetailJD(html);
+      if (!jd) return card.jdText || '';
+      const salaryNote = / Salary: [^]*$/.exec(card.jdText)?.[0] || '';
+      card.jdText = (jd.slice(0, 8000 - salaryNote.length) + salaryNote).trim();
+      card.__descriptionComplete = true;
+      return card.jdText;
+    };
+  }
+  // Preserve the explicit eager-enrichment option for callers/tests, but the
+  // production default is zero; evaluation now owns description acquisition.
   const targets = cards.slice(0, Math.max(0, jdTop));
   for (let i = 0; i < targets.length; i += JD_CONCURRENCY) {
     await Promise.all(targets.slice(i, i + JD_CONCURRENCY).map(async card => {
-      const html = await get(card.href, fetchImpl);
-      if (!html) return;
-      const jd = parseDiceDetailJD(html);
-      if (jd) {
-        const salaryNote = / Salary: [^]*$/.exec(card.jdText)?.[0] || '';
-        card.jdText = (jd.slice(0, 8000 - salaryNote.length) + salaryNote).trim();
-      }
+      await card.__loadDescription();
     }));
   }
   return cards;

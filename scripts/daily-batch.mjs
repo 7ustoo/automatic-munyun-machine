@@ -31,7 +31,7 @@ import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
-import { aiRerank } from './ai-rerank.mjs';
+import { aiRerank, candidateBatches } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
@@ -43,6 +43,11 @@ import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
 import { matchRequirements } from './requirement-matcher.mjs';
+import { dedupeJobs, jobIdentity } from './job-deduper.mjs';
+import { readAppliedLedger } from './application-ledger.mjs';
+import { enrichParsedResume } from './resume-parser.mjs';
+import { set as setConfig } from './config-rw.mjs';
+import { scrubLegacyAiKeysFromSnapshots, setLocalSecret } from './secret-store.mjs';
 import { fetchAllSources } from './sources/index.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
@@ -123,12 +128,20 @@ function loadConfig() {
   return readActiveConfig();
 }
 const CFG = loadConfig();
+if (IS_CLI && CFG.scoring?.ai?.apiKey) {
+  if (!env.AMM_AI_KEY) {
+    setLocalSecret('AMM_AI_KEY', CFG.scoring.ai.apiKey);
+    env.AMM_AI_KEY = CFG.scoring.ai.apiKey;
+  }
+  setConfig('scoring.ai.apiKey', '');
+  scrubLegacyAiKeysFromSnapshots();
+}
 
 // ---------- parsed CV (per-profile, written by resume-parser.mjs) ----------
 function loadParsedCV() {
   const p = PP.cvParsed;
   if (!fs.existsSync(p)) return { titles: [], certs: [], skills: [], compliance: [] };
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
+  return enrichParsedResume(JSON.parse(fs.readFileSync(p, 'utf8')));
 }
 const CV = loadParsedCV();
 const CV_DICTIONARY = (() => {
@@ -470,7 +483,7 @@ async function _scrapeWith(ctx) {
   // scoring.searchAllQueries:false to restore the old "stop once we have
   // ~1.5x target candidates" speed optimization.
   const SEARCH_ALL_QUERIES = SCORING.searchAllQueries !== false;
-  const _appliedSet  = loadAppliedHrefs();
+  const _appliedSet  = loadAppliedState();
   const _blockedSet  = loadBlockedSeen();
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
   let runningFreshEstimate = 0;
@@ -628,7 +641,7 @@ async function _scrapeWith(ctx) {
     for (const r of allRows) {
       if (_crossQuerySeen.has(r.href)) continue;
       _crossQuerySeen.add(r.href);
-      if (!_appliedSet.has(r.href) && !_blockedSet.has(r.href)) runningFreshEstimate++;
+      if (!matchesIdentityState(r, _appliedSet) && !matchesIdentityState(r, _blockedSet)) runningFreshEstimate++;
     }
     // v2.3: only early-stop when explicitly opted out of full-scan. By
     // default we search every keyword to the end so a plethora of jobs under
@@ -756,9 +769,67 @@ const TF_CAP        = 3; // count term occurrences up to this many times
 // AMM_AI_KEY env var. NEVER log the key.
 const AI_CFG = {
   enabled: !!SCORING.ai?.enabled,
-  apiKey: SCORING.ai?.apiKey || process.env.AMM_AI_KEY || '',
+  apiKey: env.AMM_AI_KEY || process.env.AMM_AI_KEY || SCORING.ai?.apiKey || '',
   model: SCORING.ai?.model || 'claude-opus-4-8',
 };
+
+const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
+const smartMatchedRows = [];
+let smartMatchFailedOpen = false;
+
+async function applySmartMatch(rows) {
+  if (!AI_CFG.enabled || !AI_CFG.apiKey || !rows.length || smartMatchFailedOpen) return 0;
+  const cvSummary = {
+    titles: CV_TITLES.slice(0, 12), certs: CV_CERTS.slice(0, 16),
+    skills: CV_SKILLS.slice(0, 60), compliance: CV_COMPLIANCE.slice(0, 16),
+    employment: CV.employment || [],
+    experienceEvidence: CV.experienceEvidence || {},
+    ...(CV_RAW ? { resumeText: CV_RAW.slice(0, 24000) } : {}),
+  };
+  let applied = 0;
+  // Forty is now an API-request batch size, not a total-job ceiling.
+  const batches = candidateBatches(rows, 40);
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    const candidates = batch.map((r, n) => ({
+      n, title: r.title, company: r.company,
+      text: (r.__jd || r.cardText || '').slice(0, 3500),
+    }));
+    let ratings;
+    try {
+      ratings = await aiRerank({ apiKey: AI_CFG.apiKey, model: AI_CFG.model, cvSummary, candidates });
+      const unique = new Set((ratings || []).map(r => r.n).filter(n => Number.isInteger(n) && n >= 0 && n < batch.length));
+      if (unique.size !== batch.length) throw new Error(`incomplete response (${unique.size}/${batch.length} jobs)`);
+    } catch (e) {
+      log(`Smart Match batch ${batchIndex + 1}/${batches.length} failed open: ${SCRUB(e.message || e)}`);
+      // Do not mix AI and keyword-only scores in one run. Roll back prior AI
+      // blends and continue the complete target-fill loop deterministically.
+      for (const prior of smartMatchedRows) {
+        prior.matchPct = prior.kwPct;
+        delete prior.aiPct;
+        delete prior.aiReason;
+        delete prior.aiSub;
+      }
+      smartMatchedRows.length = 0;
+      smartMatchFailedOpen = true;
+      return -1;
+    }
+    for (const rt of ratings || []) {
+      const r = batch[rt.n];
+      if (!r || typeof rt.fit !== 'number') continue;
+      r.aiPct = clamp100(rt.fit);
+      r.aiReason = String(rt.reason || '').slice(0, 180);
+      if (Number.isInteger(rt.skills) && Number.isInteger(rt.seniority) && Number.isInteger(rt.role)) {
+        r.aiSub = { skills: clamp100(rt.skills), seniority: clamp100(rt.seniority), role: clamp100(rt.role) };
+      }
+      r.kwPct = r.matchPct;
+      r.matchPct = Math.round(0.35 * r.kwPct + 0.65 * r.aiPct);
+      smartMatchedRows.push(r);
+      applied++;
+    }
+  }
+  return applied;
+}
 
 // v4.0: scrape outcome record — the dashboard's red "scrape failed" banner
 // reads this via /api/status. Written on EVERY exit path so a failed 7am run
@@ -984,19 +1055,20 @@ export function missingTerms(text, max = 6) {
 const CLEARANCE_RX = /\b(top[\s-]*secret|ts\/sci|\bsecret\s+clearance\b|public[\s-]*trust|polygraph|sf-?86|dod[\s-]*clearance|government[\s-]*clearance|federal[\s-]*clearance|active[\s-]+(security|secret|government)[\s-]+clearance|clearance(?:\s+is)?\s+required|cleared[\s-]+(?:personnel|professional)|able\s+to\s+obtain[^.]{0,40}clearance|must\s+be\s+a\s+u\.?s\.?\s+citizen|us\s+citizenship\s+required)\b/i;
 
 function filterAndDedupe(byQuery, extraCards = []) {
-  const all = []; const seen = new Set();
+  const collected = [];
   for (const [q, rows] of Object.entries(byQuery)) {
     for (const r of rows) {
-      if (seen.has(r.href)) continue;
-      seen.add(r.href); r.q = KEY_TO_TERM[q] || q; all.push(r);
+      r.q = KEY_TO_TERM[q] || q; collected.push(r);
     }
   }
   // v5.0: ATS source jobs (pre-normalized, pre-resolved) join the same pool and
   // pass through the exact same drop rules below. Their `q` is the source name.
   for (const r of extraCards) {
-    if (!r || seen.has(r.href)) continue;
-    seen.add(r.href); r.q = r.q || r.source || 'ats'; all.push(r);
+    if (!r) continue;
+    r.q = r.q || r.source || 'ats'; collected.push(r);
   }
+  const deduped = dedupeJobs(collected);
+  const all = deduped.jobs;
   const filterClearance = CFG.filters?.filterClearance === true; // v5.0: default OFF (opt-in)
   const maxYoe = CFG.user?.maxYoeAcceptable ?? 100; // v5.0: default effectively no cap
   // v2.5: recency filter. filters.maxJobAge is a preset key (today|3days|
@@ -1021,20 +1093,52 @@ function filterAndDedupe(byQuery, extraCards = []) {
     }
     return true;
   });
-  return { all, kept, droppedClearance, droppedStale, droppedManagement, droppedSales };
+  return {
+    all, kept,
+    rawCount: collected.length,
+    droppedDuplicates: deduped.dropped,
+    droppedClearance, droppedStale, droppedManagement, droppedSales,
+  };
 }
 
-function loadAppliedHrefs() {
+function emptyIdentityState() {
+  return { urls: new Set(), exact: new Set(), bases: new Set(), looseBases: new Set() };
+}
+
+function addIdentityToState(state, identity = {}) {
+  if (identity.url) state.urls.add(identity.url);
+  if (!identity.company || !identity.title) return;
+  const base = `${identity.company}\u0000${identity.title}`;
+  state.bases.add(base);
+  if (identity.location) state.exact.add(`${base}\u0000${identity.location}`);
+  else state.looseBases.add(base);
+}
+
+function matchesIdentityState(job, state) {
+  const id = jobIdentity(job);
+  if (id.url && state.urls.has(id.url)) return true;
+  if (!id.company || !id.title) return false;
+  const base = `${id.company}\u0000${id.title}`;
+  return id.location
+    ? state.exact.has(`${base}\u0000${id.location}`) || state.looseBases.has(base)
+    : state.bases.has(base);
+}
+
+function loadAppliedState() {
+  const state = emptyIdentityState();
   try {
     const apps = fs.readFileSync(PP.applications, 'utf8');
-    // Case-insensitive match + lowercase normalization. hiring.cafe IDs are
-    // lowercase today, but treating them as a case-sensitive contract was
-    // the kind of brittleness that bites silently if the upstream shifts.
-    // Accept both legacy `/viewjob/` and the current `/job/` paths so an
-    // applications.md that pre-dates the v1.3 path migration still dedupes.
-    return new Set([...apps.matchAll(/hiring\.cafe\/(?:viewjob|job)\/([a-z0-9]+)/gi)]
-      .map(m => 'https://hiring.cafe/job/' + m[1].toLowerCase()));
-  } catch { return new Set(); }
+    for (const match of apps.matchAll(/https:\/\/[^\s)>]+/gi)) {
+      const rawUrl = match[0].replace(/[.,;]+$/, '');
+      addIdentityToState(state, jobIdentity({ href: rawUrl }));
+      const hcafe = rawUrl.match(/hiring\.cafe\/(?:viewjob|job)\/([a-z0-9]+)/i);
+      if (hcafe) addIdentityToState(state, jobIdentity({ href: `https://hiring.cafe/job/${hcafe[1].toLowerCase()}` }));
+    }
+  } catch {}
+  for (const entry of Object.values(readAppliedLedger(PP.appliedJobs).jobs)) {
+    addIdentityToState(state, entry?.identity || jobIdentity({ ...entry, href: entry?.url }));
+  }
+  return state;
 }
 
 // Persistent map of every viewjob URL we've ever surfaced via Telegram, with
@@ -1084,14 +1188,23 @@ function loadBlockedSeen() {
   const store = loadSeenStore();
   const { fresh, dropped } = decaySeenStore(store);
   if (dropped > 0) log(`Decayed ${dropped} seen entries past ${SEEN_FRESHNESS_DAYS}-day freshness window.`);
-  return new Set(Object.keys(fresh));
+  const state = emptyIdentityState();
+  for (const url of Object.keys(fresh)) addIdentityToState(state, jobIdentity({ href: url }));
+  for (const meta of Object.values(fresh)) {
+    addIdentityToState(state, meta?.identity);
+  }
+  return state;
+}
+
+function wasSeen(job, state) {
+  return matchesIdentityState(job, state);
 }
 
 // Persist the seen store. Called only after Telegram delivery succeeds for
 // the batch — see "Persist seen IDs" block below. v1.0 E3 race fix: was
 // previously written before sendDocument retries, so a Telegram outage
 // mid-attachment could mark jobs seen that the user never received.
-function saveSeenStore(blockedSet, top) {
+function saveSeenStore(_blockedState, top) {
   const store = loadSeenStore();
   const { fresh } = decaySeenStore(store);
   const now = new Date().toISOString();
@@ -1107,7 +1220,8 @@ function saveSeenStore(blockedSet, top) {
     const existing = fresh[r.href] || store.jobs[r.href];
     fresh[r.href] = {
       firstSeenAt: existing?.firstSeenAt || now,
-      lastSeenAt: now
+      lastSeenAt: now,
+      identity: jobIdentity(r),
     };
   }
   const out = {
@@ -1171,8 +1285,28 @@ async function resolveAll(rows) {
   // v5.0: ATS jobs (from source adapters) already carry their JD + apply URL,
   // so they skip Playwright entirely. If EVERY shortlisted job is from an ATS,
   // don't even launch a browser.
-  const preResolve = (r) => ({ directUrl: r.directUrl || r.href, jdText: r.jdText || '' });
-  if (rows.every(r => r.__ats)) return rows.map(preResolve);
+  const preResolve = async (r) => {
+    let jdText = r.jdText || '';
+    let descriptionQuality = r.__descriptionComplete ? 'full' : (jdText ? 'summary' : 'missing');
+    if (typeof r.__loadDescription === 'function') {
+      try {
+        const loaded = await r.__loadDescription();
+        if (loaded) jdText = loaded;
+        descriptionQuality = r.__descriptionComplete ? 'full' : (jdText ? 'summary' : 'missing');
+      } catch { /* best-effort: retain the search summary */ }
+    }
+    return { directUrl: r.directUrl || r.href, jdText, descriptionQuality };
+  };
+  const out = new Array(rows.length);
+  const atsIndexes = rows.map((r, idx) => r.__ats ? idx : -1).filter(idx => idx >= 0);
+  let atsCursor = 0;
+  await Promise.all(Array.from({ length: Math.min(5, atsIndexes.length) }, async () => {
+    while (atsCursor < atsIndexes.length) {
+      const idx = atsIndexes[atsCursor++];
+      out[idx] = await preResolve(rows[idx]);
+    }
+  }));
+  if (rows.every(r => r.__ats)) return out;
   log(`Launching browser for direct-URL resolution (${rows.filter(r => !r.__ats).length} hiring.cafe jobs)…`);
   const ctx = await launchBrowser();
   try {
@@ -1181,7 +1315,6 @@ async function resolveAll(rows) {
     for (let i = 0; i < PAR; i++) {
       pages.push(i === 0 ? (ctx.pages()[0] || await ctx.newPage()) : await ctx.newPage());
     }
-    const out = new Array(rows.length);
     let i = 0;
     let resolved = 0;
     await Promise.all(pages.map(async (p) => {
@@ -1189,8 +1322,9 @@ async function resolveAll(rows) {
         const idx = i++;
         if (idx >= rows.length) break;
         const r = rows[idx];
-        if (r.__ats) { out[idx] = preResolve(r); if (out[idx].directUrl) resolved++; continue; }
+        if (r.__ats) { if (out[idx]?.directUrl) resolved++; continue; }
         out[idx] = await resolveOnePage(p, r.href);
+        if (out[idx]) out[idx].descriptionQuality = out[idx].jdText?.length >= 1000 ? 'full' : (out[idx].jdText ? 'summary' : 'missing');
         if (out[idx]?.directUrl) resolved++;
       }
     }));
@@ -1214,9 +1348,9 @@ function buildSupplyBanner({ funnel, byQuery }) {
   const warnings = [];
   if ((funnel.sent ?? 0) < (funnel.targetJobsPerBatch ?? 0) && (funnel.afterDedup ?? 0) >= 30) {
     const unchecked = funnel.unevaluatedCandidates || 0;
-    warnings.push(unchecked > 0
-      ? `⚠️ <b>Found ${funnel.sent} strong matches after checking ${funnel.descriptionEvaluated} descriptions.</b> ${unchecked} lower-ranked candidates remain available for another run.`
-      : `⚠️ <b>Found ${funnel.sent} strong matches after checking all ${funnel.descriptionEvaluated} candidates.</b> AMM did not pad the batch with weaker jobs.`);
+    warnings.push(funnel.descriptionCeilingReached
+      ? `⚠️ <b>Found ${funnel.sent} strong matches after reaching the ${funnel.descriptionEvaluated}-description safety ceiling.</b> ${unchecked} candidates were not evaluated; raise the ceiling to inspect them in this run.`
+      : `⚠️ <b>Found ${funnel.sent} strong matches after checking all ${funnel.descriptionEvaluated} candidates.</b> No qualifying matches were held for tomorrow, and AMM did not pad the batch with weaker jobs.`);
   }
   if (funnel.afterDedup < 30) {
     warnings.push(`⚠️ <b>Limited supply today: ${funnel.afterDedup} fresh jobs</b> (typical: 50–80).`);
@@ -1261,7 +1395,10 @@ function funnelLine(f) {
   const seen = Math.max(0, (f.keptAfterFilter ?? 0) - (f.afterDedup ?? 0));
   const checked = f.descriptionEvaluated ?? f.scored ?? 0;
   const aboveFloor = f.qualifyingMatches ?? Math.max(0, checked - (f.droppedBelowFloor ?? 0));
-  return `${f.raw ?? 0} raw → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${checked} descriptions checked → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% → ${f.sent ?? 0} delivered`;
+  const duplicates = f.droppedDuplicates ?? 0;
+  const full = f.fullDescriptions ?? f.descriptionScored ?? 0;
+  const smart = f.smartMatchEvaluated ? ` · ${f.smartMatchEvaluated} Smart Match` : '';
+  return `${f.raw ?? 0} raw → ${f.uniqueBeforeFilter ?? ((f.raw ?? 0) - duplicates)} unique (−${duplicates} duplicates) → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart}) → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% → ${f.sent ?? 0} delivered`;
 }
 function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
@@ -1391,6 +1528,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       id: r.href.split('/').pop(),
       title: r.title,
       company: r.company,
+      location: r.location || '',
       yoe: r.yoe,
       postedAge: r.postedAge || '',
       q: r.q,
@@ -1408,6 +1546,9 @@ function writeBatchTsv(top, directUrls, funnel) {
       rolePct: r.rolePct ?? null,
       requirementCount: r.requirementCount ?? 0,
       matchConfidence: r.matchConfidence ?? null,
+      yearsRequired: r.yearsRequired ?? 0,
+      careerYears: r.careerYears ?? 0,
+      descriptionQuality: r.descriptionQuality || 'unknown',
       salaryK: r.salaryK || 0,
       src: r.source || 'hcafe', // v7.3: where the job came from (hcafe/dice/greenhouse/lever/ashby)
       directUrl: directUrls[i] || '',
@@ -1540,14 +1681,16 @@ if (IS_CLI) (async () => {
       : [];
     if (watchCtx) { try { await watchChain; await watchCtx.close(); } catch {} }
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
-    const { all, kept, droppedClearance, droppedStale, droppedManagement, droppedSales } = filterAndDedupe(byQuery, atsCards);
-    log(`raw=${all.length} keptAfterFilter=${kept.length} (droppedClearance=${droppedClearance}, droppedManagement=${droppedManagement}, droppedSales=${droppedSales}, droppedStale=${droppedStale})`);
-    const applied = loadAppliedHrefs();
+    const {
+      all, kept, rawCount, droppedDuplicates,
+      droppedClearance, droppedStale, droppedManagement, droppedSales,
+    } = filterAndDedupe(byQuery, atsCards);
+    log(`raw=${rawCount} unique=${all.length} keptAfterFilter=${kept.length} (duplicates=${droppedDuplicates}, droppedClearance=${droppedClearance}, droppedManagement=${droppedManagement}, droppedSales=${droppedSales}, droppedStale=${droppedStale})`);
+    const applied = loadAppliedState();
     const blockedSeen = loadBlockedSeen(); // decayed: jobs > freshness window are no longer blocked
-    const blockAll = new Set([...applied, ...blockedSeen]);
-    const fresh = kept.filter(r => !blockAll.has(r.href));
-    const skippedApplied = kept.filter(r => applied.has(r.href)).length;
-    const skippedSeen    = kept.filter(r => !applied.has(r.href) && blockedSeen.has(r.href)).length;
+    const fresh = kept.filter(r => !matchesIdentityState(r, applied) && !wasSeen(r, blockedSeen));
+    const skippedApplied = kept.filter(r => matchesIdentityState(r, applied)).length;
+    const skippedSeen    = kept.filter(r => !matchesIdentityState(r, applied) && wasSeen(r, blockedSeen)).length;
     log(`afterDedup=${fresh.length} (skipped ${kept.length - fresh.length}: ${skippedApplied} applied + ${skippedSeen} previously seen, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
     // Pass 1 — cheap recall ranking on every card. The legacy raw score stays
@@ -1567,6 +1710,8 @@ if (IS_CLI) (async () => {
       r.rolePct = req.rolePct;
       r.requirementCount = req.requirementCount;
       r.matchConfidence = req.confidencePct;
+      r.yearsRequired = req.yearsRequired;
+      r.careerYears = req.careerYears;
       r.__rankScore = 0.7 * req.matchPct + 0.3 * legacyPct;
     }
     fresh.sort((a, b) => b.__rankScore - a.__rankScore);
@@ -1582,6 +1727,8 @@ if (IS_CLI) (async () => {
     let cursor = 0;
     let jdScored = 0;
     let resolvedCount = 0;
+    let fullDescriptionCount = 0;
+    let smartMatchEvaluated = 0;
     while (cursor < candidatePool.length && cursor < MAX_DESCRIPTION_EVALUATIONS) {
       const remainingBudget = MAX_DESCRIPTION_EVALUATIONS - cursor;
       const firstSize = Math.min(DELIVER_COUNT + 50, MAX_DESCRIPTION_EVALUATIONS);
@@ -1595,6 +1742,8 @@ if (IS_CLI) (async () => {
         if (r.__direct) resolvedCount++;
         const jd = resolved[i]?.jdText || '';
         r.__jd = jd;
+        r.descriptionQuality = resolved[i]?.descriptionQuality || (jd ? 'summary' : 'missing');
+        if (r.descriptionQuality === 'full') fullDescriptionCount++;
         if (JD_RESCORE && jd.length >= 400) {
           const s2 = scoreJob({ title: r.title, cardText: jd });
           const req = requirementScore(r, jd, jdScoreToPercent(s2.score));
@@ -1604,6 +1753,8 @@ if (IS_CLI) (async () => {
           r.rolePct = req.rolePct;
           r.requirementCount = req.requirementCount;
           r.matchConfidence = req.confidencePct;
+          r.yearsRequired = req.yearsRequired;
+          r.careerYears = req.careerYears;
           r.matched = req.matched.length ? req.matched : s2.matched;
           r.missing = req.missing;
           if (s2.salaryK) r.salaryK = s2.salaryK;
@@ -1611,58 +1762,17 @@ if (IS_CLI) (async () => {
         }
         evaluated.push(r);
       }
+      const aiApplied = await applySmartMatch(chunk);
+      if (aiApplied < 0) smartMatchEvaluated = 0;
+      else smartMatchEvaluated += aiApplied;
+      if (aiApplied > 0) log(`Smart Match evaluated ${aiApplied}/${chunk.length} candidates in this description pass`);
       cursor += chunk.length;
       const qualifying = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT).length;
       log(`description pass: evaluated=${evaluated.length}, resolved=${resolvedCount}, qualifying=${qualifying}/${DELIVER_COUNT}`);
       if (qualifying >= DELIVER_COUNT) break;
     }
     const unevaluatedCandidates = Math.max(0, candidatePool.length - evaluated.length);
-    if (JD_RESCORE) log(`description-rescored ${jdScored}/${evaluated.length}; ${unevaluatedCandidates} candidates remain available for a later batch`);
-
-    // Pass 3 — v4.0: optional AI rerank of the top candidates (opt-in via
-    // scoring.ai in Settings). Fail-open: any error leaves keyword scores.
-    if (AI_CFG.enabled && AI_CFG.apiKey) {
-      try {
-        evaluated.sort(compareJobs);
-        // v5.0 fix: use r.__jd (stashed pre-sort) — resolved[] is aligned to the
-        // PRE-sort order, so resolved[shortlist.indexOf(r)] fed each job another
-        // job's description once the sort reordered the shortlist.
-        // Fuller JD text per candidate — the model
-        // can't judge requirements it never sees.
-        const candidates = evaluated.slice(0, 40).map((r, i) => ({
-          n: i, title: r.title, company: r.company,
-          text: (r.__jd || r.cardText || '').slice(0, 3500)
-        }));
-        // v7.0: include the real resume text when the parser stored it —
-        // the single biggest accuracy lever. Keywords stay as a supplement.
-        const cvSummary = {
-          titles: CV_TITLES.slice(0, 8), certs: CV_CERTS.slice(0, 8),
-          skills: CV_SKILLS.slice(0, 25), compliance: CV_COMPLIANCE.slice(0, 8),
-          ...(CV_RAW ? { resumeText: CV_RAW.slice(0, 16000) } : {})
-        };
-        const ratings = await aiRerank({ apiKey: AI_CFG.apiKey, model: AI_CFG.model, cvSummary, candidates });
-        const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
-        let applied2 = 0;
-        for (const rt of ratings || []) {
-          const r = evaluated[rt.n];
-          if (!r || typeof rt.fit !== 'number') continue;
-          r.aiPct = clamp100(rt.fit);
-          r.aiReason = String(rt.reason || '').slice(0, 180);
-          // v7.0: rubric subscores (skills / seniority / role) for the Why panel.
-          if (Number.isInteger(rt.skills) && Number.isInteger(rt.seniority) && Number.isInteger(rt.role)) {
-            r.aiSub = { skills: clamp100(rt.skills), seniority: clamp100(rt.seniority), role: clamp100(rt.role) };
-          }
-          r.kwPct = r.matchPct;
-          // v7.0: 0.45/0.55 → 0.35/0.65 — now that the model reads the real
-          // resume against fuller descriptions, its judgment earns more weight.
-          r.matchPct = Math.round(0.35 * r.kwPct + 0.65 * r.aiPct);
-          applied2++;
-        }
-        log(`AI rerank applied to ${applied2} jobs (model=${AI_CFG.model})`);
-      } catch (e) {
-        log(`AI rerank skipped (non-fatal): ${SCRUB(e.message || e)}`);
-      }
-    }
+    if (JD_RESCORE) log(`description-rescored ${jdScored}/${evaluated.length}; full descriptions=${fullDescriptionCount}; not evaluated=${unevaluatedCandidates}`);
 
     evaluated.sort(compareJobs);
     const aboveFloor = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
@@ -1672,7 +1782,9 @@ if (IS_CLI) (async () => {
     const directUrls = top.map(r => r.__direct || null);
     log(`final: top=${top[0]?.matchPct ?? 0}%  median=${top[Math.floor(top.length/2)]?.matchPct ?? 0}%  bottom=${top[top.length-1]?.matchPct ?? 0}%`);
     const funnel = {
-      raw: all.length,
+      raw: rawCount,
+      uniqueBeforeFilter: all.length,
+      droppedDuplicates,
       keptAfterFilter: kept.length,
       droppedClearance,
       droppedManagement,
@@ -1683,7 +1795,10 @@ if (IS_CLI) (async () => {
       matchFloorPercent: MATCH_FLOOR_PCT,
       descriptionEvaluated: evaluated.length,
       descriptionScored: jdScored,
+      fullDescriptions: fullDescriptionCount,
+      smartMatchEvaluated,
       unevaluatedCandidates,
+      descriptionCeilingReached: evaluated.length >= MAX_DESCRIPTION_EVALUATIONS && candidatePool.length > evaluated.length,
       qualifyingMatches: aboveFloor.length,
       // v4.5: the user's chosen batch size — `sent` may be lower when supply
       // (fresh jobs above the floor) runs out before reaching it.
@@ -1700,7 +1815,7 @@ if (IS_CLI) (async () => {
     const weather = await getWeather();
     const banner = buildSupplyBanner({ funnel, byQuery });
     let message = buildMessage(weather, top, directUrls, {
-      raw: all.length,
+      raw: rawCount,
       kept: kept.length,
       droppedClearance,
       droppedManagement,
@@ -1721,7 +1836,7 @@ if (IS_CLI) (async () => {
 
     // Keep the detailed disk archive, but deliver the compact apply-links
     // file requested for handoff: number, title, and direct apply URL only.
-    const txtStats = { raw: all.length, droppedClearance, droppedManagement, droppedSales, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
+    const txtStats = { raw: rawCount, droppedClearance, droppedManagement, droppedSales, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
     let deliveryTxtPath = null;
     try {
       const archiveTxtPath = writeBatchTxt(top, directUrls, weather, txtStats);
@@ -1792,6 +1907,7 @@ if (IS_CLI) (async () => {
         viewjobUrl: r.href,
         title: r.title,
         company: r.company,
+        location: r.location || '',
         directUrl: directUrls[i] || '',
         matchPct: r.matchPct,
         score: r.score,

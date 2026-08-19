@@ -68,6 +68,7 @@ import {
 import { atomicWriteJson, lockedUpdateJsonSync } from './io-helpers.mjs';
 import { readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
 import { clampBatchSize } from './batch-size.mjs';
+import { recordAppliedJob } from './application-ledger.mjs';
 
 // v4.3: is account dedup on for the active profile? Read fresh each call —
 // settings edits can flip it while the bot runs. Fail-open to the default.
@@ -566,8 +567,13 @@ function buildDiagnoseMessage() {
     const f = lastBatch.funnel;
     lines.push(`  Date: ${lastBatch.date}`);
     lines.push(`  Raw cards scraped: ${f.raw}`);
-    lines.push(`  After filters: ${f.keptAfterFilter} (-${f.raw - f.keptAfterFilter} dropped, ${f.droppedClearance} were clearance)`);
+    lines.push(`  Cross-source unique: ${f.uniqueBeforeFilter ?? f.raw} (-${f.droppedDuplicates || 0} duplicates)`);
+    lines.push(`  After filters: ${f.keptAfterFilter} (${f.droppedClearance || 0} clearance, ${f.droppedManagement || 0} management/lead, ${f.droppedSales || 0} sales dropped)`);
     lines.push(`  After dedup: ${f.afterDedup} (-${f.keptAfterFilter - f.afterDedup} already seen / applied)`);
+    lines.push(`  Descriptions: ${f.descriptionEvaluated || 0} evaluated, ${f.fullDescriptions ?? f.descriptionScored ?? 0} full${f.smartMatchEvaluated ? `, ${f.smartMatchEvaluated} Smart Match` : ''}`);
+    lines.push(`  Strong matches: ${f.qualifyingMatches || 0} above ${f.matchFloorPercent || 0}%`);
+    if (f.descriptionCeilingReached) lines.push(`  ⚠️ Description safety ceiling reached; ${f.unevaluatedCandidates || 0} candidates were not evaluated.`);
+    else if ((f.sent || 0) < (f.targetJobsPerBatch || 0)) lines.push(`  All candidates were evaluated; no strong matches were held for tomorrow.`);
     lines.push(`  Sent to Telegram: ${f.sent}`);
     lines.push(`  Score band: ${f.bottomPct}% – ${f.topPct}% (median ${f.medianPct}%)`);
     if (f.afterDedup < 30) {
@@ -1587,6 +1593,12 @@ async function handleCallback(cq) {
       const line = `\n- ${new Date().toISOString().slice(0, 10)} — ${item.title} @ ${item.company} — ${item.url}\n`;
       fs.appendFileSync(profilePaths().applications, line);
     } catch (e) { log('applications.md append failed: ' + e.message); }
+    try {
+      await recordAppliedJob(profilePaths().appliedJobs, item, item.directUrl || item.url);
+    } catch (e) { log('applied-jobs.json update failed: ' + e.message); }
+    if (!/https:\/\/(?:www\.)?hiring\.cafe\/(?:viewjob|job)\//i.test(item.url || '')) {
+      return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')} (locally).`);
+    }
     const { code, output, timeout } = await spawnAction('applied', item.url);
     if (timeout) return reply(chatId, `✅ Logged applied locally for #${idx}; hiring.cafe click timed out.`);
     if (code === 0) return reply(chatId, `✅ Marked applied: <b>${escHtml(item.title || `job #${idx}`)}</b> @ ${escHtml(item.company || '')} (locally + on hiring.cafe).`);

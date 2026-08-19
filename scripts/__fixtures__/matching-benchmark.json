@@ -1,0 +1,30 @@
+[
+  {
+    "name": "demonstrated cloud security fit",
+    "jobTitle": "Cloud Security Engineer",
+    "jobText": "Required: AWS, Terraform and Python.",
+    "min": 85,
+    "max": 99
+  },
+  {
+    "name": "missing required certification",
+    "jobTitle": "Cloud Security Engineer",
+    "jobText": "CISSP is required. AWS and Terraform experience required.",
+    "min": 0,
+    "max": 69
+  },
+  {
+    "name": "wrong role family",
+    "jobTitle": "Account Executive",
+    "jobText": "Sell AWS and Terraform services.",
+    "min": 0,
+    "max": 49
+  },
+  {
+    "name": "strict experience gap",
+    "jobTitle": "Cloud Security Engineer",
+    "jobText": "Must have 10 years of experience. Required: AWS and Terraform.",
+    "min": 0,
+    "max": 69
+  }
+]

@@ -18,6 +18,15 @@
 const API_URL = 'https://api.anthropic.com/v1/messages';
 export const DEFAULT_AI_MODEL = 'claude-opus-4-8';
 
+export function candidateBatches(candidates, size = 40) {
+  const safeSize = Math.max(1, Math.min(100, Number(size) || 40));
+  const out = [];
+  for (let i = 0; i < (candidates || []).length; i += safeSize) {
+    out.push(candidates.slice(i, i + safeSize));
+  }
+  return out;
+}
+
 // Strict schema: {ratings:[{n,fit,reason,skills,seniority,role}]}.
 // v7.0: rubric subscores force the model to decompose the judgment (skills
 // coverage / seniority match / role family) before committing to an overall

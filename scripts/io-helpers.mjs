@@ -33,8 +33,12 @@ const RETRY_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
 // Synchronous backoff loop. atomicWrite needs to stay sync because most of
 // our callers (config-rw.set, etc.) are sync by contract.
 function syncBackoff(ms) {
-  const end = Date.now() + ms;
-  while (Date.now() < end) { /* spin */ }
+  // Atomics.wait gives synchronous callers a real sleep instead of burning a
+  // CPU core. The old spin loop could starve the process that actually held
+  // the lock, making contention last longer and occasionally exhausting the
+  // retry budget during the full regression suite.
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  Atomics.wait(sleeper, 0, 0, Math.max(1, ms));
 }
 
 /**
@@ -161,23 +165,22 @@ export function lockedUpdateJsonSync(filePath, mutator) {
 
   // proper-lockfile's lockSync API does not accept a `retries` option (it's
   // sync — there's no async sleep to back off with). Implement our own
-  // bounded busy-retry: 30 attempts x ~80 ms = up to ~2.4 s total wait.
-  // The previous ~1 s ceiling was flaky with three concurrent writers on
-  // slower Windows disks and under full-suite CPU contention.
+  // bounded sleeping retry. Do not spin here: config writers often run in
+  // separate Node helpers, and spinning can prevent the lock owner from being
+  // scheduled promptly on a busy or single-core machine.
   let release;
   let lastErr;
-  const MAX_ATTEMPTS = 30;
+  const MAX_ATTEMPTS = 80;
   for (let i = 0; i < MAX_ATTEMPTS; i++) {
     try {
       release = lockfile.lockSync(filePath, { stale: 30000, realpath: false });
       break;
     } catch (e) {
       lastErr = e;
-      // Spin-wait briefly. proper-lockfile errors with .code === 'ELOCKED'
-      // when another holder owns the lock; treat any error as retryable
-      // until attempts exhaust.
-      const end = Date.now() + 80;
-      while (Date.now() < end) { /* spin */ }
+      // Small exponential delay plus per-process jitter avoids a thundering
+      // herd where every helper retries on exactly the same cadence.
+      const delay = Math.min(200, 20 + i * 4) + ((process.pid + i * 17) % 23);
+      syncBackoff(delay);
     }
   }
   if (!release) {

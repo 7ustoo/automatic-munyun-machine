@@ -43,6 +43,7 @@ const PROFILE_DATA_FILES = [
   'last-batch.json',
   'last-batch-callbacks.json',
   'applications.md',
+  'applied-jobs.json',
   'query-stats.json'
 ];
 
@@ -144,6 +145,7 @@ export function paths(slug) {
     lastBatch:          path.join(dir, 'last-batch.json'),
     lastBatchCallbacks: path.join(dir, 'last-batch-callbacks.json'),
     applications:       path.join(dir, 'applications.md'),
+    appliedJobs:         path.join(dir, 'applied-jobs.json'),
     queryStats:         path.join(dir, 'query-stats.json'),
     batchHistory:       path.join(dir, 'batch-history.json'), // v4.6: daily snapshots for Trends
     batchArchiveDir:    path.join(dir, 'batch-archive'),      // v7.2: full per-scrape snapshots (30-day retention)

@@ -12,6 +12,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"html"
 	"io"
 	"log"
@@ -65,6 +66,10 @@ func (d *dashboardServer) guardPost(h http.HandlerFunc) http.HandlerFunc {
 // (v5.0 — these GET handlers previously had no Host validation).
 func (d *dashboardServer) guardGet(h http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			writeJSONError(w, http.StatusMethodNotAllowed, "GET only")
+			return
+		}
 		if !loopbackHost(r) {
 			writeJSONError(w, http.StatusForbidden, "loopback only")
 			return
@@ -449,9 +454,17 @@ func (d *dashboardServer) handleEmailDisable(w http.ResponseWriter, r *http.Requ
 // dashboard-api resume-parse — which also returns fresh search-term
 // suggestions. Guarded (POST + token). 8 MB cap covers any real resume.
 func (d *dashboardServer) handleResumeUpload(w http.ResponseWriter, r *http.Request) {
+	const maxResumeBytes int64 = 8 << 20
+	// ParseMultipartForm's argument is only an in-memory threshold; it does not
+	// cap the request and may spill an arbitrarily large body to disk. Enforce a
+	// real wire-size limit before parsing, with modest room for multipart headers.
+	r.Body = http.MaxBytesReader(w, r.Body, maxResumeBytes+(1<<20))
 	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		writeJSONError(w, http.StatusOK, "upload too large or malformed")
 		return
+	}
+	if r.MultipartForm != nil {
+		defer r.MultipartForm.RemoveAll()
 	}
 	file, header, err := r.FormFile("resume")
 	if err != nil {
@@ -469,20 +482,34 @@ func (d *dashboardServer) handleResumeUpload(w http.ResponseWriter, r *http.Requ
 	}
 
 	uploadDir := filepath.Join(d.installDir, "data", "uploads")
-	_ = os.MkdirAll(uploadDir, 0o755)
-	dest := filepath.Join(uploadDir, "resume-upload"+ext)
-	dst, err := os.Create(dest)
+	_ = os.MkdirAll(uploadDir, 0o700)
+	// Remove legacy persistent copies. Uploaded originals are now temporary;
+	// only the parsed, profile-scoped evidence file remains after this request.
+	if old, _ := filepath.Glob(filepath.Join(uploadDir, "resume-upload*")); len(old) > 0 {
+		for _, name := range old {
+			_ = os.Remove(name)
+		}
+	}
+	dest := filepath.Join(uploadDir, fmt.Sprintf("resume-upload-%d%s", time.Now().UnixNano(), ext))
+	dst, err := os.OpenFile(dest, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		writeJSONError(w, http.StatusOK, "could not save the upload")
 		return
 	}
 	// Cap the copy too (defense in depth against a lying Content-Length).
-	if _, err := io.Copy(dst, io.LimitReader(file, 8<<20)); err != nil {
+	written, copyErr := io.Copy(dst, io.LimitReader(file, maxResumeBytes+1))
+	if copyErr != nil || written > maxResumeBytes {
 		dst.Close()
+		_ = os.Remove(dest)
+		if written > maxResumeBytes {
+			writeJSONError(w, http.StatusOK, "resume must be 8 MB or smaller")
+			return
+		}
 		writeJSONError(w, http.StatusOK, "could not save the upload")
 		return
 	}
 	dst.Close()
+	defer os.Remove(dest)
 
 	// v4.1.1: optional mode hint from the setup step-1 preview toggle
 	// (titles|keywords). Empty = let dashboard-api pick the default.

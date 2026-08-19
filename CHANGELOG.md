@@ -8,6 +8,28 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [9.0.0] — 2026-08-19
+
+### Changed
+
+- **Smart Match no longer stops at 40 jobs.** Forty is now only the maximum size of one Anthropic request. Every candidate whose description AMM evaluates is AI-scored in consecutive batches before the target-fill loop decides whether it has enough strong matches.
+- **Evaluated Dice jobs now receive their full descriptions on demand.** The old first-12-per-query enrichment cap is gone; search results carry lazy description loaders so AMM pays the network cost only for candidates it actually evaluates.
+- **Resume evidence is structured.** Parsing now records dated employment, career length, demonstrated-versus-listed skill evidence, nearby evidence text, and stated years. Strict experience requirements can prevent an unsupported strong score.
+- **Cross-source duplicates collapse automatically.** AMM recognizes the same company/title/location opening across hiring.cafe, Dice, Greenhouse, Lever, and Ashby even when the URLs differ, preferring the richer full-description record.
+- **Applied status follows the opening across sources.** Dashboard and Telegram actions store a private profile-scoped identity ledger, so an opening marked applied from Dice or an ATS stays excluded if it later appears through another feed.
+- The dashboard funnel now shows raw versus unique jobs, duplicate removal, full descriptions, Smart Match coverage, the description safety ceiling, and whether every candidate was exhausted. When fewer than 200 strong matches exist, it explicitly says no qualifying jobs were held for tomorrow.
+
+### Fixed
+
+- Concurrent state writers now sleep with jitter instead of CPU-spinning while waiting for the file lock, eliminating the intermittent contention failure found in the existing cross-process regression test.
+- Every dashboard data route, including setup/auth status and the HTML shell, now enforces loopback Host and HTTP method checks. The local server also has bounded read/write/idle timeouts.
+- Resume uploads now have a real eight-megabyte request limit, use owner-only temporary files, remove legacy upload copies, and delete the original immediately after parsing.
+- Smart Match API keys now live in the private local secret file instead of profile config. Migration clears the current config and scrubs historical config snapshots.
+
+### Tests
+
+- Added cross-source identity tests, lazy Dice description coverage, structured resume evidence tests, a table-driven matching benchmark, strict experience-gap coverage, and a regression proving 205 Smart Match candidates become six API batches rather than a 40-job shortlist.
+
 ## [8.4.0] — 2026-08-17
 
 ### Changed
@@ -1089,7 +1111,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.4.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.0...HEAD
+[9.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.4.0...v9.0.0
 [8.4.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.3.0...v8.4.0
 [8.3.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.2.0...v8.3.0
 [8.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.1.0...v8.2.0
