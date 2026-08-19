@@ -180,7 +180,24 @@ tell application "Finder"
 end tell
 APPLESCRIPT
 
-hdiutil detach "$MOUNT" >/dev/null
+# Finder and diskimages-helper can briefly retain the mounted volume after the
+# layout AppleScript exits. Give normal detach several chances before falling
+# back to a forced detach; otherwise an otherwise-valid release fails randomly
+# with hdiutil exit code 16 (Resource busy).
+detached=false
+for attempt in 1 2 3 4 5; do
+  if hdiutil detach "$MOUNT" >/dev/null 2>&1; then
+    detached=true
+    break
+  fi
+  echo "  DMG volume is busy; retrying detach ($attempt/5)…"
+  sync
+  sleep $((attempt * 2))
+done
+if [[ "$detached" != true ]]; then
+  echo "  Normal detach remained busy; forcing detach…"
+  hdiutil detach -force "$MOUNT" >/dev/null
+fi
 hdiutil convert "$RW" -format UDZO -o "$OUT/$DMG_NAME" -ov >/dev/null
 rm -f "$RW"
 
