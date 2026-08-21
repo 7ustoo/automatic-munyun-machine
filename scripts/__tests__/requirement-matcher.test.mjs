@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildRequirementCatalog,
+  canonicalTerm,
+  equivalentTerms,
   extractRequirements,
   matchRequirements,
   roleFitPercent,
@@ -29,6 +31,54 @@ test('catalog deduplicates terms and keeps weighted categories', () => {
 test('nested aliases in the same phrase count as one requirement', () => {
   const reqs = extractRequirements('Cloud Security Engineer wanted', dictionary);
   assert.deepEqual(reqs.filter(r => r.category === 'titles').map(r => r.term), ['Cloud Security Engineer']);
+});
+
+test('standard abbreviations and their expanded names share one concept', () => {
+  assert.equal(canonicalTerm('SSO'), canonicalTerm('Single Sign-On'));
+  assert.equal(canonicalTerm('Azure AD'), canonicalTerm('Microsoft Entra ID'));
+  assert.ok(equivalentTerms('SSO').includes('single sign-on'));
+  assert.notEqual(canonicalTerm('OAuth'), canonicalTerm('OIDC'));
+});
+
+test('resume abbreviations satisfy expanded job requirements', () => {
+  const result = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: 'Single Sign-On is required.',
+    cv: { ...cv, skills: [...cv.skills, 'SSO'] },
+    dictionary: { ...dictionary, skills: [...dictionary.skills, 'SSO', 'Single Sign-On'] },
+  });
+  assert.equal(result.coveragePct, 100);
+  assert.deepEqual(result.matched, ['Single Sign-On']);
+  assert.deepEqual(result.missing, []);
+});
+
+test('expanded resume terms satisfy abbreviated requirements', () => {
+  const result = matchRequirements({
+    jobTitle: 'Cloud Security Engineer',
+    text: 'SSO is required.',
+    cv: { ...cv, skills: [...cv.skills, 'Single Sign-On'] },
+    dictionary: { ...dictionary, skills: [...dictionary.skills, 'SSO', 'Single Sign-On'] },
+  });
+  assert.equal(result.coveragePct, 100);
+  assert.deepEqual(result.matched, ['SSO']);
+});
+
+test('an expanded term plus its abbreviation count as one requirement', () => {
+  const reqs = extractRequirements(
+    'Experience with Single Sign-On (SSO) is required.',
+    { skills: ['SSO', 'Single Sign-On'] },
+  );
+  assert.equal(reqs.length, 1);
+  assert.equal(reqs[0].concept, canonicalTerm('SSO'));
+});
+
+test('required alias wording wins over a preferred equivalent', () => {
+  const reqs = extractRequirements(
+    'Single Sign-On preferred. SSO is required.',
+    { skills: ['SSO', 'Single Sign-On'] },
+  );
+  assert.equal(reqs.length, 1);
+  assert.equal(reqs[0].context, 'required');
 });
 
 test('role fit recognizes target titles but rejects unrelated sales roles', () => {

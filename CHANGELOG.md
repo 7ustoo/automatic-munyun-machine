@@ -8,6 +8,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [9.0.3] — 2026-08-21
+
+### Changed
+
+- Resume matching now recognizes controlled industry equivalents such as SSO/Single Sign-On, Entra ID/Azure AD, OIDC/OpenID Connect, M365/Microsoft 365, and other standard identity and infrastructure abbreviations. Equivalent terms satisfy requirements in either direction and count only once.
+
+### Fixed
+
+- Automatic post-scrape email delivery now sends CSV and XLSX attachments from the batch that was just published instead of failing with an undefined batch reference.
+
 ## [9.0.2] — 2026-08-19
 
 ### Fixed
@@ -1123,7 +1133,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.2...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.3...HEAD
+[9.0.3]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.2...v9.0.3
 [9.0.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.1...v9.0.2
 [9.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.0...v9.0.1
 [9.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v8.4.0...v9.0.0

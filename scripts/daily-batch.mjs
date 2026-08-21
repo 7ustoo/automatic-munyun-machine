@@ -42,7 +42,7 @@ import { clampBatchSize } from './batch-size.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
-import { matchRequirements } from './requirement-matcher.mjs';
+import { canonicalTerm, equivalentTerms, matchRequirements } from './requirement-matcher.mjs';
 import { dedupeJobs, jobIdentity } from './job-deduper.mjs';
 import { readAppliedLedger } from './application-ledger.mjs';
 import { enrichParsedResume } from './resume-parser.mjs';
@@ -940,18 +940,22 @@ export function scoreJob(job) {
   const matched = [];
   const seen = new Set();
   const tryMatch = (term, baseWeight) => {
-    if (seen.has(term.toLowerCase())) return;
-    if (MUTED.has(term.toLowerCase())) return;              // v4.0
+    const concept = canonicalTerm(term);
+    if (seen.has(concept)) return;
+    if ([...MUTED].some(muted => canonicalTerm(muted) === concept)) return; // v4.0
     const weight = baseWeight * clusterMultiplier(term);
     // Exact phrase / word-boundary match. Term-frequency cap: count up to TF_CAP.
-    const re = termRegex(term, 'gi');
-    const matches = text.match(re);
+    let matches = null;
+    for (const variant of equivalentTerms(term)) {
+      matches = text.match(termRegex(variant, 'gi'));
+      if (matches?.length) break;
+    }
     if (matches && matches.length > 0) {
       if (!termAllowedInText(term, text)) return;           // v4.0: ambiguous-term guard
       const tf = Math.min(matches.length, TF_CAP);
       score += weight * tf;
       matched.push(tf > 1 ? `${term} ×${tf}` : term);
-      seen.add(term.toLowerCase());
+      seen.add(concept);
       return;
     }
     // Multi-token phrase that didn't match exactly — try tokens-anywhere fallback
@@ -959,7 +963,7 @@ export function scoreJob(job) {
       if (!termAllowedInText(term, text)) return;           // v4.0
       score += weight * 0.5;
       matched.push(`${term} (partial)`);
-      seen.add(term.toLowerCase());
+      seen.add(concept);
     }
   };
   for (const t of CV_TITLES)     tryMatch(t, W_TITLE);
@@ -1036,14 +1040,19 @@ const DICT_ALL = (() => {
   } catch { return []; }
 })();
 const CV_ALL_TERMS = new Set(
-  [...CV_TITLES, ...CV_CERTS, ...CV_SKILLS, ...CV_COMPLIANCE].map(t => t.toLowerCase()));
+  [...CV_TITLES, ...CV_CERTS, ...CV_SKILLS, ...CV_COMPLIANCE].map(canonicalTerm));
 export function missingTerms(text, max = 6) {
   const out = [];
+  const seenConcepts = new Set();
   for (const { t, w } of DICT_ALL) {
-    const lt = t.toLowerCase();
-    if (CV_ALL_TERMS.has(lt) || MUTED.has(lt)) continue;
+    const concept = canonicalTerm(t);
+    if (seenConcepts.has(concept) || CV_ALL_TERMS.has(concept)) continue;
+    if ([...MUTED].some(muted => canonicalTerm(muted) === concept)) continue;
     const m = text.match(termRegex(t, 'gi'));
-    if (m && termAllowedInText(t, text)) out.push({ t, rank: w * Math.min(m.length, 3) });
+    if (m && termAllowedInText(t, text)) {
+      out.push({ t, rank: w * Math.min(m.length, 3) });
+      seenConcepts.add(concept);
+    }
   }
   out.sort((a, b) => b.rank - a.rank);
   return out.slice(0, max).map(x => x.t);
@@ -1501,6 +1510,23 @@ function writeApplyLinksTxt() {
   return file;
 }
 
+// Build the attachment used by automatic post-scrape email delivery. Keep
+// this pure so every format can be regression-tested without sending mail.
+// The caller passes the exact batch object that was just published to disk;
+// dashboard-only globals must never leak into this CLI path.
+export function buildAutoEmailAttachment({ lastBatch, format, deliveryTxtPath, date = DATE }) {
+  const emailFmt = ['txt', 'csv', 'xlsx'].includes(format) ? format : 'txt';
+  if (emailFmt === 'txt') {
+    if (!deliveryTxtPath) throw new Error('The apply-links text export was not created.');
+    return { filename: path.basename(deliveryTxtPath), path: deliveryTxtPath };
+  }
+  const rows = exportRows(lastBatch);
+  if (!rows.length) throw new Error('The published batch has no jobs to email.');
+  return emailFmt === 'csv'
+    ? { filename: `apply-links(${date}).csv`, content: buildExportCsv(rows) }
+    : { filename: `apply-links(${date}).xlsx`, content: buildExportXlsx(rows, date) };
+}
+
 function writeBatchTsv(top, directUrls, funnel) {
   fs.mkdirSync(PP.dir, { recursive: true });
   const tsv = top.map((r, i) => {
@@ -1577,6 +1603,7 @@ function writeBatchTsv(top, directUrls, funnel) {
   } catch (e) {
     log(`batch-archive write skipped (non-fatal): ${SCRUB(String(e.message || e))}`);
   }
+  return lastBatch;
 }
 
 // Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation
@@ -1811,7 +1838,7 @@ if (IS_CLI) (async () => {
       // are deliberately never hidden; delivered-job dedup remains local.
       accountDedup: hcafeAuthed
     };
-    writeBatchTsv(top, directUrls, funnel);
+    const lastBatch = writeBatchTsv(top, directUrls, funnel);
     const weather = await getWeather();
     const banner = buildSupplyBanner({ funnel, byQuery });
     let message = buildMessage(weather, top, directUrls, {
@@ -1866,13 +1893,12 @@ if (IS_CLI) (async () => {
         // txt keeps the pre-written delivery file; csv/xlsx build the same
         // minimal number·title·link sheet the Export menu produces, in-memory.
         const emailFmt = ['txt', 'csv', 'xlsx'].includes(CFG.email?.format) ? CFG.email.format : 'txt';
-        let attachment = { filename: path.basename(deliveryTxtPath), path: deliveryTxtPath };
-        if (emailFmt !== 'txt') {
-          const rows = exportRows(lastBatch);
-          attachment = emailFmt === 'csv'
-            ? { filename: `apply-links(${DATE}).csv`, content: buildExportCsv(rows) }
-            : { filename: `apply-links(${DATE}).xlsx`, content: buildExportXlsx(rows, DATE) };
-        }
+        const attachment = buildAutoEmailAttachment({
+          lastBatch,
+          format: emailFmt,
+          deliveryTxtPath,
+          date: DATE
+        });
         await sendConfiguredEmail({
           env,
           to,
