@@ -64,7 +64,7 @@ The desktop dashboard is the primary app. Extra delivery channels are optional:
 
 ### Explainable matching
 
-AMM uses the job card for a broad first pass, then loads the full description for every candidate it evaluates until it fills the requested batch or runs out of candidates. The final score measures recognized requirement coverage, target-role fit, demonstrated resume evidence, and strict experience gaps. The same opening found on multiple sites is delivered once. Repeated buzzwords count once.
+AMM uses the job card for a broad first pass, then loads the full description for every candidate it evaluates until it fills the requested batch or runs out of candidates. The final score measures recognized requirement coverage, target-role fit, demonstrated resume evidence, and strict experience gaps. Standard equivalents such as SSO/Single Sign-On, Entra ID/Azure AD, and OIDC/OpenID Connect count as the same skill. The same opening found on multiple sites is delivered once. Repeated buzzwords count once.
 
 An optional bring-your-own Anthropic key adds Claude scoring inside that target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. It is off by default, and the key stays in the private local secret file outside config backups.
 

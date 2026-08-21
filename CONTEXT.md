@@ -2,10 +2,10 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 9.0.2
-**Active release branch:** `v9.0.2`
+**Version:** 9.0.3
+**Active release branch:** `v9.0.3`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-08-19
+**Last refreshed:** 2026-08-21
 
 ## Product
 
@@ -16,6 +16,11 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v9.0.3 restores automatic post-scrape email delivery for CSV and XLSX exports
+by building the attachment from the batch that was just published. Requirement
+matching now canonicalizes controlled industry abbreviations and expanded names
+so equivalent resume and job-description terms satisfy the same requirement.
 
 v9.0.2 repairs one-click Windows updates when scheduled AMM helpers hold the
 bundled runtime open, and records installer diagnostics for future failures.

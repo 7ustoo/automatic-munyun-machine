@@ -19,6 +19,59 @@ const REQUIRED_RX = /\b(required|must|minimum|need(?:ed)?|qualification|you have
 const PREFERRED_RX = /\b(preferred|nice to have|bonus|ideally|desired|plus)\b/i;
 const STRICT_YEARS_RX = /\b(?:(?:at least|minimum(?: of)?|must have|requires?)\s+(\d{1,2})\+?\s+years?|(?:(\d{1,2})\+?\s+years?(?:\s+of\s+experience)?\s+(?:is\s+)?(?:required|minimum)))\b/i;
 
+// Controlled equivalence groups understand standard industry abbreviations
+// without the false positives caused by broad edit-distance matching.
+const TERM_EQUIVALENCE_GROUPS = [
+  ['sso', 'single sign-on', 'single sign on', 'single signon'],
+  ['oidc', 'openid connect', 'open id connect'],
+  ['mfa', 'multi-factor authentication', 'multifactor authentication', 'multi factor authentication'],
+  ['2fa', 'two-factor authentication', 'two factor authentication'],
+  ['m365', 'microsoft 365', 'office 365', 'o365'],
+  ['microsoft entra id', 'entra id', 'azure ad', 'azure active directory'],
+  ['rbac', 'role-based access control', 'role based access control'],
+  ['abac', 'attribute-based access control', 'attribute based access control'],
+  ['saml', 'saml 2.0', 'security assertion markup language'],
+  ['scim', 'system for cross-domain identity management'],
+  ['iam', 'identity and access management'],
+  ['iga', 'identity governance and administration'],
+  ['pam', 'privileged access management'],
+  ['jml', 'joiner-mover-leaver', 'joiner mover leaver'],
+  ['sspr', 'self-service password reset', 'self service password reset'],
+  ['pim', 'privileged identity management'],
+  ['ci/cd', 'cicd', 'continuous integration and continuous delivery', 'continuous integration continuous delivery'],
+  ['k8s', 'kubernetes'],
+];
+
+function surfaceKey(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[\u2010-\u2015_/.\\-]+/g, ' ')
+    .replace(/[^a-z0-9+#]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+const TERM_EQUIVALENCE = new Map();
+const TERM_VARIANTS = new Map();
+for (const group of TERM_EQUIVALENCE_GROUPS) {
+  const concept = surfaceKey(group[0]);
+  TERM_VARIANTS.set(concept, [...group]);
+  for (const term of group) TERM_EQUIVALENCE.set(surfaceKey(term), concept);
+}
+
+export function canonicalTerm(term) {
+  const surface = surfaceKey(term);
+  return TERM_EQUIVALENCE.get(surface) || surface;
+}
+
+export function equivalentTerms(term) {
+  const raw = cleanTerm(term);
+  const variants = TERM_VARIANTS.get(canonicalTerm(raw)) || [];
+  return [...new Set([raw, ...variants].filter(Boolean))];
+}
+
 function cleanTerm(term) {
   return String(term || '').trim();
 }
@@ -60,7 +113,7 @@ export function buildRequirementCatalog(dictionary = {}) {
       const key = term.toLowerCase();
       if (!term || seen.has(key)) continue;
       seen.add(key);
-      out.push({ term, key, category, weight: CATEGORY_WEIGHT[category] || 1 });
+      out.push({ term, key, concept: canonicalTerm(term), category, weight: CATEGORY_WEIGHT[category] || 1 });
     }
   }
   // Longer phrases claim overlapping text before their shorter aliases.
@@ -95,22 +148,32 @@ function requirementContext(text, index, length) {
 
 export function extractRequirements(text, dictionary, { mutedTerms = [] } = {}) {
   const body = String(text || '');
-  const muted = new Set(mutedTerms.map(t => String(t).toLowerCase()));
+  const muted = new Set(mutedTerms.map(canonicalTerm));
   const requirements = [];
   const claimed = [];
+  const conceptIndexes = new Map();
   for (const item of buildRequirementCatalog(dictionary)) {
-    if (muted.has(item.key)) continue;
-    const match = termRegex(item.term, 'i').exec(body);
-    if (!match) continue;
-    const start = match.index;
-    const end = start + match[0].length;
-    // Do not count "Microsoft Entra ID" and the nested "Entra ID" as two
-    // separate requirements when they point at the same words.
-    if (claimed.some(span => start >= span.start && end <= span.end)) continue;
-    claimed.push({ start, end });
-    const context = requirementContext(body, start, match[0].length);
-    const multiplier = context === 'required' ? 1.35 : context === 'preferred' ? 0.75 : 1;
-    requirements.push({ ...item, context, weighted: item.weight * multiplier });
+    if (muted.has(item.concept)) continue;
+    for (const match of body.matchAll(termRegex(item.term, 'gi'))) {
+      const start = match.index;
+      const end = start + match[0].length;
+      // Do not count "Microsoft Entra ID" and the nested "Entra ID" as two
+      // separate requirements when they point at the same words.
+      if (claimed.some(span => start >= span.start && end <= span.end)) continue;
+      claimed.push({ start, end });
+      const context = requirementContext(body, start, match[0].length);
+      const multiplier = context === 'required' ? 1.35 : context === 'preferred' ? 0.75 : 1;
+      const candidate = { ...item, context, weighted: item.weight * multiplier };
+      const existingIndex = conceptIndexes.get(item.concept);
+      if (existingIndex == null) {
+        conceptIndexes.set(item.concept, requirements.length);
+        requirements.push(candidate);
+      } else if (candidate.weighted > requirements[existingIndex].weighted) {
+        // If aliases appear in multiple clauses, retain the strongest wording:
+        // "SSO required" must beat "Single Sign-On preferred."
+        requirements[existingIndex] = candidate;
+      }
+    }
   }
   return requirements;
 }
@@ -124,9 +187,16 @@ export function matchRequirements({
   mutedTerms = [],
   fallbackPercent = 0,
 } = {}) {
-  const resumeTerms = new Set([
+  const resumeTerms = [
     ...(cv.titles || []), ...(cv.certs || []), ...(cv.skills || []), ...(cv.compliance || []),
-  ].map(t => String(t).toLowerCase()));
+  ];
+  const resumeConcepts = new Map();
+  for (const term of resumeTerms) {
+    const exactKey = String(term).toLowerCase();
+    const concept = canonicalTerm(term);
+    if (!resumeConcepts.has(concept)) resumeConcepts.set(concept, []);
+    resumeConcepts.get(concept).push(exactKey);
+  }
   const requirements = extractRequirements(`${jobTitle}\n${text}`, dictionary, { mutedTerms });
   // Titles are evaluated separately by roleFitPercent. Counting the title in
   // requirement coverage would double-reward an exact title and punish valid
@@ -142,13 +212,15 @@ export function matchRequirements({
   const missing = [];
   for (const req of concreteRequirements) {
     totalWeight += req.weighted;
-    if (resumeTerms.has(req.key)) {
-      const ev = cv.experienceEvidence?.[req.key];
+    if (resumeConcepts.has(req.concept)) {
+      const evidence = resumeConcepts.get(req.concept)
+        .map(key => cv.experienceEvidence?.[key])
+        .filter(Boolean);
       // A demonstrated skill is stronger evidence than a bare skills-list
       // mention. Older parsed resumes have no evidence map and remain fully
       // compatible instead of being penalized.
-      const evidenceFactor = ev && ['skills', 'compliance'].includes(req.category)
-        ? (ev.demonstratedMentions > 0 ? 1 : 0.8)
+      const evidenceFactor = evidence.length && ['skills', 'compliance'].includes(req.category)
+        ? (evidence.some(ev => ev.demonstratedMentions > 0) ? 1 : 0.8)
         : 1;
       matchedWeight += req.weighted * evidenceFactor;
       matched.push(req.term);
