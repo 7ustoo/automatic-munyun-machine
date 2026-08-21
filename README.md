@@ -66,6 +66,8 @@ The desktop dashboard is the primary app. Extra delivery channels are optional:
 
 AMM uses the job card for a broad first pass, then loads the full description for every candidate it evaluates until it fills the requested batch or runs out of candidates. The final score measures recognized requirement coverage, target-role fit, demonstrated resume evidence, and strict experience gaps. Standard equivalents such as SSO/Single Sign-On, Entra ID/Azure AD, and OIDC/OpenID Connect count as the same skill. The same opening found on multiple sites is delivered once. Repeated buzzwords count once.
 
+The optional **Consultant Slop Filter** reads those full descriptions before delivery. Balanced mode removes obvious consulting, professional-services, implementation, and customer-engagement roles. Strict mode also removes any role with explicit customer-facing duties or required travel. Rejected jobs do not consume the batch target; AMM keeps evaluating later candidates for replacement engineering roles.
+
 An optional bring-your-own Anthropic key adds Claude scoring inside that target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. It is off by default, and the key stays in the private local secret file outside config backups.
 
 ---
@@ -142,7 +144,7 @@ The dashboard walks you through:
 
 Fresh installs start with no profession-specific searches or company filters. Your searches are built from your resume, so AMM does not assume your career field.
 
-After setup, use **Settings** for workplace type, location, batch size, and advanced filters. You can independently drop management/tech-lead titles and sales titles before scoring. Gmail and company-board sources can be connected from the main dashboard.
+After setup, use **Settings** for workplace type, location, batch size, and advanced filters. You can independently drop management/tech-lead titles, sales titles, and consultant/customer-facing work. Gmail and company-board sources can be connected from the main dashboard.
 
 ## How it works
 

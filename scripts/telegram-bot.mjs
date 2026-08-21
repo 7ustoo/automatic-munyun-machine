@@ -571,6 +571,9 @@ function buildDiagnoseMessage() {
     lines.push(`  After filters: ${f.keptAfterFilter} (${f.droppedClearance || 0} clearance, ${f.droppedManagement || 0} management/lead, ${f.droppedSales || 0} sales dropped)`);
     lines.push(`  After dedup: ${f.afterDedup} (-${f.keptAfterFilter - f.afterDedup} already seen / applied)`);
     lines.push(`  Descriptions: ${f.descriptionEvaluated || 0} evaluated, ${f.fullDescriptions ?? f.descriptionScored ?? 0} full${f.smartMatchEvaluated ? `, ${f.smartMatchEvaluated} Smart Match` : ''}`);
+    if (f.consultantSlopMode && f.consultantSlopMode !== 'off') {
+      lines.push(`  Consultant Slop (${f.consultantSlopMode}): ${f.droppedConsultantSlop || 0} dropped (${f.consultantCustomerFacing || 0} customer-facing, ${f.consultantConsulting || 0} consulting, ${f.consultantTravelRequired || 0} travel)`);
+    }
     lines.push(`  Strong matches: ${f.qualifyingMatches || 0} above ${f.matchFloorPercent || 0}%`);
     if (f.descriptionCeilingReached) lines.push(`  ⚠️ Description safety ceiling reached; ${f.unevaluatedCandidates || 0} candidates were not evaluated.`);
     else if ((f.sent || 0) < (f.targetJobsPerBatch || 0)) lines.push(`  All candidates were evaluated; no strong matches were held for tomorrow.`);

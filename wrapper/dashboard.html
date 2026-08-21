@@ -1508,6 +1508,8 @@
             <select id="set-management-titles"><option value="false">No</option><option value="true">Yes</option></select></div>
           <div class="set-row"><label>Drop sales titles</label>
             <select id="set-sales-titles"><option value="false">No</option><option value="true">Yes</option></select></div>
+          <div class="set-row"><label title="Reads full descriptions and removes customer-facing consulting, professional-services, and travel-heavy roles.">Consultant Slop Filter</label>
+            <select id="set-consultant-slop"><option value="off">Off</option><option value="balanced">Balanced (recommended)</option><option value="strict">Strict — no customer/travel roles</option></select></div>
           <div class="set-row"><label>Application forms</label>
             <select id="set-forms"><option value="all">All</option><option value="simple">Simple only</option><option value="long">Time-consuming only</option></select></div>
           <div class="set-row"><label>Job recency</label>
@@ -2028,7 +2030,8 @@ function funnelLineJS(f) {
   const unique = f.uniqueBeforeFilter ?? Math.max(0, (f.raw || 0) - duplicates);
   const full = f.fullDescriptions ?? f.descriptionScored ?? 0;
   const smart = f.smartMatchEvaluated ? ` · ${f.smartMatchEvaluated} Smart Match` : "";
-  let result = `${f.raw || 0} raw → ${unique} unique (−${duplicates} duplicates) → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart}) → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
+  const consultant = f.droppedConsultantSlop ? ` → ${f.droppedConsultantSlop} consultant/client-facing dropped` : "";
+  let result = `${f.raw || 0} raw → ${unique} unique (−${duplicates} duplicates) → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart})${consultant} → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
   if ((f.sent || 0) < (f.targetJobsPerBatch || 0)) {
     result += f.descriptionCeilingReached
       ? ` · safety ceiling reached; ${f.unevaluatedCandidates || 0} not evaluated`
@@ -2349,6 +2352,7 @@ async function loadSettings() {
     $("set-clearance").value = String(s.filterClearance);
     $("set-management-titles").value = String(s.filterManagementTitles === true);
     $("set-sales-titles").value = String(s.filterSalesTitles === true);
+    $("set-consultant-slop").value = s.consultantSlopMode || "off";
     $("set-forms").value = s.applicationFormEase;
     $("set-recency").value = s.maxJobAge || "any";
     $("set-mode").value = s.searchMode;
@@ -2429,6 +2433,7 @@ $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.tar
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-management-titles").addEventListener("change", e => saveSetting("filters.filterManagementTitles", e.target.value));
 $("set-sales-titles").addEventListener("change", e => saveSetting("filters.filterSalesTitles", e.target.value));
+$("set-consultant-slop").addEventListener("change", e => saveSetting("filters.consultantSlopMode", e.target.value));
 $("set-forms").addEventListener("change", e => saveSetting("filters.applicationFormEase", e.target.value));
 $("set-recency").addEventListener("change", e => saveSetting("filters.maxJobAge", e.target.value));
 // v5.0: workplace type (array → JSON string; body values must be strings) + location.

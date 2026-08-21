@@ -47,6 +47,7 @@ import { loadExport } from './export-batch.mjs';
 import { listArchives, readArchive } from './batch-archive.mjs';
 import { readExclusions, writeExclusion } from './batch-exclusions.mjs';
 import { clampBatchSize } from './batch-size.mjs';
+import { normalizeConsultantSlopMode } from './consultant-slop-filter.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
   verifyLogin, sendEmail, sendConfiguredEmail, disconnectEmail,
@@ -87,6 +88,7 @@ function settingsGet() {
       filterClearance: cfg.filters?.filterClearance !== false,
       filterManagementTitles: cfg.filters?.filterManagementTitles === true,
       filterSalesTitles: cfg.filters?.filterSalesTitles === true,
+      consultantSlopMode: normalizeConsultantSlopMode(cfg.filters?.consultantSlopMode),
       applicationFormEase: cfg.filters?.applicationFormEase || 'all',
       skipCompanies: cfg.filters?.skipCompanies || [], // v4.6: blocked-companies UI
       matchFloorPercent: cfg.scoring?.matchFloorPercent ?? 70,
@@ -144,6 +146,7 @@ function settingsSet(dotPath, jsonValue) {
   const allowed = new Set([
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.filterManagementTitles', 'filters.filterSalesTitles',
+    'filters.consultantSlopMode',
     'filters.applicationFormEase', 'filters.maxJobAge',
     'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'search.mode',
     'search.workplaceTypes', 'search.location', // v5.0
@@ -190,6 +193,7 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'filters.filterManagementTitles' || dotPath === 'filters.filterSalesTitles') {
     value = (value === true || value === 'true' || value === 'on');
   }
+  if (dotPath === 'filters.consultantSlopMode') value = normalizeConsultantSlopMode(value);
   if (dotPath === 'filters.applicationFormEase' && !['all', 'simple', 'long'].includes(value)) value = 'all';
   if (dotPath === 'filters.maxJobAge' && !['today', '3days', 'week', 'month', 'any'].includes(value)) value = 'any';
   if (dotPath === 'search.mode') value = value === 'keywords' ? 'keywords' : 'titles';
