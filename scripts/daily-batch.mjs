@@ -43,6 +43,7 @@ import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
 import { canonicalTerm, equivalentTerms, matchRequirements } from './requirement-matcher.mjs';
+import { analyzeConsultantSlop, normalizeConsultantSlopMode } from './consultant-slop-filter.mjs';
 import { dedupeJobs, jobIdentity } from './job-deduper.mjs';
 import { readAppliedLedger } from './application-ledger.mjs';
 import { enrichParsedResume } from './resume-parser.mjs';
@@ -756,6 +757,7 @@ const SALARY_PENALTY= SCORING.salaryPenalty     ?? -10;
 // entirely absent (legacy configs); config.example ships 0.
 export const SALARY_FLOOR_K = Math.round((CFG.user?.salaryFloorUsd ?? 90000) / 1000);
 const MATCH_FLOOR_PCT = SCORING.matchFloorPercent ?? 70;
+const CONSULTANT_SLOP_MODE = normalizeConsultantSlopMode(CFG.filters?.consultantSlopMode);
 const TARGET_TERMS = (CFG.queries || []).map(q => q.term).filter(Boolean);
 const DESCRIPTION_CHUNK = Math.max(50, Math.min(250, DELIVER_COUNT));
 const MAX_DESCRIPTION_EVALUATIONS = Math.max(
@@ -1407,7 +1409,8 @@ function funnelLine(f) {
   const duplicates = f.droppedDuplicates ?? 0;
   const full = f.fullDescriptions ?? f.descriptionScored ?? 0;
   const smart = f.smartMatchEvaluated ? ` · ${f.smartMatchEvaluated} Smart Match` : '';
-  return `${f.raw ?? 0} raw → ${f.uniqueBeforeFilter ?? ((f.raw ?? 0) - duplicates)} unique (−${duplicates} duplicates) → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart}) → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% → ${f.sent ?? 0} delivered`;
+  const consultant = f.droppedConsultantSlop ? ` → ${f.droppedConsultantSlop} consultant/client-facing dropped` : '';
+  return `${f.raw ?? 0} raw → ${f.uniqueBeforeFilter ?? ((f.raw ?? 0) - duplicates)} unique (−${duplicates} duplicates) → ${f.keptAfterFilter ?? 0} after filters → ${f.afterDedup ?? 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart})${consultant} → ${aboveFloor} above ${f.matchFloorPercent ?? 0}% → ${f.sent ?? 0} delivered`;
 }
 function buildMessage(weather, top, directUrls, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
@@ -1415,6 +1418,7 @@ function buildMessage(weather, top, directUrls, stats) {
   if (stats.droppedClearance) filterBits.push(`${stats.droppedClearance} clearance`);
   if (stats.droppedManagement) filterBits.push(`${stats.droppedManagement} management/lead`);
   if (stats.droppedSales)      filterBits.push(`${stats.droppedSales} sales`);
+  if (stats.droppedConsultantSlop) filterBits.push(`${stats.droppedConsultantSlop} consultant/client-facing`);
   if (stats.skippedApplied)   filterBits.push(`${stats.skippedApplied} applied`);
   if (stats.skippedSeen)      filterBits.push(`${stats.skippedSeen} previously seen`);
   const tail = filterBits.length ? ` · filtered: ${filterBits.join(', ')}` : '';
@@ -1466,6 +1470,7 @@ function buildBatchTxt(top, directUrls, weather, stats) {
   if (stats.droppedClearance) filterBits.push(`${stats.droppedClearance} clearance`);
   if (stats.droppedManagement) filterBits.push(`${stats.droppedManagement} management/lead`);
   if (stats.droppedSales)      filterBits.push(`${stats.droppedSales} sales`);
+  if (stats.droppedConsultantSlop) filterBits.push(`${stats.droppedConsultantSlop} consultant/client-facing`);
   if (stats.skippedApplied)   filterBits.push(`${stats.skippedApplied} applied`);
   if (stats.skippedSeen)      filterBits.push(`${stats.skippedSeen} previously seen`);
   const tail = filterBits.length ? ` · filtered: ${filterBits.join(', ')}` : '';
@@ -1756,6 +1761,11 @@ if (IS_CLI) (async () => {
     let resolvedCount = 0;
     let fullDescriptionCount = 0;
     let smartMatchEvaluated = 0;
+    let descriptionEvaluatedCount = 0;
+    let droppedConsultantSlop = 0;
+    let consultantCustomerFacing = 0;
+    let consultantTravelRequired = 0;
+    let consultantConsulting = 0;
     while (cursor < candidatePool.length && cursor < MAX_DESCRIPTION_EVALUATIONS) {
       const remainingBudget = MAX_DESCRIPTION_EVALUATIONS - cursor;
       const firstSize = Math.min(DELIVER_COUNT + 50, MAX_DESCRIPTION_EVALUATIONS);
@@ -1763,8 +1773,10 @@ if (IS_CLI) (async () => {
       const chunk = candidatePool.slice(cursor, cursor + take);
       if (!chunk.length) break;
       const resolved = await resolveAll(chunk);
+      const acceptedChunk = [];
       for (let i = 0; i < chunk.length; i++) {
         const r = chunk[i];
+        descriptionEvaluatedCount++;
         r.__direct = resolved[i]?.directUrl || '';
         if (r.__direct) resolvedCount++;
         const jd = resolved[i]?.jdText || '';
@@ -1787,19 +1799,28 @@ if (IS_CLI) (async () => {
           if (s2.salaryK) r.salaryK = s2.salaryK;
           jdScored++;
         }
+        const slop = analyzeConsultantSlop({ title: r.title, text: jd || r.cardText || '' }, CONSULTANT_SLOP_MODE);
+        if (slop.excluded) {
+          droppedConsultantSlop++;
+          if (slop.customerFacing) consultantCustomerFacing++;
+          if (slop.travelRequired) consultantTravelRequired++;
+          if (slop.consulting) consultantConsulting++;
+          continue;
+        }
         evaluated.push(r);
+        acceptedChunk.push(r);
       }
-      const aiApplied = await applySmartMatch(chunk);
+      const aiApplied = await applySmartMatch(acceptedChunk);
       if (aiApplied < 0) smartMatchEvaluated = 0;
       else smartMatchEvaluated += aiApplied;
-      if (aiApplied > 0) log(`Smart Match evaluated ${aiApplied}/${chunk.length} candidates in this description pass`);
+      if (aiApplied > 0) log(`Smart Match evaluated ${aiApplied}/${acceptedChunk.length} candidates in this description pass`);
       cursor += chunk.length;
       const qualifying = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT).length;
-      log(`description pass: evaluated=${evaluated.length}, resolved=${resolvedCount}, qualifying=${qualifying}/${DELIVER_COUNT}`);
+      log(`description pass: inspected=${descriptionEvaluatedCount}, consultantFiltered=${droppedConsultantSlop}, eligible=${evaluated.length}, resolved=${resolvedCount}, qualifying=${qualifying}/${DELIVER_COUNT}`);
       if (qualifying >= DELIVER_COUNT) break;
     }
-    const unevaluatedCandidates = Math.max(0, candidatePool.length - evaluated.length);
-    if (JD_RESCORE) log(`description-rescored ${jdScored}/${evaluated.length}; full descriptions=${fullDescriptionCount}; not evaluated=${unevaluatedCandidates}`);
+    const unevaluatedCandidates = Math.max(0, candidatePool.length - cursor);
+    if (JD_RESCORE) log(`description-rescored ${jdScored}/${descriptionEvaluatedCount}; full descriptions=${fullDescriptionCount}; not evaluated=${unevaluatedCandidates}`);
 
     evaluated.sort(compareJobs);
     const aboveFloor = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
@@ -1816,16 +1837,21 @@ if (IS_CLI) (async () => {
       droppedClearance,
       droppedManagement,
       droppedSales,
+      consultantSlopMode: CONSULTANT_SLOP_MODE,
+      droppedConsultantSlop,
+      consultantCustomerFacing,
+      consultantTravelRequired,
+      consultantConsulting,
       afterDedup: fresh.length,
       scored: fresh.length,
       droppedBelowFloor,
       matchFloorPercent: MATCH_FLOOR_PCT,
-      descriptionEvaluated: evaluated.length,
+      descriptionEvaluated: descriptionEvaluatedCount,
       descriptionScored: jdScored,
       fullDescriptions: fullDescriptionCount,
       smartMatchEvaluated,
       unevaluatedCandidates,
-      descriptionCeilingReached: evaluated.length >= MAX_DESCRIPTION_EVALUATIONS && candidatePool.length > evaluated.length,
+      descriptionCeilingReached: descriptionEvaluatedCount >= MAX_DESCRIPTION_EVALUATIONS && candidatePool.length > descriptionEvaluatedCount,
       qualifyingMatches: aboveFloor.length,
       // v4.5: the user's chosen batch size — `sent` may be lower when supply
       // (fresh jobs above the floor) runs out before reaching it.
@@ -1847,6 +1873,7 @@ if (IS_CLI) (async () => {
       droppedClearance,
       droppedManagement,
       droppedSales,
+      droppedConsultantSlop,
       skippedApplied,
       skippedSeen,
       hcafeAuthed,
@@ -1863,7 +1890,7 @@ if (IS_CLI) (async () => {
 
     // Keep the detailed disk archive, but deliver the compact apply-links
     // file requested for handoff: number, title, and direct apply URL only.
-    const txtStats = { raw: rawCount, droppedClearance, droppedManagement, droppedSales, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
+    const txtStats = { raw: rawCount, droppedClearance, droppedManagement, droppedSales, droppedConsultantSlop, skippedApplied, skippedSeen, hcafeAuthed, accountDedupEnabled, funnel };
     let deliveryTxtPath = null;
     try {
       const archiveTxtPath = writeBatchTxt(top, directUrls, weather, txtStats);

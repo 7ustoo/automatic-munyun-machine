@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 9.0.3
-**Active release branch:** `v9.0.3`
+**Version:** 10.0.0
+**Active release branch:** `v10.0.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-08-21
 
@@ -16,6 +16,12 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v10.0.0 adds the profile-scoped Consultant Slop Filter. Balanced and Strict
+modes classify full descriptions for consulting, professional-services,
+customer-facing, and required-travel work while recognizing hands-on backend
+engineering evidence. Rejected candidates are replaced from deeper in the
+scraped pool and are reported separately in batch diagnostics.
 
 v9.0.3 restores automatic post-scrape email delivery for CSV and XLSX exports
 by building the attachment from the batch that was just published. Requirement
@@ -119,10 +125,12 @@ The wrapper is a thin native shell. Business logic stays in JavaScript helpers t
 6. Uses cards for a broad recall ranking against the resume and target roles.
 7. Fetches and requirement-scores descriptions in chunks until the requested
    number clear the final floor or the candidate supply is exhausted.
-8. Optionally invokes Claude reranking.
-9. Resolves direct application URLs.
-10. Writes `last-batch.json`, exports, scrape status, and batch history atomically. v7.2: also archives the full batch to `data/profiles/<profile>/batch-archive/` (`scripts/batch-archive.mjs`, 30-day retention, non-fatal) — the dashboard's "Previous scrapes" section lists these via `GET /api/archive`, serves one via `GET /api/archive/batch?id=`, and downloads one via `GET /api/export?format=…&archive=<id>`.
-11. Optionally delivers through Telegram and email.
+8. Applies the optional Consultant Slop description classifier and replaces
+   rejected customer-facing, consulting, and travel roles from later chunks.
+9. Optionally invokes Claude reranking only for surviving candidates.
+10. Resolves direct application URLs.
+11. Writes `last-batch.json`, exports, scrape status, and batch history atomically. v7.2: also archives the full batch to `data/profiles/<profile>/batch-archive/` (`scripts/batch-archive.mjs`, 30-day retention, non-fatal) — the dashboard's "Previous scrapes" section lists these via `GET /api/archive`, serves one via `GET /api/archive/batch?id=`, and downloads one via `GET /api/export?format=…&archive=<id>`.
+12. Optionally delivers through Telegram and email.
 
 ### Desktop dashboard
 
@@ -172,6 +180,7 @@ Important v5 defaults:
 - `filters.filterClearance: false`
 - `filters.filterManagementTitles: false`
 - `filters.filterSalesTitles: false`
+- `filters.consultantSlopMode: off` (`off | balanced | strict`)
 - `filters.skipCompanies: []`
 - `filters.dropTitlePatterns: []`
 - `search.workplaceTypes: ["Remote"]`

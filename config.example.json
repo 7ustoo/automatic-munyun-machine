@@ -34,6 +34,8 @@
     "_filterManagementTitlesComment": "When on, drops manager, supervisor, director, head, executive, team-lead, and technical-lead job titles before scoring. Profile-scoped and off by default; toggle from Settings.",
     "filterSalesTitles": false,
     "_filterSalesTitlesComment": "When on, drops sales, account executive/manager, business development, SDR/BDR, customer success, and revenue-operations job titles before scoring. Profile-scoped and off by default; toggle from Settings.",
+    "consultantSlopMode": "off",
+    "_consultantSlopModeComment": "Description-level filter for customer-facing consulting, professional-services, implementation, and required-travel roles. off (default) | balanced (obvious consultant-heavy work) | strict (any explicit customer-facing or required-travel work). Filtered jobs do not consume the requested batch target.",
     "applicationFormEase": "all",
     "_applicationFormEaseValues": "all (default) | simple (only Simple Apps - no account creation) | long (only Time Consuming Apps)",
     "maxJobAge": "any",

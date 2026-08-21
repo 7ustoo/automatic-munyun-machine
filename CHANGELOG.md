@@ -8,6 +8,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [10.0.0] — 2026-08-21
+
+### Added
+
+- Added the profile-scoped **Consultant Slop Filter** with Off, Balanced, and Strict modes. It reads full job descriptions for customer-facing duties, consulting and professional-services work, implementation engagements, and required travel while preserving genuine backend and production-engineering roles.
+- Batch diagnostics now report how many jobs the filter removed and whether they contained customer-facing, consulting, or travel signals.
+
+### Changed
+
+- Consultant-filtered jobs no longer consume the requested 50–200 job target. AMM continues evaluating deeper candidates until it fills the batch, exhausts the fresh supply, or reaches the existing description safety ceiling.
+- Smart Match runs only on candidates that survive the Consultant Slop Filter, avoiding paid scoring for jobs that cannot be delivered.
+
 ## [9.0.3] — 2026-08-21
 
 ### Changed
@@ -1133,7 +1145,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.3...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.0.0...HEAD
+[10.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.3...v10.0.0
 [9.0.3]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.2...v9.0.3
 [9.0.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.1...v9.0.2
 [9.0.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.0...v9.0.1

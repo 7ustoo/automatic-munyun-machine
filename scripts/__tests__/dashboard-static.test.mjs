@@ -77,3 +77,14 @@ test('Open All jobs action is present and uses the guarded dashboard endpoint', 
   assert.ok(html.includes('id="open-all-btn"'), 'open-all-btn missing from Jobs toolbar');
   assert.ok(html.includes('postJSON("/api/jobs/open-all")'), 'Open All must use the guarded local action');
 });
+
+test('Consultant Slop Filter exposes off, balanced, and strict modes', () => {
+  assert.ok(html.includes('id="set-consultant-slop"'), 'consultant filter setting missing');
+  for (const mode of ['off', 'balanced', 'strict']) {
+    assert.ok(html.includes(`option value="${mode}"`), `consultant filter mode missing: ${mode}`);
+  }
+  assert.ok(
+    html.includes('saveSetting("filters.consultantSlopMode", e.target.value)'),
+    'consultant filter selection must be persisted',
+  );
+});
