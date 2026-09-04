@@ -31,7 +31,7 @@ import { chromium } from 'playwright-core';
 import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
-import { aiRerank, candidateBatches } from './ai-rerank.mjs';
+import { aiRerank, candidateBatches, detectAiProvider } from './ai-rerank.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
@@ -116,6 +116,8 @@ const SCRUB = (s) => {
   let str = String(s);
   if (TG_TOKEN) str = str.split(TG_TOKEN).join('<TOKEN>');
   if (SMTP_PASS) str = str.split(SMTP_PASS).join('<APP_PASSWORD>');
+  const aiKey = env.AMM_AI_KEY || process.env.AMM_AI_KEY || '';
+  if (aiKey) str = str.split(aiKey).join('<AI_KEY>');
   return str;
 };
 
@@ -769,10 +771,11 @@ const TF_CAP        = 3; // count term occurrences up to this many times
 // v4.0: optional AI rerank (off by default; configured from the dashboard
 // Settings page). Key lives in config.json (gitignored, local-only) or the
 // AMM_AI_KEY env var. NEVER log the key.
+const AI_KEY = env.AMM_AI_KEY || process.env.AMM_AI_KEY || SCORING.ai?.apiKey || '';
 const AI_CFG = {
   enabled: !!SCORING.ai?.enabled,
-  apiKey: env.AMM_AI_KEY || process.env.AMM_AI_KEY || SCORING.ai?.apiKey || '',
-  model: SCORING.ai?.model || 'claude-opus-4-8',
+  apiKey: AI_KEY,
+  provider: detectAiProvider(AI_KEY),
 };
 
 const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
@@ -799,7 +802,7 @@ async function applySmartMatch(rows) {
     }));
     let ratings;
     try {
-      ratings = await aiRerank({ apiKey: AI_CFG.apiKey, model: AI_CFG.model, cvSummary, candidates });
+      ratings = await aiRerank({ apiKey: AI_CFG.apiKey, cvSummary, candidates });
       const unique = new Set((ratings || []).map(r => r.n).filter(n => Number.isInteger(n) && n >= 0 && n < batch.length));
       if (unique.size !== batch.length) throw new Error(`incomplete response (${unique.size}/${batch.length} jobs)`);
     } catch (e) {
@@ -1813,7 +1816,7 @@ if (IS_CLI) (async () => {
       const aiApplied = await applySmartMatch(acceptedChunk);
       if (aiApplied < 0) smartMatchEvaluated = 0;
       else smartMatchEvaluated += aiApplied;
-      if (aiApplied > 0) log(`Smart Match evaluated ${aiApplied}/${acceptedChunk.length} candidates in this description pass`);
+      if (aiApplied > 0) log(`Smart Match (${AI_CFG.provider?.label || 'unknown provider'}) evaluated ${aiApplied}/${acceptedChunk.length} candidates in this description pass`);
       cursor += chunk.length;
       const qualifying = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT).length;
       log(`description pass: inspected=${descriptionEvaluatedCount}, consultantFiltered=${droppedConsultantSlop}, eligible=${evaluated.length}, resolved=${resolvedCount}, qualifying=${qualifying}/${DELIVER_COUNT}`);
@@ -1850,6 +1853,7 @@ if (IS_CLI) (async () => {
       descriptionScored: jdScored,
       fullDescriptions: fullDescriptionCount,
       smartMatchEvaluated,
+      smartMatchProvider: AI_CFG.provider?.label || '',
       unevaluatedCandidates,
       descriptionCeilingReached: descriptionEvaluatedCount >= MAX_DESCRIPTION_EVALUATIONS && candidatePool.length > descriptionEvaluatedCount,
       qualifyingMatches: aboveFloor.length,

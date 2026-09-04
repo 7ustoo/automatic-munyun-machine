@@ -48,6 +48,7 @@ import { listArchives, readArchive } from './batch-archive.mjs';
 import { readExclusions, writeExclusion } from './batch-exclusions.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import { normalizeConsultantSlopMode } from './consultant-slop-filter.mjs';
+import { detectAiProvider } from './ai-rerank.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
   verifyLogin, sendEmail, sendConfiguredEmail, disconnectEmail,
@@ -113,7 +114,7 @@ function settingsGet() {
       // whether one is stored. Plus muted terms + a thin-CV signal.
       aiEnabled: !!cfg.scoring?.ai?.enabled,
       aiHasKey: !!secrets.AMM_AI_KEY,
-      aiModel: cfg.scoring?.ai?.model || 'claude-opus-4-8',
+      aiProvider: detectAiProvider(secrets.AMM_AI_KEY)?.label || '',
       mutedTerms: cfg.scoring?.mutedTerms || [],
       // v4.3: email-to-VA. The app password is NEVER returned — only whether
       // Gmail credentials are present in .env (hasCreds).
@@ -153,7 +154,7 @@ function settingsSet(dotPath, jsonValue) {
     'sources.greenhouse', 'sources.lever', 'sources.ashby', 'sources.remoteConfigUrl', // v5.0
     'search.scrapeSources', // v7.3: what to scrape — both/hcafe/dice (v7.4: the only Dice knob — the enable toggle is gone)
     'display.showSalary',
-    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.model', 'scoring.jdRescore',
+    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
     'email.autoSend', 'email.subject', 'email.to',
@@ -177,13 +178,12 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'scoring.ai.apiKey') {
     value = String(value || '').trim();
     if (value && !/^[\x21-\x7e]{20,200}$/.test(value)) return out({ ok: false, error: 'that does not look like an API key' });
+    const provider = value ? detectAiProvider(value) : null;
+    if (value && !provider) return out({ ok: false, error: 'paste a Gemini, Anthropic, or OpenAI API key' });
     setLocalSecret('AMM_AI_KEY', value);
     cfgRW.set('scoring.ai.apiKey', '');
-    return out({ ok: true, path: dotPath, value: value ? '<stored securely>' : '' });
-  }
-  if (dotPath === 'scoring.ai.model') {
-    value = String(value || '').trim();
-    if (!/^[a-z0-9.-]{5,60}$/i.test(value)) value = 'claude-opus-4-8';
+    if (value) cfgRW.set('scoring.ai.enabled', true);
+    return out({ ok: true, path: dotPath, value: value ? '<stored securely>' : '', provider: provider?.label || '' });
   }
   // Light validation for the numeric / enum ones.
   if (dotPath === 'user.maxYoeAcceptable') value = Math.max(0, Math.min(30, parseInt(value) || 0));

@@ -8,6 +8,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [10.1.0] — 2026-09-04
+
+### Added
+
+- Smart Match now accepts direct Google Gemini, Anthropic, and OpenAI API keys. AMM detects the provider from the pasted key, selects the provider's model automatically, and uses the correct endpoint, authentication, structured-output request, and response parser.
+
+### Changed
+
+- Smart Match setup is now key-only: the manual model field is gone, and saving a recognized key automatically enables the feature.
+- Unrecognized keys fail locally before AMM sends them to any provider. Existing keys remain in the private local secret file and legacy saved model values are safely ignored.
+
 ## [10.0.0] — 2026-08-21
 
 ### Added
@@ -1145,7 +1156,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.0.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.1.0...HEAD
+[10.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.0.0...v10.1.0
 [10.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.3...v10.0.0
 [9.0.3]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.2...v9.0.3
 [9.0.2]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.1...v9.0.2

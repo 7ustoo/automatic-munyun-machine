@@ -287,7 +287,7 @@ async function getWeather() {
   return `${WMO_EMOJI[code] || '🌤'} ${city}: ${Math.round(j.current.temperature_2m)}${tempSuffix}, ${WMO[code] || 'unknown'}, high ${Math.round(j.daily.temperature_2m_max[0])}° / low ${Math.round(j.daily.temperature_2m_min[0])}°`;
 }
 
-// ---------- run claude code ----------
+// ---------- run daily batch ----------
 let runningJob = null;
 let runningJobTimeout = null;
 const SCRAPE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes — generous
@@ -297,7 +297,7 @@ function clearRunningJob() {
   if (runningJobTimeout) { clearTimeout(runningJobTimeout); runningJobTimeout = null; }
 }
 
-function runClaudeBatch(chatId) {
+function runDailyBatch(chatId) {
   if (runningJob) {
     return reply(chatId, '⏳ A scrape is already in progress — wait for it to finish.');
   }
@@ -570,7 +570,7 @@ function buildDiagnoseMessage() {
     lines.push(`  Cross-source unique: ${f.uniqueBeforeFilter ?? f.raw} (-${f.droppedDuplicates || 0} duplicates)`);
     lines.push(`  After filters: ${f.keptAfterFilter} (${f.droppedClearance || 0} clearance, ${f.droppedManagement || 0} management/lead, ${f.droppedSales || 0} sales dropped)`);
     lines.push(`  After dedup: ${f.afterDedup} (-${f.keptAfterFilter - f.afterDedup} already seen / applied)`);
-    lines.push(`  Descriptions: ${f.descriptionEvaluated || 0} evaluated, ${f.fullDescriptions ?? f.descriptionScored ?? 0} full${f.smartMatchEvaluated ? `, ${f.smartMatchEvaluated} Smart Match` : ''}`);
+    lines.push(`  Descriptions: ${f.descriptionEvaluated || 0} evaluated, ${f.fullDescriptions ?? f.descriptionScored ?? 0} full${f.smartMatchEvaluated ? `, ${f.smartMatchEvaluated} Smart Match${f.smartMatchProvider ? ` (${escHtml(f.smartMatchProvider)})` : ''}` : ''}`);
     if (f.consultantSlopMode && f.consultantSlopMode !== 'off') {
       lines.push(`  Consultant Slop (${f.consultantSlopMode}): ${f.droppedConsultantSlop || 0} dropped (${f.consultantCustomerFacing || 0} customer-facing, ${f.consultantConsulting || 0} consulting, ${f.consultantTravelRequired || 0} travel)`);
     }
@@ -791,7 +791,7 @@ async function handleMessage(msg) {
   // command (dispatch is first-match), which made self-update unreachable
   // from v0.5 until v2.0: typing /update silently ran a scrape instead.
   if (/^\/?(scrape|daily|gm|morning)\b/.test(text) && !/^\/?jobs\b/.test(text)) {
-    return runClaudeBatch(chatId);
+    return runDailyBatch(chatId);
   }
 
   // /auth — quick health check

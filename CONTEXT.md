@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 10.0.0
-**Active release branch:** `v10.0.0`
+**Version:** 10.1.0
+**Active release branch:** `v10.1.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-08-21
 
@@ -16,6 +16,12 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v10.1.0 makes Smart Match provider-aware and key-only. It detects direct
+Google Gemini, Anthropic, and OpenAI API keys, selects a maintained default
+model for the detected provider, enables Smart Match when a key is saved, and
+keeps keys in the existing private local secret store. The dashboard no longer
+exposes a model field.
 
 v10.0.0 adds the profile-scoped Consultant Slop Filter. Balanced and Strict
 modes classify full descriptions for consulting, professional-services,
@@ -71,7 +77,7 @@ v5.0 removes owner-specific defaults and expands the product beyond remote techn
 - Users can search Remote, Hybrid, and On-Site roles with an optional location.
 - Greenhouse, Lever, and Ashby public company-board feeds can supplement hiring.cafe.
 - Profile-scoped `search` and `sources` settings migrate from older top-level config locations.
-- Full-description scoring, role-family checks, salary parsing, optional Claude reranking, and score explanations remain in place.
+- Full-description scoring, role-family checks, salary parsing, provider-aware Smart Match reranking, and score explanations remain in place.
 
 v6.0.0 replaces the Chrome-hosted dashboard window on Windows with an
 AMM-owned Win32 window embedding Microsoft WebView2. The wrapper launches a
@@ -127,7 +133,7 @@ The wrapper is a thin native shell. Business logic stays in JavaScript helpers t
    number clear the final floor or the candidate supply is exhausted.
 8. Applies the optional Consultant Slop description classifier and replaces
    rejected customer-facing, consulting, and travel roles from later chunks.
-9. Optionally invokes Claude reranking only for surviving candidates.
+9. Optionally invokes provider-aware Smart Match reranking only for surviving candidates.
 10. Resolves direct application URLs.
 11. Writes `last-batch.json`, exports, scrape status, and batch history atomically. v7.2: also archives the full batch to `data/profiles/<profile>/batch-archive/` (`scripts/batch-archive.mjs`, 30-day retention, non-fatal) — the dashboard's "Previous scrapes" section lists these via `GET /api/archive`, serves one via `GET /api/archive/batch?id=`, and downloads one via `GET /api/export?format=…&archive=<id>`.
 12. Optionally delivers through Telegram and email.

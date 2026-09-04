@@ -6,7 +6,7 @@ import {
   termAllowedInText, AMBIGUOUS_TERM_CONTEXT, OFF_FAMILY_RX, FAMILY_PENALTY,
   jdScoreToPercent, salaryRank, compareJobs, SALARY_FLOOR_K,
 } from '../daily-batch.mjs';
-import { buildPrompt, candidateBatches, DEFAULT_AI_MODEL, RATINGS_SCHEMA } from '../ai-rerank.mjs';
+import { AI_PROVIDERS, buildPrompt, candidateBatches, detectAiProvider, RATINGS_SCHEMA } from '../ai-rerank.mjs';
 
 test('ambiguous guard: Palo Alto the city does NOT count', () => {
   assert.equal(termAllowedInText('Palo Alto', 'Marketing Manager — Palo Alto, CA · $120k'), false);
@@ -64,10 +64,20 @@ test('salary breaks ties but never outranks match %', () => {
   }
 });
 
-test('ai prompt embeds cv summary + jobs and model default is opus 4.8', () => {
+test('ai prompt embeds cv summary + jobs and providers choose models automatically', () => {
   const p = buildPrompt({ skills: ['iam'] }, [{ n: 0, title: 'IAM Engineer', company: 'X', text: 'body' }]);
   assert.ok(p.includes('"iam"') && p.includes('IAM Engineer') && p.includes('fit 0-100'));
-  assert.equal(DEFAULT_AI_MODEL, 'claude-opus-4-8');
+  assert.equal(AI_PROVIDERS.google.model, 'gemini-flash-latest');
+  assert.equal(AI_PROVIDERS.anthropic.model, 'claude-sonnet-4-6');
+  assert.equal(AI_PROVIDERS.openai.model, 'gpt-5-mini');
+});
+
+test('Smart Match detects Gemini, Anthropic, and OpenAI keys without a model field', () => {
+  assert.equal(detectAiProvider(`AIza${'a'.repeat(32)}`)?.id, 'google');
+  assert.equal(detectAiProvider(`sk-ant-${'a'.repeat(32)}`)?.id, 'anthropic');
+  assert.equal(detectAiProvider(`sk-proj-${'a'.repeat(32)}`)?.id, 'openai');
+  assert.equal(detectAiProvider(`sk-or-v1-${'a'.repeat(32)}`), null, 'OpenRouter keys must not be sent to OpenAI');
+  assert.equal(detectAiProvider('not-a-direct-provider-key'), null);
 });
 
 // v7.0: Smart match reads the real resume + scores a rubric, not just keywords.

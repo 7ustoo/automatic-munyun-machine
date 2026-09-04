@@ -1528,14 +1528,13 @@
         <!-- v9.0: Smart Match participates in the full target-fill loop. -->
         <div class="card">
           <h2>Smart match (AI) <span class="pill" id="ai-pill">off</span></h2>
-          <div class="muted-sm">Optional: every job whose description AMM evaluates gets a second opinion from Claude before the batch decides whether it has enough strong matches. Requests are grouped into 40-job batches, but there is no 40-job total limit. More evaluated jobs can mean more API usage.</div>
+          <div class="muted-sm">Optional: paste a Google Gemini, Anthropic, or OpenAI API key. AMM detects the provider, picks the model automatically, and gives every evaluated job a second opinion. Requests are grouped into 40-job batches, but there is no 40-job total limit.</div>
           <div class="set-row" style="margin-top:8px"><label>Enable Smart match</label>
             <select id="set-ai-enabled"><option value="false">Off</option><option value="true">On</option></select></div>
-          <div class="set-row"><label>Anthropic API key</label>
-            <input type="password" id="set-ai-key" class="num" style="width:230px" placeholder="sk-ant-…" autocomplete="new-password" spellcheck="false" /></div>
-          <div class="set-row"><label>Model</label>
-            <input type="text" id="set-ai-model" class="num" style="width:230px" autocomplete="off" spellcheck="false" /></div>
-          <div class="hint">The key is stored in your private local secret file, excluded from config backups, and is never displayed again after saving. Muted terms: <span id="muted-count">0</span>.</div>
+          <div class="set-row"><label>API key</label>
+            <input type="password" id="set-ai-key" class="num" style="width:230px" placeholder="Paste API key" autocomplete="new-password" spellcheck="false" /></div>
+          <div class="set-row"><label>Detected provider</label><span id="ai-provider" class="muted-sm">Paste key to detect</span></div>
+          <div class="hint">Pasting a key turns Smart Match on. The key is stored in your private local secret file, excluded from config backups, and is never displayed again after saving. Muted terms: <span id="muted-count">0</span>.</div>
         </div>
       </section>
 
@@ -2369,8 +2368,8 @@ async function loadSettings() {
     $("set-ai-enabled").value = String(!!s.aiEnabled);
     $("ai-pill").textContent = s.aiEnabled ? "on" : "off";
     $("set-ai-key").value = "";
-    $("set-ai-key").placeholder = s.aiHasKey ? "•••••••• saved — paste to replace" : "sk-ant-…";
-    $("set-ai-model").value = s.aiModel || "claude-opus-4-8";
+    $("set-ai-key").placeholder = s.aiHasKey ? "•••••••• saved — paste to replace" : "Paste API key";
+    $("ai-provider").textContent = s.aiProvider || "Paste key to detect";
     $("muted-count").textContent = (s.mutedTerms || []).length;
     // v4.0: thin-CV honesty — weak extraction means weak matching.
     const warn = $("cv-warn");
@@ -2389,11 +2388,14 @@ $("set-ai-enabled").addEventListener("change", async e => {
 $("set-ai-key").addEventListener("change", async e => {
   const v = e.target.value.trim();
   if (!v) return;
-  await saveSetting("scoring.ai.apiKey", v);
+  const r = await saveSetting("scoring.ai.apiKey", v);
+  if (!r.ok) return;
   e.target.value = "";
   e.target.placeholder = "•••••••• saved — paste to replace";
+  $("set-ai-enabled").value = "true";
+  $("ai-pill").textContent = "on";
+  $("ai-provider").textContent = r.provider || "Detected";
 });
-$("set-ai-model").addEventListener("change", e => saveSetting("scoring.ai.model", e.target.value));
 
 // v4.0: settings backups (list + restore).
 async function loadBackups() {
@@ -2423,6 +2425,7 @@ async function saveSetting(path, value) {
   const r = await postJSON("/api/settings/set", { path, value: String(value) });
   note("set-note", r.ok ? "✓ Saved." : ("✗ " + (r.error || "could not save")), r.ok);
   if (r.ok) setTimeout(() => note("set-note", ""), 1500);
+  return r;
 }
 $("set-yoe").addEventListener("change", e => saveSetting("user.maxYoeAcceptable", e.target.value));
 $("set-salary").addEventListener("change", e => saveSetting("user.salaryFloorUsd", e.target.value));
