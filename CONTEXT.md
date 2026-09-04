@@ -2,10 +2,10 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 10.1.0
-**Active release branch:** `v10.1.0`
+**Version:** 10.1.1
+**Active release branch:** `v10.1.1`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-08-21
+**Last refreshed:** 2026-09-04
 
 ## Product
 
@@ -16,6 +16,10 @@ The local desktop dashboard is the primary interface. Telegram and Gmail deliver
 AMM has no hosted backend. User state is stored in `config.json` and `data/`, both gitignored.
 
 ## Current release
+
+v10.1.1 recognizes Google's new `AQ.` Gemini authorization keys as well as
+legacy `AIza` keys, keeping Smart Match compatible with keys currently issued
+by Google AI Studio.
 
 v10.1.0 makes Smart Match provider-aware and key-only. It detects direct
 Google Gemini, Anthropic, and OpenAI API keys, selects a maintained default

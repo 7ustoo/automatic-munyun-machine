@@ -74,6 +74,7 @@ test('ai prompt embeds cv summary + jobs and providers choose models automatical
 
 test('Smart Match detects Gemini, Anthropic, and OpenAI keys without a model field', () => {
   assert.equal(detectAiProvider(`AIza${'a'.repeat(32)}`)?.id, 'google');
+  assert.equal(detectAiProvider(`AQ.${'a'.repeat(48)}`)?.id, 'google', 'new Gemini authorization keys are accepted');
   assert.equal(detectAiProvider(`sk-ant-${'a'.repeat(32)}`)?.id, 'anthropic');
   assert.equal(detectAiProvider(`sk-proj-${'a'.repeat(32)}`)?.id, 'openai');
   assert.equal(detectAiProvider(`sk-or-v1-${'a'.repeat(32)}`), null, 'OpenRouter keys must not be sent to OpenAI');
