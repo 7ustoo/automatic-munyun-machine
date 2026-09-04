@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [10.1.1] — 2026-09-04
+
+### Fixed
+
+- Smart Match now accepts the new `AQ.` authorization keys issued by Google AI Studio, as well as existing `AIza` Gemini keys.
+
 ## [10.1.0] — 2026-09-04
 
 ### Added
@@ -1156,7 +1162,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.1.0...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.1.1...HEAD
+[10.1.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.1.0...v10.1.1
 [10.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.0.0...v10.1.0
 [10.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.3...v10.0.0
 [9.0.3]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.2...v9.0.3

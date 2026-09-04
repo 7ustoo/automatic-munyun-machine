@@ -23,7 +23,9 @@ export const AI_PROVIDERS = Object.freeze({
 
 export function detectAiProvider(apiKey) {
   const key = String(apiKey || '').trim();
-  if (/^AIza[0-9A-Za-z_-]{20,}$/.test(key)) return AI_PROVIDERS.google;
+  // Google AI Studio now issues AQ. authorization keys in addition to the
+  // older AIza standard keys. Both authenticate through x-goog-api-key.
+  if (/^(?:AIza[0-9A-Za-z_-]{20,}|AQ\.[0-9A-Za-z_-]{20,})$/.test(key)) return AI_PROVIDERS.google;
   if (/^sk-ant-[0-9A-Za-z_-]{20,}$/.test(key)) return AI_PROVIDERS.anthropic;
   if (/^sk-(?:proj-|svcacct-)[0-9A-Za-z_-]{20,}$/.test(key) || /^sk-[0-9A-Za-z]{20,}$/.test(key)) {
     return AI_PROVIDERS.openai;
