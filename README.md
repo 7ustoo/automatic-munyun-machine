@@ -68,7 +68,7 @@ AMM uses the job card for a broad first pass, then loads the full description fo
 
 The optional **Consultant Slop Filter** reads those full descriptions before delivery. Balanced mode removes obvious consulting, professional-services, implementation, and customer-engagement roles. Strict mode also removes any role with explicit customer-facing duties or required travel. Rejected jobs do not consume the batch target; AMM keeps evaluating later candidates for replacement engineering roles.
 
-An optional bring-your-own Anthropic key adds Claude scoring inside that target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. It is off by default, and the key stays in the private local secret file outside config backups.
+Optional **Smart Match** accepts a Google Gemini, Anthropic, or OpenAI API key. Paste the key once; AMM detects the provider, selects the model automatically, turns Smart Match on, and scores jobs inside the target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. The key stays in the private local secret file outside config backups.
 
 ---
 
@@ -221,7 +221,7 @@ Network access happens only when needed for enabled features:
 - open-meteo for optional weather
 - Telegram or Gmail when connected
 - GitHub for update checks
-- Anthropic only when optional AI reranking is enabled
+- Google Gemini, Anthropic, or OpenAI only when optional Smart Match is enabled
 
 Sensitive and generated files are excluded from Git through `.gitignore`, including `.env`, `config.json`, and `data/`.
 
@@ -229,7 +229,7 @@ Sensitive and generated files are excluded from Git through `.gitignore`, includ
 
 Core AMM usage is free. hiring.cafe, public company-board feeds, Telegram, open-meteo, and local scoring do not require a paid AMM service.
 
-Optional Claude reranking uses your own Anthropic API key and may incur Anthropic charges.
+Optional Smart Match uses your own Gemini, Anthropic, or OpenAI API key and may incur charges from that provider.
 
 ## Requirements
 

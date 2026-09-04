@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const html = readFileSync(path.join(__dirname, '..', '..', 'wrapper', 'dashboard.html'), 'utf8');
+const dashboardApi = readFileSync(path.join(__dirname, '..', 'dashboard-api.mjs'), 'utf8');
 
 // ids created only at runtime by the modal system / empty state.
 const DYNAMIC = new Set(['modal-overlay', 'modal', 'modal-input', 'modal-cancel', 'modal-ok', 'empty-scrape', 'empty-setup', 'empty-tour']);
@@ -87,4 +88,14 @@ test('Consultant Slop Filter exposes off, balanced, and strict modes', () => {
     html.includes('saveSetting("filters.consultantSlopMode", e.target.value)'),
     'consultant filter selection must be persisted',
   );
+});
+
+test('Smart Match is key-only and shows the auto-detected provider', () => {
+  assert.ok(html.includes('id="set-ai-key"'), 'API key input missing');
+  assert.ok(html.includes('id="ai-provider"'), 'detected provider label missing');
+  assert.ok(!html.includes('id="set-ai-model"'), 'users should not have to choose a model');
+  assert.ok(html.includes('r.provider || "Detected"'), 'saved-key response must update provider label');
+  assert.ok(!dashboardApi.includes("'scoring.ai.model'"), 'model must not remain an editable setting');
+  assert.ok(dashboardApi.includes("cfgRW.set('scoring.ai.enabled', true)"), 'saving a key must enable Smart Match');
+  assert.ok(dashboardApi.includes('detectAiProvider(value)'), 'saving a key must validate its provider locally');
 });

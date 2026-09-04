@@ -2,21 +2,34 @@
 /**
  * v4.0: optional AI rerank for the daily batch ("Smart match").
  *
- * One batched call to the Claude API scores the top keyword-ranked candidates
- * against a summary of the user's CV, returning fit (0-100) + a one-line
- * reason per job. daily-batch blends this with the keyword score.
+ * One provider-aware API call scores keyword-ranked candidates against a
+ * summary of the user's CV, returning fit (0-100) + a one-line reason per
+ * job. The API key identifies Gemini, Anthropic, or OpenAI automatically;
+ * users never need to select a provider or model.
  *
  * Design constraints (AMM conventions):
  *  - Raw fetch, zero new deps (Node >= 18 global fetch, same as telegram-bot).
  *  - Fail-open: ANY error throws; the caller logs and keeps keyword ranks.
  *  - The API key must never be logged — it travels in the header only, and
  *    error messages thrown from here never embed it.
- *  - Structured output via output_config.format (json_schema) so the reply
- *    is guaranteed-parseable JSON — no prose to strip.
+ *  - Each provider's structured-output format is used so replies are JSON.
  */
 
-const API_URL = 'https://api.anthropic.com/v1/messages';
-export const DEFAULT_AI_MODEL = 'claude-opus-4-8';
+export const AI_PROVIDERS = Object.freeze({
+  google: Object.freeze({ id: 'google', label: 'Google Gemini', model: 'gemini-flash-latest' }),
+  anthropic: Object.freeze({ id: 'anthropic', label: 'Anthropic', model: 'claude-sonnet-4-6' }),
+  openai: Object.freeze({ id: 'openai', label: 'OpenAI', model: 'gpt-5-mini' }),
+});
+
+export function detectAiProvider(apiKey) {
+  const key = String(apiKey || '').trim();
+  if (/^AIza[0-9A-Za-z_-]{20,}$/.test(key)) return AI_PROVIDERS.google;
+  if (/^sk-ant-[0-9A-Za-z_-]{20,}$/.test(key)) return AI_PROVIDERS.anthropic;
+  if (/^sk-(?:proj-|svcacct-)[0-9A-Za-z_-]{20,}$/.test(key) || /^sk-[0-9A-Za-z]{20,}$/.test(key)) {
+    return AI_PROVIDERS.openai;
+  }
+  return null;
+}
 
 export function candidateBatches(candidates, size = 40) {
   const safeSize = Math.max(1, Math.min(100, Number(size) || 40));
@@ -89,39 +102,32 @@ export function buildPrompt(cvSummary, candidates) {
 }
 
 /**
- * @param {{apiKey:string, model?:string, cvSummary:object, candidates:Array<{n:number,title:string,company:string,text:string}>}} opts
+ * @param {{apiKey:string, cvSummary:object, candidates:Array<{n:number,title:string,company:string,text:string}>, fetchImpl?:typeof fetch}} opts
  * @returns {Promise<Array<{n:number,fit:number,reason:string}>>}
  */
-export async function aiRerank({ apiKey, model = DEFAULT_AI_MODEL, cvSummary, candidates }) {
+export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetch }) {
   if (!apiKey) throw new Error('no API key configured');
   if (!candidates?.length) return [];
-
-  const body = JSON.stringify({
-    model,
-    max_tokens: 8000,
-    output_config: { format: { type: 'json_schema', schema: RATINGS_SCHEMA } },
-    messages: [{ role: 'user', content: buildPrompt(cvSummary, candidates) }],
-  });
+  const provider = detectAiProvider(apiKey);
+  if (!provider) throw new Error('unsupported API key; paste a Gemini, Anthropic, or OpenAI key');
+  const prompt = buildPrompt(cvSummary, candidates);
+  const request = providerRequest(provider, apiKey, prompt);
 
   // One retry on retryable statuses / network errors — this runs inside the
   // (long) daily batch, so a transient 529 shouldn't cost the user the rerank.
   let lastErr;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const res = await fetch(API_URL, {
+      const res = await fetchImpl(request.url, {
         method: 'POST',
-        headers: {
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-          'content-type': 'application/json',
-        },
-        body,
+        headers: request.headers,
+        body: JSON.stringify(request.body),
         signal: AbortSignal.timeout(120000),
       });
       if (!res.ok) {
         let detail = 'HTTP ' + res.status;
         try { const j = await res.json(); detail += ': ' + (j.error?.message || j.error?.type || ''); } catch {}
-        if ([429, 500, 529].includes(res.status) && attempt === 0) {
+        if ([429, 500, 502, 503, 529].includes(res.status) && attempt === 0) {
           lastErr = new Error(detail);
           await new Promise(r => setTimeout(r, 3000));
           continue;
@@ -129,10 +135,8 @@ export async function aiRerank({ apiKey, model = DEFAULT_AI_MODEL, cvSummary, ca
         throw new Error(detail); // 401 → bad key; 400 → bad request; surfaced (scrubbed) in the batch log
       }
       const data = await res.json();
-      if (data.stop_reason === 'refusal') throw new Error('model declined the request');
-      if (data.stop_reason === 'max_tokens') throw new Error('response truncated (max_tokens)');
-      const text = (data.content || []).find(b => b.type === 'text')?.text || '';
-      const parsed = JSON.parse(text); // guaranteed-schema JSON via output_config.format
+      const text = providerResponseText(provider, data);
+      const parsed = JSON.parse(text);
       return (parsed.ratings || []).filter(r => Number.isInteger(r.n));
     } catch (e) {
       lastErr = e;
@@ -144,4 +148,68 @@ export async function aiRerank({ apiKey, model = DEFAULT_AI_MODEL, cvSummary, ca
     }
   }
   throw lastErr;
+}
+
+export function providerRequest(provider, apiKey, prompt) {
+  if (provider.id === 'google') {
+    return {
+      url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(provider.model)}:generateContent`,
+      headers: { 'x-goog-api-key': apiKey, 'content-type': 'application/json' },
+      body: {
+        contents: [{ role: 'user', parts: [{ text: prompt }] }],
+        generationConfig: {
+          maxOutputTokens: 8000,
+          responseMimeType: 'application/json',
+          responseSchema: RATINGS_SCHEMA,
+        },
+      },
+    };
+  }
+  if (provider.id === 'openai') {
+    return {
+      url: 'https://api.openai.com/v1/chat/completions',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: {
+        model: provider.model,
+        max_completion_tokens: 8000,
+        messages: [{ role: 'user', content: prompt }],
+        response_format: {
+          type: 'json_schema',
+          json_schema: { name: 'job_match_ratings', strict: true, schema: RATINGS_SCHEMA },
+        },
+      },
+    };
+  }
+  return {
+    url: 'https://api.anthropic.com/v1/messages',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: {
+      model: provider.model,
+      max_tokens: 8000,
+      output_config: { format: { type: 'json_schema', schema: RATINGS_SCHEMA } },
+      messages: [{ role: 'user', content: prompt }],
+    },
+  };
+}
+
+export function providerResponseText(provider, data) {
+  if (provider.id === 'google') {
+    const candidate = data.candidates?.[0];
+    if (!candidate) throw new Error(data.promptFeedback?.blockReason ? 'model declined the request' : 'empty model response');
+    if (candidate.finishReason === 'MAX_TOKENS') throw new Error('response truncated (max tokens)');
+    return (candidate.content?.parts || []).map(part => part.text || '').join('');
+  }
+  if (provider.id === 'openai') {
+    const choice = data.choices?.[0];
+    if (choice?.message?.refusal) throw new Error('model declined the request');
+    if (choice?.finish_reason === 'length') throw new Error('response truncated (max tokens)');
+    return choice?.message?.content || '';
+  }
+  if (data.stop_reason === 'refusal') throw new Error('model declined the request');
+  if (data.stop_reason === 'max_tokens') throw new Error('response truncated (max tokens)');
+  return (data.content || []).find(block => block.type === 'text')?.text || '';
 }
