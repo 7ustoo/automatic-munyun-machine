@@ -2031,10 +2031,16 @@ function funnelLineJS(f) {
   const smart = f.smartMatchEvaluated ? ` · ${f.smartMatchEvaluated} Smart Match` : "";
   const consultant = f.droppedConsultantSlop ? ` → ${f.droppedConsultantSlop} consultant/client-facing dropped` : "";
   let result = `${f.raw || 0} raw → ${unique} unique (−${duplicates} duplicates) → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart})${consultant} → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
+  if (f.smartMatchStatus) result += ` · AI: ${f.smartMatchStatus}`;
+  if (f.smartMatchError) result += ` (${f.smartMatchError})`;
+  if (f.searchIncomplete) result += ' · Search incomplete — interrupted or capped searches, not exhausted supply';
+  if (f.savedSync) result += ` · hiring.cafe Saved: ${f.savedSync.status}, ${f.savedSync.pending || 0} pending`;
+  if (f.emailDelivery) result += ` · Email: ${f.emailDelivery}`;
+  if (f.telegramDelivery) result += ` · Telegram: ${f.telegramDelivery}`;
   if ((f.sent || 0) < (f.targetJobsPerBatch || 0)) {
     result += f.descriptionCeilingReached
       ? ` · safety ceiling reached; ${f.unevaluatedCandidates || 0} not evaluated`
-      : " · all candidates evaluated; no strong matches held back";
+      : f.searchIncomplete ? " · retry scrape to finish search coverage" : " · all collected candidates evaluated; no strong matches held back";
   }
   return result;
 }

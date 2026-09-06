@@ -8,6 +8,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [10.2.0] — 2026-09-05
+
+### Fixed
+
+- Gemini Smart Match now uses Google's JSON Schema request field. Ratings are validated for completeness, unique job IDs and bounded scores; malformed/truncated batches split, and later failures preserve earlier valid scores.
+- Search explicitly requests All time, retains your workplace selection (Remote by default), follows available pages, retries interrupted pages and reads jobs inside grouped company cards. Search coverage is recorded; failures and safety limits are not reported as exhausted supply.
+- Scoring reads the actual job-description section, with retries and a 24-hour local cache. A 0% minimum no longer stops the search before it looks for enough strong matches.
+- Published jobs enter local duplicate protection before optional delivery. Email/Telegram failures are non-fatal and appear in batch status.
+
+### Added
+
+- Verified Saved synchronization for published hiring.cafe selections, with a persistent retry queue. Requires sign-in; selection never automatically marks a job Applied. Viewed jobs remain eligible.
+- Per-batch AI status, search coverage, delivery and Saved-sync receipts. History retains up to 500 individual run summaries alongside existing daily trends.
+- Opt-in synthetic Smart Match and isolated live hiring.cafe validation helpers; scrape playbook in README.
+
 ## [10.1.1] — 2026-09-04
 
 ### Fixed

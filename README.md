@@ -12,6 +12,23 @@
 
 ## What AMM does
 
+### What happens when you click Scrape (v10.2)
+
+1. AMM loads your active profile's locally saved resume and settings and takes a scrape lock so two runs cannot collide.
+2. It searches your hiring.cafe keywords with **Remote** by default (or your chosen workplace types), **All time**, and newest first. All time includes recent jobs; it does not need to repeat overlapping date presets. Your configured recency filter still applies afterward.
+3. It follows available pages and opens the extra jobs inside grouped company cards. Each failed page gets three attempts. An interrupted search or safety cap is shown as **incomplete**, not “you ran out of jobs.” Retrying starts a fresh search against the current listings.
+4. It removes duplicates, previously delivered/applied jobs, and jobs blocked by your settings. When signed in, hiring.cafe also excludes Saved and Applied jobs. **Viewed stays off** so merely inspecting a description does not discard a job.
+5. It reads actual job descriptions, compares requirements to your resume, and optionally sends resume evidence and job text to your chosen AI provider. Smart Match understands standard equivalent names such as SSO/single sign-on. Every returned score must validate. The dashboard distinguishes AI success, partial results, failure, missing key, and disabled scoring.
+6. It keeps evaluating until it finds your target of strong matches (70% or your higher minimum), reaches the available candidate limit, or hits the description safety ceiling. A 0% minimum allows weaker fallback jobs; it no longer makes AMM stop looking early. No tool can guarantee 200 strong, fresh jobs every day.
+7. It publishes the highest-ranked selection locally and remembers only those delivered jobs. Selected hiring.cafe jobs are queued for **Saved**, verified after reload, and retried on later scrapes if needed. **Saved is not Applied**: applications remain your explicit action. Sign in through AMM for account synchronization; the Codex browser is a separate session.
+8. Optional Telegram/email delivery follows. Failures are shown without losing the local batch. If Gmail says `reconnect-required`, reconnect Gmail in System and use the existing email/export controls to resend the batch—no new scrape needed.
+
+Each run has an archived batch with scoring and coverage details. Daily trend percentages from older scoring versions are not directly comparable. Detailed local run summaries also retain the scorer version and whether Smart Match actually ran.
+
+Advanced profile settings: `scoring.searchAllPages` defaults to true (5,000-page runaway guard); false restores your `maxPagesPerQuery` limit. `scoring.syncSavedJobs` defaults to true and requires `accountDedup` plus a signed-in hiring.cafe session. No new employer sources are enabled by this update.
+
+### Overview
+
 1. **Reads your resume** and identifies relevant titles, skills, certifications, and experience.
 2. **Finds jobs** on hiring.cafe and optional Greenhouse, Lever, and Ashby company boards.
 3. **Filters the noise** using your location, workplace preference, experience limit, blocked companies, recency, and other settings.

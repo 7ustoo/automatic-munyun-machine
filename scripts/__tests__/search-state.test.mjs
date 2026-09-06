@@ -13,6 +13,8 @@ test('default: query + Remote only — no account filter, no form-ease', () => {
   assert.deepEqual(buildSearchState('security engineer'), {
     searchQuery: 'security engineer',
     workplaceTypes: ['Remote'],
+    dateFetchedPastNDays: -1,
+    sortBy: 'date',
   });
 });
 
@@ -40,6 +42,8 @@ test('both filters combine', () => {
   assert.deepEqual(s, {
     searchQuery: 'it auditor',
     workplaceTypes: ['Remote'],
+    dateFetchedPastNDays: -1,
+    sortBy: 'date',
     hideJobTypes: ['Saved', 'Applied'],
     applicationFormEase: ['TimeConsuming'],
   });
