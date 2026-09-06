@@ -2,10 +2,19 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 10.1.1
-**Active release branch:** `v10.1.1`
+**Version:** 10.2.0
+**Active release branch:** `v10.2.0`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-09-04
+**Last refreshed:** 2026-09-05
+
+### v10.2 search/scoring changes
+
+- `hcafe-pagination.mjs`: rendered-page retry traversal and company-card carousel extraction. Search sends `dateFetchedPastNDays:-1`, `sortBy:date`, configured workplace types. `scoring.searchAllPages` defaults true (5,000-page guard); false retains `maxPagesPerQuery`. Coverage snapshots in profile `search-coverage.json` record last completed and next zero-based page, not a cross-day resume token: searches restart against the changing live index.
+- `ai-rerank.mjs`: Gemini `responseJsonSchema`, strict per-job validation. Caller splits truncated/malformed batches, preserves prior successful blends, and exposes partial/failure status. Strong-target stopping uses max(70, configured floor); weaker jobs remain allowed only by configured floor when evaluation ends.
+- Actual `#job-description` only, two load attempts, profile `description-cache.json` (24 hours, 5,000 entries).
+- `hcafe-save-queue.mjs`: profile `hcafe-save-queue.json`, selected jobs only, idempotent Saved verification after reload. `scoring.syncSavedJobs` defaults true; gated by accountDedup. Failed saves remain queued for later scrapes. No automatic Applied action.
+- Local seen persistence immediately follows publication; optional delivery cannot cancel it. Last batch/archive funnel records AI, coverage, Saved and delivery outcomes. History adds `runs` (500 retained) without changing daily trends' `days` contract.
+- Live probes: `node dev/live-smart-match.mjs <install-root>` uses configured secret with synthetic data only; `node dev/live-hcafe-search.mjs [term]` visits two pages in an isolated browser, without batch/seen writes.
 
 ## Product
 

@@ -1,12 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiRerank } from '../ai-rerank.mjs';
+import { aiRerank, validateRatings } from '../ai-rerank.mjs';
 
 const ratings = [{ n: 0, fit: 91, reason: 'Strong fit.', skills: 93, seniority: 88, role: 94 }];
 const options = {
   cvSummary: { skills: ['Node.js'] },
   candidates: [{ n: 0, title: 'Backend Engineer', company: 'A', text: 'Build APIs.' }],
 };
+
+test('reject missing, duplicate, out-of-range, and unrelated model ratings', () => {
+  assert.throws(() => validateRatings([], options.candidates), /incomplete/);
+  for (const patch of [{ n: 999 }, { fit: 101 }, { skills: -1 }, { fit: '91' }, { reason: '' }]) {
+    assert.throws(() => validateRatings([{ ...ratings[0], ...patch }], options.candidates), /invalid/);
+  }
+  assert.throws(() => validateRatings([ratings[0], ratings[0]], [{ n: 0 }, { n: 1 }]), /invalid/);
+});
 
 function okJson(data, inspect) {
   return async (url, init) => {
@@ -25,7 +33,8 @@ test('Gemini key selects Google endpoint, model, schema, and response parser', a
       assert.match(url, /gemini-flash-latest/);
       assert.equal(init.headers['x-goog-api-key'], key);
       assert.equal(body.generationConfig.responseMimeType, 'application/json');
-      assert.deepEqual(body.generationConfig.responseSchema.required, ['ratings']);
+      assert.equal(body.generationConfig.responseSchema, undefined);
+      assert.deepEqual(body.generationConfig.responseJsonSchema.required, ['ratings']);
     }),
   });
   assert.deepEqual(result, ratings);

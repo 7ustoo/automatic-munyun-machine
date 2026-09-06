@@ -32,6 +32,8 @@ import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
 import { aiRerank, candidateBatches, detectAiProvider } from './ai-rerank.mjs';
+import { crawlSearch } from './hcafe-pagination.mjs';
+import { enqueueSaved, drainSaveQueue, ensureJobSaved, readSaveQueue } from './hcafe-save-queue.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
 import { resolveBrowser } from './browser-launcher.mjs';
 import { isSignedIn, writeHcafeAuthCache, readHcafeAuthCache, dedupMode } from './hcafe-session.mjs';
@@ -399,12 +401,13 @@ export function buildSearchState(term, { formEaseFilter = null, accountDedup = f
   const loc = String(location || '').trim();
   const wantsLocal = wt.some(w => w !== 'Remote');
   const searchQuery = (loc && wantsLocal) ? `${term} ${loc}` : term;
-  const s = { searchQuery, workplaceTypes: wt };
+  const s = { searchQuery, workplaceTypes: wt, dateFetchedPastNDays: -1, sortBy: 'date' };
   if (accountDedup) s.hideJobTypes = ['Saved', 'Applied'];
   if (formEaseFilter) s.applicationFormEase = formEaseFilter;
   return s;
 }
 
+const searchCoverage = {};
 async function scrape() {
   log(`Launching headless Chromium with persistent profile…`);
   const ctx = await launchBrowser();
@@ -474,7 +477,7 @@ async function _scrapeWith(ctx) {
   // stops offering a Next link long before it (observed 15–25 pages), so the
   // real end of the result set is what ends the loop. The old 50 was close
   // enough to real page counts to look like a legitimate stopping point.
-  const MAX_PAGES_PER_QUERY = SCORING.maxPagesPerQuery ?? 300;
+  const MAX_PAGES_PER_QUERY = SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
 
   // v1.0.x: target-driven cross-query early stop. After each query's
   // pagination, we compute the running fresh-after-dedup count. If it
@@ -491,150 +494,19 @@ async function _scrapeWith(ctx) {
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
   let runningFreshEstimate = 0;
 
-  // v7.9: exhaustive pagination helpers.
-  //
-  // The old loop slept a flat 2.5s after clicking Next, then checked ONCE for
-  // the Next button. hiring.cafe re-renders its grid in place and is often
-  // slower than that, so a still-rendering page looked identical to the end of
-  // the results: a short card count and no Next button. Measured cost of that
-  // race — "iam" (Remote) reported 899 jobs on the site; the scrape collected
-  // 398. Waiting properly collected 560 from the same search.
-  //
-  // Everything below trades time for completeness, which is the correct trade
-  // for a batch that runs unattended at 7am.
-  const NEXT_SEL = 'a[aria-label*="next" i], button[aria-label*="next" i]';
-
-  // Wait until the grid actually turns over. Anchors on the first card's href
-  // instead of a wall-clock guess: the page has genuinely advanced only once
-  // that value changes.
-  const waitForPageTurn = async (prevFirstHref, timeoutMs = 20000) => {
-    try {
-      await page.waitForFunction(
-        (prev) => {
-          const first = document.querySelector('a[href^="/job/"]');
-          return !!first && first.getAttribute('href') !== prev;
-        },
-        prevFirstHref,
-        { timeout: timeoutMs, polling: 250 }
-      );
-      return true;
-    } catch { return false; }
-  };
-
-  // Wait for the card count to hold steady across consecutive polls, so we
-  // never extract a half-populated grid and mistake it for a final short page.
-  const waitForCardsSettled = async (timeoutMs = 12000) => {
-    const deadline = Date.now() + timeoutMs;
-    let last = -1, stableFor = 0;
-    while (Date.now() < deadline) {
-      const n = await page.evaluate(() => document.querySelectorAll('a[href^="/job/"]').length).catch(() => -1);
-      if (n > 0 && n === last) { if (++stableFor >= 2) return n; }
-      else { stableFor = 0; last = n; }
-      await page.waitForTimeout(400);
-    }
-    return last;
-  };
-
-  // Only declare "no more pages" after the button has stayed missing across
-  // several escalating waits (~12s total). A single miss is almost always a
-  // slow render, not the end of the result set.
-  const findNextButton = async (attempts = 5) => {
-    for (let t = 0; t < attempts; t++) {
-      const btn = page.locator(NEXT_SEL).first();
-      const visible = await btn.isVisible().catch(() => false);
-      const enabled = visible && await btn.isEnabled().catch(() => false);
-      if (visible && enabled) return btn;
-      if (t < attempts - 1) await page.waitForTimeout(1200 * (t + 1)); // 1.2s → 2.4s → 3.6s → 4.8s
-    }
-    return null;
-  };
-
   for (const [key, query] of HCAFE_QUERIES) {
     const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
-    const url = 'https://hiring.cafe/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
-    log(`Scraping "${query}"…`);
-    const seenInQuery = new Set();
-    const allRows = [];
-
-    // Page 1 — initial navigation, retry up to 3 times on failure.
-    let firstPageRows = [];
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForSelector('a[href^="/job/"]', { timeout: 15000 }).catch(() => {});
-        await waitForCardsSettled(); // v7.9: no fixed sleep — wait for the grid to stop growing
-        firstPageRows = await page.evaluate(EXTRACT_FN);
-        break;
-      } catch (e) {
-        log(`  attempt ${attempt} failed: ${e.message.split('\n')[0]}`);
-        if (attempt === 3) throw e;
-        await page.waitForTimeout(2000);
-      }
-    }
-    for (const r of firstPageRows) {
-      if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); }
-    }
-    log(`  page 1 → ${firstPageRows.length} cards (running total: ${allRows.length})`);
-
-    // Pages 2..N — click Next to the true end of the result set. v7.9: every
-    // stop condition now has to survive a retry, so we only quit when the site
-    // has actually run out, never because a render was slow.
-    let stoppedBecause = `hit the ${MAX_PAGES_PER_QUERY}-page safety cap`;
-    for (let pageNum = 2; pageNum <= MAX_PAGES_PER_QUERY; pageNum++) {
-      const nextBtn = await findNextButton();
-      if (!nextBtn) {
-        stoppedBecause = `Next stayed gone after 5 checks over ~12s — end of results`;
-        log(`  no more pages after ${pageNum - 1} (${stoppedBecause})`);
-        break;
-      }
-      try {
-        const prevFirstHref = await page.evaluate(() => {
-          const a = document.querySelector('a[href^="/job/"]');
-          return a ? a.getAttribute('href') : null;
-        });
-        await nextBtn.scrollIntoViewIfNeeded().catch(() => {});
-        await nextBtn.click({ timeout: 10000 });
-        // Wait for the grid to actually turn over, then for it to stop growing.
-        const turned = await waitForPageTurn(prevFirstHref);
-        await waitForCardsSettled();
-        let pageRows = await page.evaluate(EXTRACT_FN);
-        // A short page is the classic false-end. Give it one more settle pass
-        // before believing it.
-        if (pageRows.length < 40) {
-          await page.waitForTimeout(2500);
-          await waitForCardsSettled(6000);
-          const retryRows = await page.evaluate(EXTRACT_FN);
-          if (retryRows.length > pageRows.length) pageRows = retryRows;
-        }
-        let newCards = 0;
-        for (const r of pageRows) {
-          if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); newCards++; }
-        }
-        log(`  page ${pageNum} → ${pageRows.length} cards (${newCards} new, running total: ${allRows.length})${turned ? '' : ' [grid did not turn over]'}`);
-        if (newCards === 0) {
-          // Re-extract once after a longer pause before concluding we're looping
-          // on the same page — another slow-render false positive.
-          await page.waitForTimeout(3000);
-          await waitForCardsSettled(8000);
-          const secondLook = await page.evaluate(EXTRACT_FN);
-          let recovered = 0;
-          for (const r of secondLook) {
-            if (!seenInQuery.has(r.href)) { seenInQuery.add(r.href); allRows.push(r); recovered++; }
-          }
-          if (recovered === 0) {
-            stoppedBecause = `page ${pageNum} returned no new jobs on two consecutive reads`;
-            log(`  stopping pagination — ${stoppedBecause}`);
-            break;
-          }
-          log(`  page ${pageNum} recovered ${recovered} more on a second read (running total: ${allRows.length})`);
-        }
-      } catch (e) {
-        stoppedBecause = `page ${pageNum} errored: ${e.message.split('\n')[0]}`;
-        log(`  ${stoppedBecause} — stopping pagination`);
-        break;
-      }
-    }
-    log(`  "${query}" complete: ${allRows.length} jobs (${stoppedBecause})`);
+    const url = 'https://hiringcafe.com/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
+    log(`Scraping "${query}" — All time…`);
+    const { rows: allRows, coverage } = await crawlSearch({
+      page, url, extract: EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
+      checkpoint: state => {
+        searchCoverage[key] = { query, ...state };
+        atomicWriteJson(path.join(PP.dir, 'search-coverage.json'), { at: new Date().toISOString(), queries: searchCoverage });
+      },
+    });
+    searchCoverage[key] = { query, ...coverage, jobs: allRows.length };
+    log(`  "${query}" ${coverage.complete ? 'complete' : 'INCOMPLETE'}: ${allRows.length} jobs (${coverage.reason})`);
 
     results[key] = allRows;
 
@@ -654,7 +526,7 @@ async function _scrapeWith(ctx) {
       break;
     }
   }
-  log(`Searched ${Object.keys(results).length}/${QUERIES.length} keywords${SEARCH_ALL_QUERIES ? ' (full scan — every keyword, every page)' : ''}.`);
+  log(`Searched ${Object.keys(results).length}/${HCAFE_QUERIES.length} hiring.cafe keywords; ${Object.values(searchCoverage).filter(q => !q.complete).length} incomplete searches.`);
 
   // Persist per-query 7-day rolling supply history. Surfaces in /diagnose
   // so a user can see "Detection Engineer has averaged 0 cards/day for a
@@ -779,8 +651,8 @@ const AI_CFG = {
 };
 
 const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
-const smartMatchedRows = [];
 let smartMatchFailedOpen = false;
+let smartMatchError = '';
 
 async function applySmartMatch(rows) {
   if (!AI_CFG.enabled || !AI_CFG.apiKey || !rows.length || smartMatchFailedOpen) return 0;
@@ -798,7 +670,7 @@ async function applySmartMatch(rows) {
     const batch = batches[batchIndex];
     const candidates = batch.map((r, n) => ({
       n, title: r.title, company: r.company,
-      text: (r.__jd || r.cardText || '').slice(0, 3500),
+      text: (r.__jd || r.cardText || '').slice(0, 16000),
     }));
     let ratings;
     try {
@@ -807,17 +679,15 @@ async function applySmartMatch(rows) {
       if (unique.size !== batch.length) throw new Error(`incomplete response (${unique.size}/${batch.length} jobs)`);
     } catch (e) {
       log(`Smart Match batch ${batchIndex + 1}/${batches.length} failed open: ${SCRUB(e.message || e)}`);
-      // Do not mix AI and keyword-only scores in one run. Roll back prior AI
-      // blends and continue the complete target-fill loop deterministically.
-      for (const prior of smartMatchedRows) {
-        prior.matchPct = prior.kwPct;
-        delete prior.aiPct;
-        delete prior.aiReason;
-        delete prior.aiSub;
+      smartMatchError = SCRUB(String(e.message || e)).slice(0, 240);
+      // Split malformed/truncated output; preserve previous successful scores.
+      if (batch.length > 1 && /truncated|ratings|incomplete|JSON/i.test(smartMatchError)) {
+        const mid = Math.ceil(batch.length / 2);
+        batches.splice(batchIndex + 1, 0, batch.slice(0, mid), batch.slice(mid));
+        continue;
       }
-      smartMatchedRows.length = 0;
       smartMatchFailedOpen = true;
-      return -1;
+      return applied;
     }
     for (const rt of ratings || []) {
       const r = batch[rt.n];
@@ -829,10 +699,10 @@ async function applySmartMatch(rows) {
       }
       r.kwPct = r.matchPct;
       r.matchPct = Math.round(0.35 * r.kwPct + 0.65 * r.aiPct);
-      smartMatchedRows.push(r);
       applied++;
     }
   }
+  if (!smartMatchFailedOpen) smartMatchError = '';
   return applied;
 }
 
@@ -1270,17 +1140,19 @@ function recordAuthFail() {
 // spawns a small page pool, and parallel-fetches each viewjob page,
 // extracting "apply_url" from the rendered HTML.
 async function resolveOnePage(page, viewjobUrl) {
+  for (let attempt = 0; attempt < 2; attempt++) {
   try {
     await page.goto(viewjobUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
     // Settle so JSON payload renders into HTML
-    await page.waitForTimeout(1500);
+    await page.locator('#job-description').waitFor({ timeout: 15000 });
     const html = await page.content();
     // v4.0: we're already standing on the job page for the apply-URL — now we
     // finally READ it. The rendered body text (title + full description +
     // hiring.cafe's requirements summary) feeds the second-pass rescore.
     let jdText = '';
-    try { jdText = await page.evaluate(() => document.body.innerText || ''); } catch {}
-    jdText = String(jdText).replace(/\s+/g, ' ').slice(0, 7000);
+    jdText = await page.locator('#job-description').innerText();
+    jdText = String(jdText).replace(/\s+/g, ' ').trim().slice(0, 40000);
+    if (!jdText) throw new Error('empty description');
     const m = html.match(/"apply_url":"([^"]+)"/);
     if (!m) return { directUrl: null, jdText };
     const u = m[1];
@@ -1291,9 +1163,14 @@ async function resolveOnePage(page, viewjobUrl) {
     // escHtmlAttr() at the message-build site (see buildMessage / F-H1).
     if (!/^https?:\/\/[^\s<>"']+$/i.test(u)) return { directUrl: null, jdText };
     return { directUrl: u, jdText };
-  } catch { return { directUrl: null, jdText: '' }; }
+  } catch { /* retry the actual description, never substitute navigation text */ }
+  }
+  return { directUrl: null, jdText: '' };
 }
 
+const descriptionCachePath = path.join(PP.dir, 'description-cache.json');
+let descriptionCache = {};
+try { descriptionCache = JSON.parse(fs.readFileSync(descriptionCachePath, 'utf8')); } catch {}
 async function resolveAll(rows) {
   if (!rows.length) return [];
   // v5.0: ATS jobs (from source adapters) already carry their JD + apply URL,
@@ -1337,11 +1214,16 @@ async function resolveAll(rows) {
         if (idx >= rows.length) break;
         const r = rows[idx];
         if (r.__ats) { if (out[idx]?.directUrl) resolved++; continue; }
-        out[idx] = await resolveOnePage(p, r.href);
-        if (out[idx]) out[idx].descriptionQuality = out[idx].jdText?.length >= 1000 ? 'full' : (out[idx].jdText ? 'summary' : 'missing');
+        const cached = descriptionCache[r.href];
+        out[idx] = cached?.jdText && Date.now() - cached.at < 24 * 60 * 60 * 1000
+          ? cached : await resolveOnePage(p, r.href);
+        if (out[idx]?.jdText) descriptionCache[r.href] = { ...out[idx], at: Date.now() };
+        if (out[idx]) out[idx].descriptionQuality = out[idx].jdText ? 'full' : 'missing';
         if (out[idx]?.directUrl) resolved++;
       }
     }));
+    descriptionCache = Object.fromEntries(Object.entries(descriptionCache).filter(([, v]) => Date.now() - v.at < 24 * 60 * 60 * 1000).slice(-5000));
+    try { atomicWriteJson(descriptionCachePath, descriptionCache); } catch {}
     return out;
   } finally {
     await ctx.close().catch(() => {});
@@ -1360,11 +1242,12 @@ function escHtmlAttr(s) { return escHtml(s).replace(/"/g, '&quot;').replace(/'/g
 // (2) any query has 3+ consecutive zero-card days → likely typo, suggest /jobs remove + /jobs add
 function buildSupplyBanner({ funnel, byQuery }) {
   const warnings = [];
+  if (funnel.searchIncomplete) warnings.push('⚠️ <b>Search incomplete.</b> Some pages or keywords were interrupted or capped. This does not mean jobs ran out. Retry the scrape.');
   if ((funnel.sent ?? 0) < (funnel.targetJobsPerBatch ?? 0) && (funnel.afterDedup ?? 0) >= 30) {
     const unchecked = funnel.unevaluatedCandidates || 0;
     warnings.push(funnel.descriptionCeilingReached
-      ? `⚠️ <b>Found ${funnel.sent} strong matches after reaching the ${funnel.descriptionEvaluated}-description safety ceiling.</b> ${unchecked} candidates were not evaluated; raise the ceiling to inspect them in this run.`
-      : `⚠️ <b>Found ${funnel.sent} strong matches after checking all ${funnel.descriptionEvaluated} candidates.</b> No qualifying matches were held for tomorrow, and AMM did not pad the batch with weaker jobs.`);
+      ? `⚠️ <b>Selected ${funnel.sent} jobs after reaching the ${funnel.descriptionEvaluated}-description safety ceiling.</b> ${unchecked} candidates were not evaluated.`
+      : `⚠️ <b>Selected ${funnel.sent} jobs after checking ${funnel.descriptionEvaluated} collected candidates.</b> Your minimum match setting controls whether weaker jobs may be included.`);
   }
   if (funnel.afterDedup < 30) {
     warnings.push(`⚠️ <b>Limited supply today: ${funnel.afterDedup} fresh jobs</b> (typical: 50–80).`);
@@ -1818,7 +1701,7 @@ if (IS_CLI) (async () => {
       else smartMatchEvaluated += aiApplied;
       if (aiApplied > 0) log(`Smart Match (${AI_CFG.provider?.label || 'unknown provider'}) evaluated ${aiApplied}/${acceptedChunk.length} candidates in this description pass`);
       cursor += chunk.length;
-      const qualifying = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT).length;
+      const qualifying = evaluated.filter(r => r.matchPct >= Math.max(70, MATCH_FLOOR_PCT)).length;
       log(`description pass: inspected=${descriptionEvaluatedCount}, consultantFiltered=${droppedConsultantSlop}, eligible=${evaluated.length}, resolved=${resolvedCount}, qualifying=${qualifying}/${DELIVER_COUNT}`);
       if (qualifying >= DELIVER_COUNT) break;
     }
@@ -1854,6 +1737,12 @@ if (IS_CLI) (async () => {
       fullDescriptions: fullDescriptionCount,
       smartMatchEvaluated,
       smartMatchProvider: AI_CFG.provider?.label || '',
+      smartMatchModel: AI_CFG.provider?.model || '',
+      smartMatchStatus: !AI_CFG.enabled ? 'disabled' : !AI_CFG.apiKey ? 'missing-key' : smartMatchFailedOpen ? (smartMatchEvaluated ? 'partial' : 'failed') : smartMatchEvaluated ? 'complete' : 'not-evaluated',
+      smartMatchError,
+      scorerVersion: '10.2.0',
+      searchCoverage: Object.values(searchCoverage),
+      searchIncomplete: Object.values(searchCoverage).some(q => !q.complete) || Object.keys(searchCoverage).length < HCAFE_QUERIES.length,
       unevaluatedCandidates,
       descriptionCeilingReached: descriptionEvaluatedCount >= MAX_DESCRIPTION_EVALUATIONS && candidatePool.length > descriptionEvaluatedCount,
       qualifyingMatches: aboveFloor.length,
@@ -1869,6 +1758,27 @@ if (IS_CLI) (async () => {
       accountDedup: hcafeAuthed
     };
     const lastBatch = writeBatchTsv(top, directUrls, funnel);
+    // Local publication is delivery. Optional integrations must not undo it.
+    saveSeenStore(blockedSeen, top);
+    const saveQueuePath = path.join(PP.dir, 'hcafe-save-queue.json');
+    if (accountDedupEnabled && SCORING.syncSavedJobs !== false) {
+      try {
+        enqueueSaved(saveQueuePath, top);
+        funnel.savedSync = { saved: 0, pending: readSaveQueue(saveQueuePath).length, status: hcafeAuthed ? 'pending' : 'sign-in-required' };
+        if (hcafeAuthed && funnel.savedSync.pending) {
+          const syncCtx = await launchBrowser();
+          try {
+            const syncPage = syncCtx.pages()[0] || await syncCtx.newPage();
+            if (await isSignedIn(syncPage)) {
+              const receipt = await drainSaveQueue(saveQueuePath, url => ensureJobSaved(syncPage, url));
+              funnel.savedSync = { ...receipt, status: receipt.pending ? 'pending' : 'complete' };
+            } else funnel.savedSync.status = 'sign-in-required';
+          } finally { await syncCtx.close().catch(() => {}); }
+        }
+      } catch { funnel.savedSync = { status: 'pending', pending: readSaveQueue(saveQueuePath).length }; }
+      lastBatch.funnel = funnel;
+      atomicWriteJson(PP.lastBatch, lastBatch);
+    }
     const weather = await getWeather();
     const banner = buildSupplyBanner({ funnel, byQuery });
     let message = buildMessage(weather, top, directUrls, {
@@ -1885,9 +1795,13 @@ if (IS_CLI) (async () => {
       funnel
     });
     if (banner) message = banner + '\n\n' + message;
-    if (TELEGRAM_ON) {
+    if (TELEGRAM_ON) try {
       const chunks = await tgChunked(message);
       log(`Telegram sent in ${chunks} chunk(s)`);
+      funnel.telegramDelivery = 'sent';
+    } catch (e) {
+      funnel.telegramDelivery = 'failed';
+      log(`Telegram delivery failed (non-fatal): ${SCRUB(e.message || e)}`);
     } else {
       log('Telegram off — batch ready in the dashboard (last-batch.json) + jobs txt on disk.');
     }
@@ -1939,17 +1853,17 @@ if (IS_CLI) (async () => {
           attachments: [attachment],
         });
         log(`Emailed job batch (${emailFmt}) to ${to}`);
+        funnel.emailDelivery = 'sent';
       } catch (e) {
+        funnel.emailDelivery = /invalid_grant|expired|revoked/i.test(String(e.message || e)) ? 'reconnect-required' : 'failed';
         log(`Batch email failed (non-fatal): ${SCRUB(e.message || e)}`);
       }
     }
 
-    // Only persist seen-jobs *after* successful Telegram delivery —
-    // so a failed run doesn't burn jobs we never actually surfaced.
-    // v8.4: searchState no longer hides Viewed jobs. hiring.cafe may still
-    // record description visits, but those visits cannot remove undelivered
-    // candidates from tomorrow's scrape. Only `top` enters local memory.
-    saveSeenStore(blockedSeen, top);
+    // Update integration receipts for the already-published local batch.
+    lastBatch.funnel = funnel;
+    atomicWriteJson(PP.lastBatch, lastBatch);
+    archiveBatch(PP.batchArchiveDir, lastBatch);
     log(`Persisted seen-jobs.json (${top.length} new, freshness=${SEEN_FRESHNESS_DAYS}d)`);
 
     // v1.0 E4: write per-batch callback table + send a final "Open batch

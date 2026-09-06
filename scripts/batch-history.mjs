@@ -47,6 +47,10 @@ export function summarizeBatch({ date, generatedAt, jobs = [], funnel = {} }) {
     raw: funnel.raw ?? null,
     keptAfterFilter: funnel.keptAfterFilter ?? null,
     afterDedup: funnel.afterDedup ?? null,
+    scorerVersion: funnel.scorerVersion || 'legacy',
+    smartMatchStatus: funnel.smartMatchStatus || 'unknown',
+    smartMatchEvaluated: funnel.smartMatchEvaluated || 0,
+    searchIncomplete: !!funnel.searchIncomplete,
     terms
   };
 }
@@ -72,7 +76,11 @@ export function readHistory(filePath) {
 export function appendHistory(filePath, entry, maxDays = HISTORY_MAX_DAYS) {
   try {
     const days = mergeHistory(readHistory(filePath), entry, maxDays);
-    atomicWriteJson(filePath, { lastUpdated: entry.generatedAt || null, days });
+    let runs = [];
+    try { runs = JSON.parse(fs.readFileSync(filePath, 'utf8')).runs || []; } catch {}
+    runs = runs.filter(r => r.generatedAt !== entry.generatedAt);
+    runs.push(entry);
+    atomicWriteJson(filePath, { lastUpdated: entry.generatedAt || null, days, runs: runs.slice(-500) });
     return true;
   } catch { return false; }
 }
