@@ -681,7 +681,7 @@ async function applySmartMatch(rows) {
       log(`Smart Match batch ${batchIndex + 1}/${batches.length} failed open: ${SCRUB(e.message || e)}`);
       smartMatchError = SCRUB(String(e.message || e)).slice(0, 240);
       // Split malformed/truncated output; preserve previous successful scores.
-      if (batch.length > 1 && /truncated|ratings|incomplete|JSON/i.test(smartMatchError)) {
+      if (batch.length > 1 && !/^HTTP /i.test(smartMatchError) && /truncated|ratings|incomplete|JSON/i.test(smartMatchError)) {
         const mid = Math.ceil(batch.length / 2);
         batches.splice(batchIndex + 1, 0, batch.slice(0, mid), batch.slice(mid));
         continue;
@@ -1145,6 +1145,10 @@ async function resolveOnePage(page, viewjobUrl) {
     await page.goto(viewjobUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
     // Settle so JSON payload renders into HTML
     await page.locator('#job-description').waitFor({ timeout: 15000 });
+    await page.waitForFunction(() => {
+      const el = document.querySelector('#job-description');
+      return !!el && el.innerText.replace(/^Job description\s*/i, '').trim().length > 0;
+    }, null, { timeout: 15000 });
     const html = await page.content();
     // v4.0: we're already standing on the job page for the apply-URL — now we
     // finally READ it. The rendered body text (title + full description +
@@ -1217,7 +1221,7 @@ async function resolveAll(rows) {
         const cached = descriptionCache[r.href];
         out[idx] = cached?.jdText && Date.now() - cached.at < 24 * 60 * 60 * 1000
           ? cached : await resolveOnePage(p, r.href);
-        if (out[idx]?.jdText) descriptionCache[r.href] = { ...out[idx], at: Date.now() };
+        if (out[idx]?.jdText) descriptionCache[r.href] = { ...out[idx], at: out[idx].at || Date.now() };
         if (out[idx]) out[idx].descriptionQuality = out[idx].jdText ? 'full' : 'missing';
         if (out[idx]?.directUrl) resolved++;
       }
