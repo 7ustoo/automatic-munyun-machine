@@ -55,7 +55,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - Resume rescan and automatic search-term suggestions
 - Remote, hybrid, and on-site searches with optional location
 - Blocked companies, job age, experience, salary, clearance, and application-form controls
-- Multiple profiles, each with its own resume, searches, settings, and history
+- Multiple profiles with normal names such as `Cloud DevOps`, each with its own resume, searches, settings, and history
 - An always-visible profile switcher plus a resume evidence viewer showing the exact extracted text used for matching
 - A different VA email recipient and auto-send preference for each profile
 - A saved weekday-morning toggle per profile; one unattended run processes every enabled profile without changing the profile you left open

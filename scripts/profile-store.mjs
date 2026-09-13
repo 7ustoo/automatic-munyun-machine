@@ -33,6 +33,12 @@ const CFG_PATH = path.join(ROOT, 'config.json');
 const CFG_EXAMPLE = path.join(ROOT, 'config.example.json');
 const PROFILES_DIR = path.join(ROOT, 'data', 'profiles');
 
+function isValidProfileName(name) {
+  return typeof name === 'string'
+    && name.length <= 32
+    && /^[a-z0-9_-]+(?: [a-z0-9_-]+)*$/i.test(name);
+}
+
 // Fields that live "inside" a profile vs at config top level.
 const PROFILE_FIELDS = ['user', 'queries', 'filters', 'scoring', 'weather', 'schedule', 'telegram', 'email', 'display', 'search', 'sources'];
 
@@ -164,8 +170,8 @@ export function paths(slug) {
 // new profile drops every job below the match floor and the user gets a
 // confusing "0 fresh jobs" outcome.
 export function addProfile(slug, opts = {}) {
-  if (!/^[a-z0-9_-]{1,32}$/i.test(slug)) {
-    throw new Error('Profile slug must be 1-32 chars: letters, digits, dash, underscore.');
+  if (!isValidProfileName(slug)) {
+    throw new Error('Profile name must be 1-32 characters: letters, digits, spaces, dashes, or underscores.');
   }
   const raw = readRawConfig();
   if (!raw.profiles) throw new Error('Run migrateIfNeeded() before addProfile().');
@@ -206,11 +212,11 @@ export function setActiveProfile(slug) {
 
 // Rename a profile. Renames the profiles[<slug>] key in config.json, moves
 // data/profiles/<old>/ → data/profiles/<new>/, and updates active_profile
-// if it was pointing at the renamed profile. Slug format matches addProfile.
+// if it was pointing at the renamed profile. Name format matches addProfile.
 // Fails cleanly if newSlug already exists or the source is missing.
 export function renameProfile(oldSlug, newSlug) {
-  if (!/^[a-z0-9_-]{1,32}$/i.test(newSlug)) {
-    throw new Error('Profile slug must be 1-32 chars: letters, digits, dash, underscore.');
+  if (!isValidProfileName(newSlug)) {
+    throw new Error('Profile name must be 1-32 characters: letters, digits, spaces, dashes, or underscores.');
   }
   if (oldSlug === newSlug) return { renamed: oldSlug, dataMoved: false };
   const raw = readRawConfig();
@@ -280,4 +286,4 @@ export function readActiveConfig() {
   };
 }
 
-export const _internals = { readRawConfig, atomicWriteConfig, PROFILE_FIELDS, PROFILE_DATA_FILES };
+export const _internals = { readRawConfig, atomicWriteConfig, isValidProfileName, PROFILE_FIELDS, PROFILE_DATA_FILES };
