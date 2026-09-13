@@ -127,10 +127,23 @@ function retryDelayMs(res, retryIndex) {
 export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetch, sleepImpl = ms => new Promise(r => setTimeout(r, ms)) }) {
   if (!apiKey) throw new Error('no API key configured');
   if (!candidates?.length) return [];
+  const prompt = buildPrompt(cvSummary, candidates);
+  const { value } = await aiStructuredOutput({
+    apiKey, prompt, schema: RATINGS_SCHEMA, schemaName: 'job_match_ratings',
+    maxTokens: 8000, fetchImpl, sleepImpl,
+  });
+  return validateRatings(value.ratings, candidates);
+}
+
+export async function aiStructuredOutput({
+  apiKey, prompt, schema, schemaName, maxTokens = 4000,
+  fetchImpl = fetch, sleepImpl = ms => new Promise(r => setTimeout(r, ms)),
+}) {
+  if (!apiKey) throw new Error('no API key configured');
   const provider = detectAiProvider(apiKey);
   if (!provider) throw new Error('unsupported API key; paste a Gemini, Anthropic, or OpenAI key');
-  const prompt = buildPrompt(cvSummary, candidates);
-  const request = providerRequest(provider, apiKey, prompt);
+  if (!prompt || !schema || !schemaName) throw new Error('structured AI request is incomplete');
+  const request = providerStructuredRequest(provider, apiKey, prompt, schema, schemaName, maxTokens);
 
   // Demand spikes commonly last longer than a single three-second pause.
   // Retry three times with increasing delays and honor the provider's
@@ -156,8 +169,7 @@ export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetc
       }
       const data = await res.json();
       const text = providerResponseText(provider, data);
-      const parsed = JSON.parse(text);
-      return validateRatings(parsed.ratings, candidates);
+      return { provider, value: JSON.parse(text) };
     } catch (e) {
       lastErr = e;
       if (attempt < RETRY_DELAYS_MS.length && /fetch failed|timeout|aborted/i.test(String(e.message))) {
@@ -184,6 +196,10 @@ export function validateRatings(ratings, candidates) {
 }
 
 export function providerRequest(provider, apiKey, prompt) {
+  return providerStructuredRequest(provider, apiKey, prompt, RATINGS_SCHEMA, 'job_match_ratings', 8000);
+}
+
+export function providerStructuredRequest(provider, apiKey, prompt, schema, schemaName, maxTokens = 4000) {
   if (provider.id === 'google') {
     return {
       url: `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(provider.model)}:generateContent`,
@@ -191,9 +207,9 @@ export function providerRequest(provider, apiKey, prompt) {
       body: {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
-          maxOutputTokens: 8000,
+          maxOutputTokens: maxTokens,
           responseMimeType: 'application/json',
-          responseJsonSchema: RATINGS_SCHEMA,
+          responseJsonSchema: schema,
         },
       },
     };
@@ -204,11 +220,11 @@ export function providerRequest(provider, apiKey, prompt) {
       headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: {
         model: provider.model,
-        max_completion_tokens: 8000,
+        max_completion_tokens: maxTokens,
         messages: [{ role: 'user', content: prompt }],
         response_format: {
           type: 'json_schema',
-          json_schema: { name: 'job_match_ratings', strict: true, schema: RATINGS_SCHEMA },
+          json_schema: { name: schemaName, strict: true, schema },
         },
       },
     };
@@ -222,8 +238,8 @@ export function providerRequest(provider, apiKey, prompt) {
     },
     body: {
       model: provider.model,
-      max_tokens: 8000,
-      output_config: { format: { type: 'json_schema', schema: RATINGS_SCHEMA } },
+      max_tokens: maxTokens,
+      output_config: { format: { type: 'json_schema', schema } },
       messages: [{ role: 'user', content: prompt }],
     },
   };

@@ -49,6 +49,7 @@ import { readExclusions, writeExclusion } from './batch-exclusions.mjs';
 import { clampBatchSize } from './batch-size.mjs';
 import { normalizeConsultantSlopMode } from './consultant-slop-filter.mjs';
 import { detectAiProvider } from './ai-rerank.mjs';
+import { analyzeResumeWithAI, currentAiAnalysis } from './ai-resume-analysis.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
   verifyLogin, sendEmail, sendConfiguredEmail, disconnectEmail,
@@ -301,10 +302,17 @@ function skipRemove(company) {
 // unit-tested. Any mode string other than 'keywords' means titles (precise).
 export function suggestTermsForMode(parsed, mode, max = 12) {
   const flavor = mode === 'keywords' ? 'keywords' : 'titles';
+  const ai = currentAiAnalysis(parsed);
+  if (ai) {
+    const values = flavor === 'keywords'
+      ? ai.searchKeywords.map(item => item.term)
+      : ai.targetRoles.map(item => item.title);
+    return { mode: flavor, source: 'ai', suggestions: values.slice(0, max) };
+  }
   const raw = flavor === 'keywords'
     ? suggestKeywords(parsed, { max })
     : suggestRoles(parsed, { max });
-  return { mode: flavor, suggestions: raw.map(s => s.title) };
+  return { mode: flavor, source: 'local', suggestions: raw.map(s => s.title) };
 }
 
 // v2.8: re-suggest search terms from the ALREADY-parsed CV (no re-upload),
@@ -410,6 +418,23 @@ async function resumeParse(filePath, modeArg, originalName = '') {
   // copy of the original file.
   parsed.displayName = path.basename(String(originalName || parsed.sourceFile || 'resume'))
     .replace(/[\x00-\x1f<>:"/\\|?*]/g, '').slice(0, 180) || 'resume';
+  let aiStatus = 'not-configured';
+  let aiError = '';
+  if (!freshInstall) {
+    const cfg = cfgRW.read();
+    const aiKey = readLocalSecrets().AMM_AI_KEY || process.env.AMM_AI_KEY || cfg.scoring?.ai?.apiKey || '';
+    if (cfg.scoring?.ai?.enabled && aiKey) {
+      aiStatus = 'analyzing';
+      try {
+        parsed.aiAnalysis = await analyzeResumeWithAI({ apiKey: aiKey, resumeText: parsed.raw });
+        aiStatus = 'complete';
+      } catch (e) {
+        aiStatus = 'failed';
+        aiError = String(e.message || e).slice(0, 240);
+        parsed.aiAnalysis = { status: 'failed', analyzedAt: new Date().toISOString(), error: aiError };
+      }
+    }
+  }
   writeParsedCV(parsed, freshInstall ? 'default' : undefined);
   // v4.1.1: the setup preview lets the user flip titles↔keywords at scan time.
   // An explicit modeArg (from the step-1 toggle) wins; otherwise fall back to
@@ -418,8 +443,7 @@ async function resumeParse(filePath, modeArg, originalName = '') {
   const mode = wanted
     ? wanted
     : (freshInstall ? 'titles' : (cfgRW.read().search?.mode === 'keywords' ? 'keywords' : 'titles'));
-  const suggestions = (mode === 'keywords' ? suggestKeywords(parsed, { max: 12 }) : suggestRoles(parsed, { max: 12 }))
-    .map(s => s.title);
+  const suggested = suggestTermsForMode(parsed, mode, 12);
   out({
     ok: true,
     parsed: {
@@ -428,8 +452,28 @@ async function resumeParse(filePath, modeArg, originalName = '') {
       primaryClusters: parsed.primaryClusters || []
     },
     mode,
-    suggestions
+    suggestionSource: suggested.source,
+    suggestions: suggested.suggestions,
+    aiStatus,
+    aiError,
   });
+}
+
+async function resumeAnalyze() {
+  try {
+    const cvPath = profilePaths().cvParsed;
+    if (!fs.existsSync(cvPath)) return out({ ok: false, error: 'Upload a resume before running AI analysis.' });
+    const parsed = enrichParsedResume(JSON.parse(fs.readFileSync(cvPath, 'utf8')));
+    const cfg = cfgRW.read();
+    const aiKey = readLocalSecrets().AMM_AI_KEY || process.env.AMM_AI_KEY || cfg.scoring?.ai?.apiKey || '';
+    if (!aiKey) return out({ ok: false, error: 'Add a Smart Match API key in Settings first.' });
+    parsed.aiAnalysis = await analyzeResumeWithAI({ apiKey: aiKey, resumeText: parsed.raw });
+    writeParsedCV(parsed);
+    const mode = cfg.search?.mode === 'keywords' ? 'keywords' : 'titles';
+    return out({ ok: true, ...suggestTermsForMode(parsed, mode), analysis: parsed.aiAnalysis });
+  } catch (e) {
+    return out({ ok: false, error: 'AI resume analysis failed: ' + String(e.message || e).slice(0, 240) });
+  }
 }
 
 // Exact, profile-scoped resume evidence used by local matching. Smart Match
@@ -441,6 +485,9 @@ function resumeGet() {
     if (!fs.existsSync(cvPath)) return out({ ok: true, available: false });
     const cv = enrichParsedResume(JSON.parse(fs.readFileSync(cvPath, 'utf8')));
     const raw = typeof cv.raw === 'string' ? cv.raw : '';
+    const ai = currentAiAnalysis(cv);
+    const cfg = cfgRW.read();
+    const aiKey = readLocalSecrets().AMM_AI_KEY || process.env.AMM_AI_KEY || cfg.scoring?.ai?.apiKey || '';
     out({
       ok: true,
       available: true,
@@ -457,8 +504,16 @@ function resumeGet() {
       primaryClusters: cv.primaryClusters || [],
       careerYears: cv.careerYears || 0,
       employment: (cv.employment || []).slice(0, 20),
-      recommendedRoles: suggestRoles(cv, { max: 12 }).map(s => s.title),
-      recommendedKeywords: suggestKeywords(cv, { max: 12 }).map(s => s.title),
+      analysisSource: ai ? 'ai' : 'local',
+      aiConfigured: !!aiKey,
+      aiAnalysis: ai ? {
+        provider: ai.provider, model: ai.model, analyzedAt: ai.analyzedAt,
+        summary: ai.summary, seniority: ai.seniority,
+        skills: ai.skills, targetRoles: ai.targetRoles, searchKeywords: ai.searchKeywords,
+      } : null,
+      aiAnalysisError: cv.aiAnalysis?.status === 'failed' ? cv.aiAnalysis.error || 'Previous analysis failed.' : '',
+      recommendedRoles: ai ? ai.targetRoles.map(item => item.title) : suggestRoles(cv, { max: 12 }).map(s => s.title),
+      recommendedKeywords: ai ? ai.searchKeywords.map(item => item.term) : suggestKeywords(cv, { max: 12 }).map(s => s.title),
     });
   } catch (e) { out({ ok: false, error: 'Could not read the active profile resume: ' + String(e.message || e) }); }
 }
@@ -953,6 +1008,7 @@ if (isMain) (async () => {
     case 'suggest-current': return suggestCurrent(a);
     case 'job-action':   return jobAction(a, b);
     case 'resume-get': return resumeGet();
+    case 'resume-analyze': return resumeAnalyze();
     case 'resume-parse': return resumeParse(a, b, a3);
     case 'resume-apply': return resumeApply(a);
     // v2.4: minimal export (number · title · apply link) as txt or csv.

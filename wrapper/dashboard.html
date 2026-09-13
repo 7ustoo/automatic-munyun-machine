@@ -1302,13 +1302,18 @@
           <div class="resume-proof" id="resume-proof">
             <div class="resume-proof-head">
               <div><b id="resume-proof-name">No resume attached</b><div class="muted-sm" id="resume-proof-meta">Upload a resume to see the exact text AMM uses.</div></div>
-              <button class="sm" id="resume-proof-refresh">Refresh evidence</button>
+              <div class="row">
+                <button class="sm primary" id="resume-ai-analyze">Analyze with AI</button>
+                <button class="sm" id="resume-proof-refresh">Refresh evidence</button>
+              </div>
             </div>
+            <div class="note" id="resume-ai-status">AI analysis has not run for this resume.</div>
+            <div class="resume-profile-block hidden" id="resume-ai-summary-block"><b>AI resume summary</b><div class="muted-sm" id="resume-ai-summary">—</div></div>
             <div class="resume-tags" id="resume-proof-tags"></div>
             <div class="resume-profile-grid" id="resume-profile-grid">
-              <div class="resume-profile-block"><b>Skills AMM recognized</b><div class="muted-sm" id="resume-skills">—</div></div>
+              <div class="resume-profile-block"><b id="resume-skills-label">Skills AMM recognized</b><div class="muted-sm" id="resume-skills">—</div></div>
               <div class="resume-profile-block"><b>Experience AMM recognized</b><div class="muted-sm" id="resume-experience">—</div></div>
-              <div class="resume-profile-block"><b>Recommended searches</b><div class="muted-sm" id="resume-recommendations">—</div></div>
+              <div class="resume-profile-block"><b id="resume-recommendations-label">Recommended searches</b><div class="muted-sm" id="resume-recommendations">—</div></div>
             </div>
             <pre id="resume-proof-text">No extracted resume text yet.</pre>
           </div>
@@ -3437,9 +3442,15 @@ async function loadResumeEvidence() {
       $("resume-skills").textContent = "—";
       $("resume-experience").textContent = "—";
       $("resume-recommendations").textContent = "—";
+      $("resume-skills-label").textContent = "Skills AMM recognized";
+      $("resume-recommendations-label").textContent = "Recommended searches";
+      $("resume-ai-status").textContent = "Upload a resume before running AI analysis.";
+      $("resume-ai-summary-block").classList.add("hidden");
+      $("resume-ai-analyze").disabled = true;
       $("resume-proof-text").textContent = "No extracted resume text yet.";
       return;
     }
+    $("resume-ai-analyze").disabled = !r.aiConfigured;
     $("resume-proof-name").textContent = r.name || "Resume";
     const aiNote = r.smartMatchTruncated
       ? `Smart Match reads the first ${Number(r.smartMatchCharacters).toLocaleString()} characters; local matching reads all ${Number(r.rawCharacters).toLocaleString()}.`
@@ -3451,11 +3462,32 @@ async function loadResumeEvidence() {
       `${(r.certs || []).length} certs`, `${r.careerYears || 0} career years detected`,
     ];
     $("resume-proof-tags").innerHTML = tags.map(x => `<span class="pill">${escapeHTML(x)}</span>`).join("");
-    const recognized = [...(r.skills || []), ...(r.certs || []), ...(r.compliance || [])];
+    const ai = r.aiAnalysis;
+    const recognized = ai
+      ? [...(ai.skills || []).map(x => `${x.name} — “${x.evidence}”`), ...(r.certs || []), ...(r.compliance || [])]
+      : [...(r.skills || []), ...(r.certs || []), ...(r.compliance || [])];
+    $("resume-skills-label").textContent = ai ? "Skills AI verified from resume evidence" : "Skills AMM recognized locally";
     $("resume-skills").textContent = recognized.join(" · ") || "No named skills were recognized.";
     const roles = (r.employment || []).map(job => `${job.title || "Role"}${job.organization ? " at " + job.organization : ""} (${job.startYear || "?"}–${job.current ? "present" : job.endYear || "?"})`);
     $("resume-experience").textContent = roles.join(" · ") || `${r.careerYears || 0} total career years detected; no dated roles were parsed.`;
-    $("resume-recommendations").textContent = (r.recommendedRoles || []).join(" · ") || "Add clearer target titles to the résumé for recommendations.";
+    const roleText = ai
+      ? (ai.targetRoles || []).map(x => `${x.title} — “${x.evidence}”`).join(" · ")
+      : (r.recommendedRoles || []).join(" · ");
+    const keywordText = ai
+      ? (ai.searchKeywords || []).map(x => `${x.term} — “${x.evidence}”`).join(" · ")
+      : (r.recommendedKeywords || []).join(" · ");
+    $("resume-recommendations-label").textContent = ai ? "AI-recommended roles and search keywords" : "Locally recommended searches";
+    $("resume-recommendations").textContent = [roleText && `Roles: ${roleText}`, keywordText && `Keywords: ${keywordText}`].filter(Boolean).join(" | ") || "Add clearer experience and skills for recommendations.";
+    if (ai) {
+      $("resume-ai-status").textContent = `✓ AI analyzed by ${ai.provider} (${ai.model})${ai.analyzedAt ? " · " + String(ai.analyzedAt).replace("T", " ").slice(0, 16) : ""}. Skills below require exact resume evidence.`;
+      $("resume-ai-summary").textContent = `${ai.summary}${ai.seniority ? " · Seniority: " + ai.seniority : ""}`;
+      $("resume-ai-summary-block").classList.remove("hidden");
+    } else {
+      $("resume-ai-status").textContent = r.aiAnalysisError
+        ? `AI analysis failed: ${r.aiAnalysisError} Local resume analysis is still active.`
+        : (r.aiConfigured ? "Ready for AI analysis. This will improve this profile's roles, keywords, and verified skill set." : "Add a Smart Match API key in Settings to enable AI resume analysis.");
+      $("resume-ai-summary-block").classList.add("hidden");
+    }
     $("resume-proof-text").textContent = r.raw || "The parser found no readable text.";
   } catch (e) {
     $("resume-proof-meta").textContent = "Could not load evidence: " + e.message;
@@ -3481,6 +3513,31 @@ $("set-ai-required").addEventListener("change", async e => {
 
 $("resume-proof-refresh").addEventListener("click", loadResumeEvidence);
 
+$("resume-ai-analyze").addEventListener("click", async () => {
+  const btn = $("resume-ai-analyze");
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Analyzing…";
+  $("resume-ai-status").textContent = "AI is reading the resume and building evidence-backed skills, target roles, and search keywords…";
+  try {
+    const r = await postJSON("/api/resume/analyze", {});
+    if (!r.ok) throw new Error(r.error || "AI analysis failed");
+    await loadResumeEvidence();
+    if ((r.suggestions || []).length) {
+      window.__resumeSuggest = r.suggestions;
+      $("resume-suggest-label").textContent = `AI-suggested search terms (${r.mode}) — click to toggle:`;
+      renderResumeSuggest(r.suggestions, new Set(r.suggestions));
+      $("resume-suggest").classList.remove("hidden");
+    }
+    toast("AI resume analysis saved to this profile.", "good");
+  } catch (e) {
+    $("resume-ai-status").textContent = "AI analysis failed: " + e.message + " Local resume analysis is still active.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = label;
+  }
+});
+
 $("resume-upload-btn").addEventListener("click", async () => {
   const input = $("resume-file");
   const file = input.files && input.files[0];
@@ -3495,12 +3552,14 @@ $("resume-upload-btn").addEventListener("click", async () => {
     const r = await res.json();
     if (!r.ok) { note("resume-note", "✗ " + (r.error || "could not parse"), false); return; }
     const p = r.parsed || {};
-    note("resume-note", `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance. Your CV is updated.`, true);
+    const aiNote = r.aiStatus === "complete" ? " AI analysis and suggestions are saved to this profile."
+      : r.aiStatus === "failed" ? ` AI analysis failed (${r.aiError}); local analysis is active.` : "";
+    note("resume-note", `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance. Your CV is updated.${aiNote}`, true);
     await loadResumeEvidence();
     const sugg = r.suggestions || [];
     if (sugg.length) {
       window.__resumeSuggest = sugg;
-      $("resume-suggest-label").textContent = `Suggested search terms (${r.mode}) from your resume — click to toggle:`;
+      $("resume-suggest-label").textContent = `${r.suggestionSource === "ai" ? "AI-suggested" : "Suggested"} search terms (${r.mode}) from your resume — click to toggle:`;
       renderResumeSuggest(sugg, new Set(sugg));
       $("resume-suggest").classList.remove("hidden");
     }

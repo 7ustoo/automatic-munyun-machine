@@ -453,6 +453,12 @@ func (d *dashboardServer) handleResumeGet(w http.ResponseWriter, r *http.Request
 	d.relayDashboardAPI(w, 10*time.Second, "resume-get")
 }
 
+func (d *dashboardServer) handleResumeAnalyze(w http.ResponseWriter, r *http.Request) {
+	// Provider retries can legitimately take a little over two minutes during
+	// rate limits. The Node helper still applies its own bounded timeouts.
+	d.relayDashboardAPI(w, 210*time.Second, "resume-analyze")
+}
+
 // handleResumeUpload accepts a multipart resume file, saves it under
 // data/uploads/, and re-parses it into the active profile's CV via
 // dashboard-api resume-parse — which also returns fresh search-term
@@ -522,8 +528,9 @@ func (d *dashboardServer) handleResumeUpload(w http.ResponseWriter, r *http.Requ
 		mode = ""
 	}
 
-	// Parsing a PDF/DOCX + suggesting terms is quick but give it headroom.
-	d.relayDashboardAPI(w, 45*time.Second, "resume-parse", dest, mode, filepath.Base(header.Filename))
+	// A configured profile analyzes the extracted resume through its Smart
+	// Match provider before returning suggestions, including bounded retries.
+	d.relayDashboardAPI(w, 210*time.Second, "resume-parse", dest, mode, filepath.Base(header.Filename))
 }
 
 // handleResumeApply replaces the search-term list with the terms the user

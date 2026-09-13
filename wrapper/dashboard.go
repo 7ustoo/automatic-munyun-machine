@@ -128,6 +128,7 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	mux.HandleFunc("/api/window/open", d.guardPost(d.handleWindowOpen))
 	mux.HandleFunc("/api/resume/upload", d.guardPost(d.handleResumeUpload))
 	mux.HandleFunc("/api/resume", d.guardGet(d.handleResumeGet))
+	mux.HandleFunc("/api/resume/analyze", d.guardPost(d.handleResumeAnalyze))
 	mux.HandleFunc("/api/resume/apply", d.guardPost(d.handleResumeApply))
 	mux.HandleFunc("/api/update/apply", d.guardPost(d.handleUpdateApply))
 	// v2.6: profile CRUD from the dashboard. list is read-only (GET);

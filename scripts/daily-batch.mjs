@@ -32,6 +32,7 @@ import { writeCallbackTable, makeNavCallback } from './callback-router.mjs';
 import { migrateIfNeeded, paths as profilePaths, readActiveConfig } from './profile-store.mjs';
 import { atomicWriteJson, atomicWriteText } from './io-helpers.mjs';
 import { aiRerank, candidateBatches, detectAiProvider } from './ai-rerank.mjs';
+import { currentAiAnalysis } from './ai-resume-analysis.mjs';
 import { crawlSearch } from './hcafe-pagination.mjs';
 import { enqueueSaved, drainSaveQueue, ensureJobSaved, readSaveQueue } from './hcafe-save-queue.mjs';
 import { telegramConfigured } from './telegram-config.mjs';
@@ -585,8 +586,16 @@ const SKIP_CO = SKIP_COMPANIES.length
 // To regenerate: node scripts/resume-parser.mjs <path-to-resume>
 const CV_TITLES     = CV.titles     || [];
 const CV_CERTS      = CV.certs      || [];
-const CV_SKILLS     = CV.skills     || [];
+const CV_AI_ANALYSIS = currentAiAnalysis(CV);
+// AI-extracted skills are accepted only when their evidence was validated as
+// a literal resume phrase. This expands beyond the static dictionary without
+// letting a model hallucination become candidate evidence.
+const CV_SKILLS     = [...new Set([
+  ...(CV.skills || []),
+  ...(CV_AI_ANALYSIS?.skills || []).map(item => item.name),
+].filter(Boolean))];
 const CV_COMPLIANCE = CV.compliance || [];
+const CV_FOR_MATCHING = { ...CV, skills: CV_SKILLS };
 // Raw resume text (up to 100K on newly parsed resumes; older profiles may still
 // carry the legacy 8K copy) —
 // feeds the Smart match rerank so the model reads the actual resume, not
@@ -669,6 +678,10 @@ async function applySmartMatch(rows) {
     skills: CV_SKILLS.slice(0, 60), compliance: CV_COMPLIANCE.slice(0, 16),
     employment: CV.employment || [],
     experienceEvidence: CV.experienceEvidence || {},
+    ...(CV_AI_ANALYSIS ? {
+      aiResumeSummary: CV_AI_ANALYSIS.summary,
+      aiResumeSeniority: CV_AI_ANALYSIS.seniority,
+    } : {}),
     ...(CV_RAW ? { resumeText: CV_RAW.slice(0, 24000) } : {}),
   };
   let applied = 0;
@@ -875,7 +888,7 @@ function requirementScore(job, text, fallbackPercent = 0) {
   return matchRequirements({
     jobTitle: job.title || '',
     text,
-    cv: CV,
+    cv: CV_FOR_MATCHING,
     dictionary: CV_DICTIONARY,
     targetTerms: TARGET_TERMS,
     mutedTerms: [...MUTED],
