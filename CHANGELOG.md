@@ -8,6 +8,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.0.0] — 2026-09-12
+
+### Added
+
+- Added an always-visible profile switcher and expanded profile cards that show each job hunt's resume, search scope, match target, Smart Match state, and assigned VA recipient.
+- Added a resume evidence viewer showing the exact profile-scoped text and extracted focus data used by local scoring, including the visible 24,000-character Smart Match input limit.
+- Added batch-level AI coverage and per-job `AI verified` / `local only` labels so a fallback score can no longer look like an AI-reviewed score.
+- Added profile-level VA assignment editing without reconnecting Gmail; recipients and auto-send preferences remain independent per resume profile.
+- Added independent weekday scheduling per profile. The unattended runner now processes every enabled profile sequentially, without changing the profile selected in the dashboard.
+- Expanded the résumé evidence view into a career snapshot with every recognized skill, parsed employment history, and suggested job searches.
+
+### Changed
+
+- Smart Match now defaults to strict delivery coverage: when enabled, jobs not successfully reviewed by the API are held back instead of silently padding a partial batch. The setting can be relaxed to allow local fallback.
+- Refreshed the **Automatic Munyun Machine** interface while preserving its established product identity.
+
+### Fixed
+
+- Smart Match now withstands temporary provider demand spikes with bounded exponential retries and honors `Retry-After` guidance instead of giving up after one three-second pause.
+- Repeatedly failing hiring.cafe Saved entries rotate behind unattempted work so three stale jobs cannot permanently starve the queue; batch status now distinguishes a blocked sync from an ordinary pending backlog.
+
 ## [10.2.0] — 2026-09-05
 
 ### Fixed

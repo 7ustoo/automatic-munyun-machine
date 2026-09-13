@@ -1,5 +1,5 @@
 /**
- * AMM README banner — terminal wordmark (v8.0).
+ * AMM README banner — terminal wordmark (v11).
  *
  * Source of truth for docs/banner.png, rendered by make-banner.mjs. The
  * concept: a shell prompt whose "$" is also the brand mark, so the banner
@@ -44,6 +44,6 @@ export function bannerSvg() {
        monospace advance widths differ per font, so a hardcoded position drifts
        away from the text on any machine with a different mono installed. -->
   <rect id="cursor" x="686" y="82" width="17" height="38" fill="${COLORS.brand}"/>
-  <text x="44" y="152" font-family='${MONO}' font-size="17" fill="${COLORS.caption}">50–200 jobs ranked against your resume · every morning · local-only</text>
+  <text x="44" y="152" font-family='${MONO}' font-size="17" fill="${COLORS.caption}">multiple career profiles · evidence-first matching · local by default</text>
 </svg>`;
 }

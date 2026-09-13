@@ -77,3 +77,43 @@ test('unrecognized key fails before sending it anywhere', async () => {
   );
   assert.equal(called, false);
 });
+
+test('retryable demand spikes use bounded backoff and eventually recover', async () => {
+  const waits = [];
+  let calls = 0;
+  const result = await aiRerank({
+    ...options,
+    apiKey: `sk-proj-${'r'.repeat(32)}`,
+    sleepImpl: async ms => waits.push(ms),
+    fetchImpl: async () => {
+      calls++;
+      if (calls < 4) return {
+        ok: false, status: 503, headers: { get: () => null },
+        json: async () => ({ error: { message: 'high demand' } }),
+      };
+      return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ratings }) } }] }) };
+    },
+  });
+  assert.deepEqual(result, ratings);
+  assert.equal(calls, 4);
+  assert.deepEqual(waits, [3000, 8000, 20000]);
+});
+
+test('retryable responses honor a bounded Retry-After header', async () => {
+  const waits = [];
+  let calls = 0;
+  await aiRerank({
+    ...options,
+    apiKey: `sk-proj-${'h'.repeat(32)}`,
+    sleepImpl: async ms => waits.push(ms),
+    fetchImpl: async () => {
+      calls++;
+      if (calls === 1) return {
+        ok: false, status: 429, headers: { get: () => '120' },
+        json: async () => ({ error: { message: 'slow down' } }),
+      };
+      return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ratings }) } }] }) };
+    },
+  });
+  assert.deepEqual(waits, [60000]);
+});

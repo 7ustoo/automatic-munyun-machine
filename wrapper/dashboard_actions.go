@@ -447,7 +447,11 @@ func (d *dashboardServer) handleEmailDisable(w http.ResponseWriter, r *http.Requ
 	d.relayDashboardAPI(w, 15*time.Second, "email-disable")
 }
 
-// --- v2.5: resume rescan ---
+// --- v2.5/v11: resume rescan + exact evidence viewer ---
+
+func (d *dashboardServer) handleResumeGet(w http.ResponseWriter, r *http.Request) {
+	d.relayDashboardAPI(w, 10*time.Second, "resume-get")
+}
 
 // handleResumeUpload accepts a multipart resume file, saves it under
 // data/uploads/, and re-parses it into the active profile's CV via
@@ -519,7 +523,7 @@ func (d *dashboardServer) handleResumeUpload(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Parsing a PDF/DOCX + suggesting terms is quick but give it headroom.
-	d.relayDashboardAPI(w, 45*time.Second, "resume-parse", dest, mode)
+	d.relayDashboardAPI(w, 45*time.Second, "resume-parse", dest, mode, filepath.Base(header.Filename))
 }
 
 // handleResumeApply replaces the search-term list with the terms the user

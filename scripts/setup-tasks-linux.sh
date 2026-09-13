@@ -104,7 +104,7 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 WorkingDirectory=$ROOT
-ExecStart=$NODE $ROOT/scripts/daily-batch.mjs
+ExecStart=$NODE $ROOT/scripts/scheduled-batches.mjs
 StandardOutput=append:$ROOT/data/daily-batch.stdout.log
 StandardError=append:$ROOT/data/daily-batch.stderr.log
 "

@@ -37,7 +37,7 @@ import {
   renameProfile,
   _internals as profileInternals
 } from './profile-store.mjs';
-import { parseResume, writeParsedCV } from './resume-parser.mjs';
+import { enrichParsedResume, parseResume, writeParsedCV } from './resume-parser.mjs';
 import { suggestRoles, suggestKeywords } from './role-suggester.mjs';
 import { withFileLock, atomicWriteJson } from './io-helpers.mjs';
 import { writeHcafeAuthCache, readHcafeAuthCache } from './hcafe-session.mjs';
@@ -96,6 +96,7 @@ function settingsGet() {
       targetJobsPerBatch: clampBatchSize(cfg.scoring?.targetJobsPerBatch),
       showSalary: cfg.display?.showSalary !== false, // v4.6: default on
       scheduleTime: cfg.schedule?.time || '07:00',
+      scheduleEnabled: cfg.schedule?.enabled !== false,
       searchMode: cfg.search?.mode === 'keywords' ? 'keywords' : 'titles',
       // v5.0: workplace-type + location search, and ATS source boards.
       workplaceTypes: (Array.isArray(cfg.search?.workplaceTypes) && cfg.search.workplaceTypes.length) ? cfg.search.workplaceTypes : ['Remote'],
@@ -113,6 +114,7 @@ function settingsGet() {
       // v4.0: Smart match (AI) — the key itself is NEVER returned, only
       // whether one is stored. Plus muted terms + a thin-CV signal.
       aiEnabled: !!cfg.scoring?.ai?.enabled,
+      aiRequireForDelivery: cfg.scoring?.ai?.requireForDelivery !== false,
       aiHasKey: !!secrets.AMM_AI_KEY,
       aiProvider: detectAiProvider(secrets.AMM_AI_KEY)?.label || '',
       mutedTerms: cfg.scoring?.mutedTerms || [],
@@ -141,7 +143,7 @@ function settingsGet() {
 }
 
 // Coerce the incoming JSON value to the right type for known paths, then set.
-function settingsSet(dotPath, jsonValue) {
+async function settingsSet(dotPath, jsonValue) {
   let value;
   try { value = JSON.parse(jsonValue); } catch { value = jsonValue; }
   const allowed = new Set([
@@ -149,12 +151,12 @@ function settingsSet(dotPath, jsonValue) {
     'filters.filterClearance', 'filters.filterManagementTitles', 'filters.filterSalesTitles',
     'filters.consultantSlopMode',
     'filters.applicationFormEase', 'filters.maxJobAge',
-    'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'search.mode',
+    'scoring.matchFloorPercent', 'scoring.targetJobsPerBatch', 'schedule.time', 'schedule.enabled', 'search.mode',
     'search.workplaceTypes', 'search.location', // v5.0
     'sources.greenhouse', 'sources.lever', 'sources.ashby', 'sources.remoteConfigUrl', // v5.0
     'search.scrapeSources', // v7.3: what to scrape — both/hcafe/dice (v7.4: the only Dice knob — the enable toggle is gone)
     'display.showSalary',
-    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.jdRescore',
+    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.requireForDelivery', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
     'email.autoSend', 'email.subject', 'email.to',
@@ -163,9 +165,10 @@ function settingsSet(dotPath, jsonValue) {
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
   if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
   if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
-  if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.ai.requireForDelivery' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'search.scrapeSources') value = normalizeScrapeSources(value); // v7.3
   if (dotPath === 'email.autoSend') value = (value === true || value === 'true' || value === 'on');
+  if (dotPath === 'schedule.enabled') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'email.format') {
     value = String(value || '').trim().toLowerCase();
     if (!['txt', 'csv', 'xlsx'].includes(value)) return out({ ok: false, error: 'format must be txt, csv, or xlsx' });
@@ -212,6 +215,11 @@ function settingsSet(dotPath, jsonValue) {
   if (dotPath === 'sources.remoteConfigUrl') {
     value = String(value || '').trim();
     if (value && !/^https:\/\/[^\s]+$/i.test(value)) return out({ ok: false, error: 'remote config URL must start with https://' });
+  }
+  if (dotPath === 'schedule.time') {
+    cfgRW.setForAllProfiles(dotPath, value);
+    const scheduler = await registerSchedulerForPlatform();
+    return out({ ok: scheduler.code === 0, path: dotPath, value, scheduler: scheduler.code === 0 ? 'updated' : 'failed', error: scheduler.code === 0 ? '' : scheduler.out.slice(0, 300) });
   }
   cfgRW.set(dotPath, value);
   out({ ok: true, path: dotPath, value });
@@ -378,7 +386,7 @@ async function jobAction(action, idxRaw) {
 // Re-parse an uploaded resume into the active profile's cv-parsed.json, then
 // suggest fresh search terms from it (titles or keywords per search.mode).
 // The Go wrapper saves the upload to a temp file and passes its path here.
-async function resumeParse(filePath, modeArg) {
+async function resumeParse(filePath, modeArg, originalName = '') {
   if (!filePath || !fs.existsSync(filePath)) return out({ ok: false, error: 'resume file not found' });
   let parsed;
   try {
@@ -396,6 +404,12 @@ async function resumeParse(filePath, modeArg) {
   // active-profile config read) and default the mode; setup-init owns
   // config.json creation at the final step.
   const freshInstall = !fs.existsSync(path.join(ROOT, 'config.json'));
+  // The wrapper parses a short-lived private upload. Preserve only the
+  // user-facing filename alongside the extracted evidence so the Resume page
+  // can show which document AMM is actually using without retaining another
+  // copy of the original file.
+  parsed.displayName = path.basename(String(originalName || parsed.sourceFile || 'resume'))
+    .replace(/[\x00-\x1f<>:"/\\|?*]/g, '').slice(0, 180) || 'resume';
   writeParsedCV(parsed, freshInstall ? 'default' : undefined);
   // v4.1.1: the setup preview lets the user flip titles↔keywords at scan time.
   // An explicit modeArg (from the step-1 toggle) wins; otherwise fall back to
@@ -416,6 +430,37 @@ async function resumeParse(filePath, modeArg) {
     mode,
     suggestions
   });
+}
+
+// Exact, profile-scoped resume evidence used by local matching. Smart Match
+// receives the first 24,000 characters of `raw`; keeping those limits visible
+// is important product truth, not an implementation detail.
+function resumeGet() {
+  try {
+    const cvPath = profilePaths().cvParsed;
+    if (!fs.existsSync(cvPath)) return out({ ok: true, available: false });
+    const cv = enrichParsedResume(JSON.parse(fs.readFileSync(cvPath, 'utf8')));
+    const raw = typeof cv.raw === 'string' ? cv.raw : '';
+    out({
+      ok: true,
+      available: true,
+      name: cv.displayName || path.basename(String(cv.sourceFile || 'resume')),
+      parsedAt: cv.parsedAt || '',
+      raw,
+      rawCharacters: raw.length,
+      smartMatchCharacters: Math.min(raw.length, 24000),
+      smartMatchTruncated: raw.length > 24000,
+      titles: cv.titles || [],
+      skills: cv.skills || [],
+      certs: cv.certs || [],
+      compliance: cv.compliance || [],
+      primaryClusters: cv.primaryClusters || [],
+      careerYears: cv.careerYears || 0,
+      employment: (cv.employment || []).slice(0, 20),
+      recommendedRoles: suggestRoles(cv, { max: 12 }).map(s => s.title),
+      recommendedKeywords: suggestKeywords(cv, { max: 12 }).map(s => s.title),
+    });
+  } catch (e) { out({ ok: false, error: 'Could not read the active profile resume: ' + String(e.message || e) }); }
 }
 
 // Replace the search-term list with the given terms (used by "Apply these"
@@ -696,7 +741,23 @@ function profileList() {
         slug,
         active: slug === active,
         userName: p.user?.name || '',
-        hasCV: fs.existsSync(cvPath)
+        hasCV: fs.existsSync(cvPath),
+        resumeName: (() => {
+          try {
+            const cv = JSON.parse(fs.readFileSync(cvPath, 'utf8'));
+            return cv.displayName || path.basename(String(cv.sourceFile || 'resume'));
+          } catch { return ''; }
+        })(),
+        queryCount: Array.isArray(p.queries) ? p.queries.length : 0,
+        workplaceTypes: Array.isArray(p.search?.workplaceTypes) ? p.search.workplaceTypes : ['Remote'],
+        location: p.search?.location || '',
+        targetJobs: clampBatchSize(p.scoring?.targetJobsPerBatch),
+        matchFloor: p.scoring?.matchFloorPercent ?? 70,
+        scheduleEnabled: p.schedule?.enabled !== false,
+        scheduleTime: p.schedule?.time || '07:00',
+        smartMatchEnabled: !!p.scoring?.ai?.enabled,
+        vaEmail: p.email?.to || '',
+        vaAutoSend: !!p.email?.autoSend,
       };
     });
     out({ ok: true, active, profiles: items });
@@ -783,7 +844,7 @@ async function emailOAuthComplete(code, state, redirectUri) {
     await sendConfiguredEmail({
       to: connected.to, from: connected.email,
       subject: '✅ Automatic Munyun Machine connected',
-      text: 'This is a test from Automatic Munyun Machine. Your daily ranked job-batch .txt will be emailed to this address so you can apply. — AMM'
+      text: 'This is a test from Automatic Munyun Machine. Ranked job batches for this profile will be emailed here.'
     });
     cfgRW.set('email.from', connected.email);
     cfgRW.set('email.to', connected.to);
@@ -812,7 +873,7 @@ async function emailSave(user, pass, to, subject, autoSend) {
     await sendEmail({
       env: { SMTP_USER: user, SMTP_APP_PASSWORD: pass }, to, from: user,
       subject: '✅ Automatic Munyun Machine connected',
-      text: 'This is a test from Automatic Munyun Machine. Your daily ranked job-batch .txt will be emailed to this address so you can apply. — AMM'
+      text: 'This is a test from Automatic Munyun Machine. Ranked job batches for this profile will be emailed here.'
     });
   } catch (e) {
     return out({ ok: false, error: emailScrub('Could not send the test email: ' + friendlyError(e), pass) });
@@ -891,7 +952,8 @@ if (isMain) (async () => {
     case 'jobs-mode':    return jobsMode(a);
     case 'suggest-current': return suggestCurrent(a);
     case 'job-action':   return jobAction(a, b);
-    case 'resume-parse': return resumeParse(a, b);
+    case 'resume-get': return resumeGet();
+    case 'resume-parse': return resumeParse(a, b, a3);
     case 'resume-apply': return resumeApply(a);
     // v2.4: minimal export (number · title · apply link) as txt or csv.
     // v7.2: optional second arg = archive id to export a previous scrape.
@@ -934,7 +996,7 @@ if (isMain) (async () => {
     case 'email-send':     return emailSend(a);
     case 'email-disable':  return emailDisable();
     default:
-      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|skip-add|skip-remove|suggest-current|job-action|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });
+      out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|skip-add|skip-remove|suggest-current|job-action|resume-get|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });
       process.exit(2);
   }
 })().catch(e => { out({ ok: false, error: String(e.message || e) }); process.exit(1); });

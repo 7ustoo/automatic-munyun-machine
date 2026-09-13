@@ -47,6 +47,7 @@ await shot("http://127.0.0.1:8765/#profiles", "07-modal.png", async () => {
   await page.click('button[data-pact="delete"]:not([disabled])');
   await page.waitForTimeout(250);
 });
+await page.click("#modal-cancel");
 // 8. System view
 await shot("http://127.0.0.1:8765/#system", "08-system.png");
 // 9. Settings view

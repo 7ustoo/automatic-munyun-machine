@@ -125,7 +125,9 @@ function isProfileScoped(dotPath) {
 
 function resolveDotPath(dotPath, raw) {
   if (raw.profiles && isProfileScoped(dotPath)) {
-    return `profiles.${raw.active_profile || 'default'}.${dotPath}`;
+    const requested = String(process.env.AMM_PROFILE || '').trim();
+    const slug = requested && raw.profiles[requested] ? requested : (raw.active_profile || 'default');
+    return `profiles.${slug}.${dotPath}`;
   }
   return dotPath;
 }
@@ -146,6 +148,27 @@ export function set(dotPath, value) {
       cur = cur[keys[i]];
     }
     cur[keys[keys.length - 1]] = value;
+    return raw;
+  });
+}
+
+// Set one profile-scoped field identically across every profile. Used for the
+// single OS scheduler trigger: all enabled hunts run sequentially at one shared
+// morning time, while schedule.enabled remains independently profile-scoped.
+export function setForAllProfiles(dotPath, value) {
+  if (!isProfileScoped(dotPath)) throw new Error('expected a profile-scoped path');
+  migrateIfNeeded();
+  return lockedUpdateJsonSync(CFG_PATH, raw => {
+    if (!raw?.profiles) return raw;
+    const keys = dotPath.split('.');
+    for (const profile of Object.values(raw.profiles)) {
+      let cur = profile;
+      for (let i = 0; i < keys.length - 1; i++) {
+        if (!cur[keys[i]] || typeof cur[keys[i]] !== 'object') cur[keys[i]] = {};
+        cur = cur[keys[i]];
+      }
+      cur[keys.at(-1)] = value;
+    }
     return raw;
   });
 }
