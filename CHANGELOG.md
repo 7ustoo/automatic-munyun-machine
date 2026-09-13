@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.0.1] — 2026-09-13
+
+### Fixed
+
+- Profile names now accept ordinary spaces, so names such as `Cloud DevOps` can be created and displayed without weakening the profile data-path safety checks.
+
 ## [11.0.0] — 2026-09-12
 
 ### Added

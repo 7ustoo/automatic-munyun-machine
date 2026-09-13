@@ -1,5 +1,5 @@
 // node --test scripts/__tests__/profile-store.test.mjs
-// Smoke tests for the v1.0 E5 multi-profile store. Locks down the slug
+// Smoke tests for the v1.0 E5 multi-profile store. Locks down the profile-name
 // validation + path shape; doesn't mutate the real config (uses a fresh
 // temp dir via NODE-side env override is too invasive — these tests only
 // exercise pure functions / read-only paths).
@@ -45,12 +45,17 @@ test('PROFILE_FIELDS is the expected set', () => {
   );
 });
 
-test('renameProfile() rejects invalid slugs before touching disk', () => {
-  // Validation runs before readRawConfig(), so a bad slug throws without I/O.
-  assert.throws(() => renameProfile('default', ''), /1-32 chars/);
-  assert.throws(() => renameProfile('default', 'has spaces'), /1-32 chars/);
-  assert.throws(() => renameProfile('default', 'x'.repeat(33)), /1-32 chars/);
-  assert.throws(() => renameProfile('default', 'weird$char'), /1-32 chars/);
+test('renameProfile() accepts spaces but rejects unsafe profile names before touching disk', () => {
+  assert.equal(_internals.isValidProfileName('Cloud DevOps'), true);
+  assert.equal(_internals.isValidProfileName('Security Engineering 2'), true);
+  assert.equal(_internals.isValidProfileName('double  space'), false);
+  assert.equal(_internals.isValidProfileName('../escape'), false);
+  // The same-name fast path also proves a spaced rename passes without I/O.
+  assert.equal(renameProfile('Cloud DevOps', 'Cloud DevOps').renamed, 'Cloud DevOps');
+  assert.throws(() => renameProfile('default', ''), /1-32 characters/);
+  assert.throws(() => renameProfile('default', 'double  space'), /1-32 characters/);
+  assert.throws(() => renameProfile('default', 'x'.repeat(33)), /1-32 characters/);
+  assert.throws(() => renameProfile('default', 'weird$char'), /1-32 characters/);
 });
 
 test('renameProfile() is a no-op when oldSlug === newSlug', () => {

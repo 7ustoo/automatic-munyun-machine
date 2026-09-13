@@ -1334,7 +1334,7 @@
           <div class="muted-sm">Each profile is a complete job hunt: its own resume, searches, filters, match floor, batch history, and VA recipient. Switch profiles from the top bar at any time.</div>
           <div id="prof-list" style="margin-top:12px"></div>
           <div class="row" style="margin-top:10px">
-            <input type="text" id="prof-new" placeholder='new profile name, e.g. "marketing"' autocomplete="off" spellcheck="false" style="flex:1;min-width:200px" />
+            <input type="text" id="prof-new" maxlength="32" placeholder='new profile name, e.g. "Cloud DevOps"' autocomplete="off" spellcheck="false" style="flex:1;min-width:200px" />
             <button class="sm primary" id="prof-add-btn"><svg class="ic"><use href="#i-plus"/></svg>Add</button>
           </div>
           <div class="hint">A new profile inherits your current settings + CV. Switch to it and upload a different resume from the Resume page.</div>
@@ -2919,7 +2919,7 @@ $("prof-list").addEventListener("click", async (ev) => {
   if (act === "rename") {
     const proposed = await promptModal({
       title: `Rename "${slug}"`,
-      body: "Profile names are short slugs — letters, numbers, dashes.",
+      body: "Use up to 32 characters — letters, numbers, spaces, dashes, or underscores.",
       confirmText: "Rename", input: slug,
     });
     if (proposed == null) return;

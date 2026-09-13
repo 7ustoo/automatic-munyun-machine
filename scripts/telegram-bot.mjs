@@ -430,9 +430,9 @@ const HELP_TEXT = `<b>🤖 Automatic Munyun Machine v${VERSION}</b>
 
 <b>Profiles</b>
 /profile list        → list profiles, mark active
-/profile add &lt;slug&gt;  → new profile (clones active config)
-/profile switch &lt;slug&gt; → switch active profile
-/profile delete &lt;slug&gt; → remove (not active, not last)
+/profile add &lt;name&gt;  → new profile (spaces allowed; clones active config)
+/profile switch &lt;name&gt; → switch active profile
+/profile delete &lt;name&gt; → remove (not active, not last)
 
 <b>Maintenance</b>
 /status              → bot uptime, last batch, last poll, version, task state
@@ -726,14 +726,14 @@ async function handleMessage(msg) {
     ].join('\n'), { reply_markup });
   }
 
-  // /profile  /profile list  /profile add <slug>  /profile switch <slug>  /profile delete <slug>
+  // /profile  /profile list  /profile add <name>  /profile switch <name>  /profile delete <name>
   // v1.0 E5: multi-profile support. One install, multiple personas. Each
   // profile has its own CV, queries, filters, and seen-jobs memory. Browser
   // session is shared (one hiring.cafe account).
   if (/^\/?profile\b/.test(text)) {
-    const sub = text.match(/^\/?profile(?:\s+(list|add|switch|delete|rm)(?:\s+(\S+))?)?/i);
+    const sub = text.match(/^\/?profile(?:\s+(list|add|switch|delete|rm)(?:\s+(.+?))?)?\s*$/i);
     const action = sub?.[1]?.toLowerCase();
-    const slug = sub?.[2];
+    const slug = sub?.[2]?.trim();
 
     if (!action || action === 'list') {
       const all = listProfiles();
@@ -743,14 +743,14 @@ async function handleMessage(msg) {
         '',
         ...all.map(s => `${s === active ? '✅' : '  '} <code>${escHtml(s)}</code>${s === active ? ' (active)' : ''}`),
         '',
-        '<i>/profile add &lt;slug&gt; — add a new profile (clones active config)</i>',
-        '<i>/profile switch &lt;slug&gt; — switch active</i>',
-        '<i>/profile delete &lt;slug&gt; — remove (cannot delete active or only profile)</i>'
+        '<i>/profile add &lt;name&gt; — add a new profile; spaces are allowed</i>',
+        '<i>/profile switch &lt;name&gt; — switch active</i>',
+        '<i>/profile delete &lt;name&gt; — remove (cannot delete active or only profile)</i>'
       ];
       return reply(chatId, lines.join('\n'));
     }
     if (action === 'add') {
-      if (!slug) return reply(chatId, '<i>Usage: /profile add &lt;slug&gt;</i>');
+      if (!slug) return reply(chatId, '<i>Usage: /profile add &lt;name&gt;</i>');
       try {
         const r = addProfile(slug);
         return reply(chatId, `✅ Profile <code>${escHtml(r.slug)}</code> created (cloned from <code>${escHtml(r.clonedFrom)}</code>).\n<i>Run /profile switch ${escHtml(r.slug)} then /resume to upload a CV for this persona.</i>`);
@@ -759,7 +759,7 @@ async function handleMessage(msg) {
       }
     }
     if (action === 'switch') {
-      if (!slug) return reply(chatId, '<i>Usage: /profile switch &lt;slug&gt;</i>');
+      if (!slug) return reply(chatId, '<i>Usage: /profile switch &lt;name&gt;</i>');
       try {
         if (runningJob) {
           return reply(chatId, `⚠️ Batch in progress — switch will apply at next /scrape after this one finishes.`);
@@ -771,7 +771,7 @@ async function handleMessage(msg) {
       }
     }
     if (action === 'delete' || action === 'rm') {
-      if (!slug) return reply(chatId, '<i>Usage: /profile delete &lt;slug&gt;</i>');
+      if (!slug) return reply(chatId, '<i>Usage: /profile delete &lt;name&gt;</i>');
       try {
         const r = deleteProfile(slug);
         return reply(chatId, `🗑️ Deleted profile <code>${escHtml(r.deleted)}</code>. Data dir kept for safety — wipe with <code>Remove-Item</code> if desired.`);

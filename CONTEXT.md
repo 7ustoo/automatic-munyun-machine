@@ -2,13 +2,14 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.0.0
-**Active release branch:** `v11.0.0`
+**Version:** 11.0.1
+**Active release branch:** `v11.0.1`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-09-05
 
 ### v11 profile workspace and scoring truth
 
+- Profile names accept single spaces between words (for example `Cloud DevOps`) while continuing to reject path separators and punctuation that would make profile directories unsafe.
 - The top bar switches complete profile-scoped job hunts. Profiles retain separate resumes, queries, filters, source routing, scoring, histories, and VA delivery recipients.
 - The unattended morning runner executes every profile with `schedule.enabled !== false` sequentially via `scheduled-batches.mjs`; `AMM_PROFILE` selects profile state without changing the dashboard's saved active profile.
 - The Resume page renders the exact extracted text local scoring reads, recognized skills and employment, suggested roles, and how much Smart Match receives (up to 24,000 characters).
