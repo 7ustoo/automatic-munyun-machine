@@ -8,6 +8,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.1.0] — 2026-09-13
+
+### Added
+
+- Added profile-scoped AI resume analysis with a visible dashboard action, provider/model status, professional summary, seniority, evidence-backed skills, realistic target roles, and focused search keywords.
+- Resume uploads automatically run the configured Smart Match provider and save its analysis to that profile; a manual **Analyze with AI** action can refresh it without uploading again.
+
+### Changed
+
+- Search suggestions now prefer saved AI recommendations over the fixed local career-cluster dictionary. The local analyzer remains available when no key is configured or a provider call fails.
+- Local requirement matching now includes AI-discovered skills only when the provider supplies an evidence phrase found verbatim in the scanned resume, expanding vocabulary without allowing invented experience into scores.
+- The Resume page clearly distinguishes AI-verified skills and searches from local recommendations while continuing to show the exact extracted text used for matching.
+
 ## [11.0.1] — 2026-09-13
 
 ### Fixed

@@ -8,6 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { suggestTermsForMode } from '../dashboard-api.mjs';
+import { resumeHash } from '../ai-resume-analysis.mjs';
 
 // Parsed-CV shape (data/cv-parsed.json): dictionary-term arrays, not raw text.
 const IAM_CV = {
@@ -57,4 +58,20 @@ test('suggestions are plain strings (ready for the search list)', () => {
   for (const t of suggestTermsForMode(IAM_CV, 'keywords').suggestions) {
     assert.equal(typeof t, 'string');
   }
+});
+
+test('current AI analysis replaces fixed-dictionary suggestions', () => {
+  const raw = 'Built identity governance automation.';
+  const cv = {
+    ...SPARSE_CV,
+    raw,
+    aiAnalysis: {
+      status: 'complete', resumeHash: resumeHash(raw),
+      targetRoles: [{ title: 'Identity Governance Engineer', reason: 'evidence', evidence: 'identity governance automation' }],
+      searchKeywords: [{ term: 'identity governance', reason: 'evidence', evidence: 'identity governance automation' }],
+    },
+  };
+  assert.deepEqual(suggestTermsForMode(cv, 'keywords'), {
+    mode: 'keywords', source: 'ai', suggestions: ['identity governance'],
+  });
 });

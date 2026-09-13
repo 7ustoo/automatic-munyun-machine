@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.0.1
-**Active release branch:** `v11.0.1`
+**Version:** 11.1.0
+**Active release branch:** `v11.1.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-09-05
 
@@ -14,6 +14,13 @@
 - The unattended morning runner executes every profile with `schedule.enabled !== false` sequentially via `scheduled-batches.mjs`; `AMM_PROFILE` selects profile state without changing the dashboard's saved active profile.
 - The Resume page renders the exact extracted text local scoring reads, recognized skills and employment, suggested roles, and how much Smart Match receives (up to 24,000 characters).
 - Jobs and batch diagnostics distinguish AI-verified scores from local-only scores. `scoring.ai.requireForDelivery` defaults true, holding unaudited jobs back during partial provider failures instead of silently padding the batch.
+
+### v11.1 AI resume analysis
+
+- `ai-resume-analysis.mjs` sends up to 24,000 extracted resume characters through the configured Gemini, Anthropic, or OpenAI provider using the shared strict structured-output transport in `ai-rerank.mjs`.
+- The profile's `cv-parsed.json` stores the provider, model, timestamp, resume-content hash, summary, seniority, evidence-backed skills, target roles, and search keywords. A changed resume hash invalidates stale analysis.
+- AI-generated skills enter local matching only when their returned evidence is a literal phrase in the scanned resume. Suggested roles guide searches but are not treated as prior employment.
+- Resume upload analyzes automatically when Smart Match is enabled and configured. `/api/resume/analyze` provides an explicit guarded refresh; provider failures preserve the local parser and its suggestions.
 
 ### v10.2 search/scoring changes
 

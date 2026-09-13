@@ -29,7 +29,7 @@ Advanced profile settings: `scoring.searchAllPages` defaults to true (5,000-page
 
 ### Overview
 
-1. **Reads your resume** and identifies relevant titles, skills, certifications, and experience.
+1. **Reads your resume** and identifies relevant titles, skills, certifications, and experience. With Smart Match configured, AI also builds a saved, profile-specific summary, verified skills, target roles, and focused search keywords.
 2. **Finds jobs** on hiring.cafe and optional Greenhouse, Lever, and Ashby company boards.
 3. **Filters the noise** using your location, workplace preference, experience limit, blocked companies, recency, and other settings.
 4. **Ranks each job** against your resume using the listing and full job description.
@@ -52,7 +52,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - Native Windows app window with AMM's own taskbar icon and pinning identity
 - Ranked jobs with search, sorting, match filters, salary, and source details
 - **Apply**, **Open All**, **Save**, **Applied**, and **Why this matched** actions
-- Resume rescan and automatic search-term suggestions
+- Resume rescan, one-click AI analysis, and profile-saved search-term suggestions
 - Remote, hybrid, and on-site searches with optional location
 - Blocked companies, job age, experience, salary, clearance, and application-form controls
 - Multiple profiles with normal names such as `Cloud DevOps`, each with its own resume, searches, settings, and history
@@ -89,6 +89,8 @@ AMM uses the job card for a broad first pass, then loads the full description fo
 The optional **Consultant Slop Filter** reads those full descriptions before delivery. Balanced mode removes obvious consulting, professional-services, implementation, and customer-engagement roles. Strict mode also removes any role with explicit customer-facing duties or required travel. Rejected jobs do not consume the batch target; AMM keeps evaluating later candidates for replacement engineering roles.
 
 Optional **Smart Match** accepts a Google Gemini, Anthropic, or OpenAI API key. Paste the key once; AMM detects the provider, selects the model automatically, turns Smart Match on, and scores jobs inside the target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. The key stays in the private local secret file outside config backups.
+
+The same provider can analyze the scanned resume itself. On upload—or when you press **Analyze with AI**—AMM sends up to 24,000 characters of extracted resume text and saves the resulting summary, seniority, target roles, and search keywords only to that profile. AI-reported skills affect matching only when the response includes a phrase found in the resume. If no key is configured or the call fails, the built-in local parser and recommendations remain active.
 
 By default, Smart Match is strict: if the provider fails partway through a run, AMM holds back jobs the API did not review instead of presenting local-only scores as if they were AI-audited. The Jobs page shows batch coverage and labels every row `AI verified` or `local only`; Settings can allow local fallback when quantity matters more than full AI coverage.
 
