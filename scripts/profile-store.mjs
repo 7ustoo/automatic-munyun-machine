@@ -123,6 +123,8 @@ export function migrateIfNeeded() {
 export function getActiveProfile() {
   migrateIfNeeded();
   const raw = readRawConfig();
+  const scheduledProfile = String(process.env.AMM_PROFILE || '').trim();
+  if (scheduledProfile && raw.profiles?.[scheduledProfile]) return scheduledProfile;
   return raw.active_profile || 'default';
 }
 
@@ -267,7 +269,8 @@ export function readActiveConfig() {
     // Pre-migration — return as is for transitional safety.
     return raw;
   }
-  const slug = raw.active_profile || 'default';
+  const requested = String(process.env.AMM_PROFILE || '').trim();
+  const slug = requested && raw.profiles[requested] ? requested : (raw.active_profile || 'default');
   const profile = raw.profiles[slug] || {};
   return {
     ...profile,

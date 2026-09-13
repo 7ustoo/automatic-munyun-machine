@@ -8,7 +8,7 @@ import (
 func TestScheduledHelperPath(t *testing.T) {
 	root := filepath.Join("C:", "AMM")
 	cases := map[string]string{
-		"daily":        "daily-batch.mjs",
+		"daily":        "scheduled-batches.mjs",
 		"watchdog":     "watchdog.mjs",
 		"batch-missed": "batch-missed-watcher.mjs",
 	}

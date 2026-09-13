@@ -64,7 +64,7 @@ $dayEnums = $days | ForEach-Object { [System.DayOfWeek]$_ }
 if (Test-Path $WRAPPER_EXE) {
   $action7 = New-ScheduledTaskAction -Execute $WRAPPER_EXE -Argument '--scheduled-task=daily' -WorkingDirectory $ROOT
 } else {
-  $RUN_BATCH_CMD = Join-Path $ROOT 'scripts\run-daily-batch.cmd'
+  $RUN_BATCH_CMD = Join-Path $ROOT 'scripts\run-scheduled-batches.cmd'
   $action7 = New-ScheduledTaskAction -Execute $RUN_BATCH_CMD -WorkingDirectory $ROOT
 }
 $trigger7 = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $dayEnums -At $time

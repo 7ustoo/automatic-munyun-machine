@@ -56,17 +56,23 @@ const routes = (needsSetup, opts = {}) => ({
     needsSetup,
     now: new Date().toISOString(),
   }),
-  "/api/batch": () => ({ ok: true, available: true, date: "2026-07-06", profile: "default", generatedAt: genAt(), jobCount: liveJobs().length, jobs: liveJobs() }),
-  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
+  "/api/batch": () => ({ ok: true, available: true, date: "2026-07-06", profile: "default", generatedAt: genAt(), jobCount: liveJobs().length,
+    funnel: { raw: 940, uniqueBeforeFilter: 810, keptAfterFilter: 380, afterDedup: 170, descriptionEvaluated: 42, smartMatchEligible: 42, smartMatchEvaluated: 6, smartMatchStatus: "partial", smartMatchProvider: "Anthropic", smartMatchRequiredForDelivery: true, smartMatchUnverifiedHeldBack: 36, matchFloorPercent: 35, qualifyingMatches: 27, sent: liveJobs().length, targetJobsPerBatch: 100 },
+    jobs: liveJobs() }),
+  "/api/resume": { ok: true, available: true, name: "Justin-Cloud-Security.pdf", parsedAt: "2026-07-05T19:14:00.000Z", rawCharacters: 1842, smartMatchCharacters: 1842, smartMatchTruncated: false, primaryClusters: ["iam", "cloud"], titles: ["IAM Engineer", "Security Engineer"], skills: ["Okta", "Entra ID", "AWS", "Terraform"], certs: ["Security+"], compliance: ["SOC 2"], careerYears: 7, employment: [{ title: "Cloud Security Engineer", organization: "Demo Corp", startYear: 2021, endYear: 2026, current: true }], recommendedRoles: ["IAM Engineer", "Cloud Security Engineer", "Identity Security Engineer"], raw: "JUSTIN DEMO\nCloud Security & Identity Engineer\n\nEXPERIENCE\nBuilt and operated Okta, Entra ID, AWS IAM, and Terraform controls across production environments.\nLed MFA and SSO rollouts and automated access reviews." },
+  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", scheduleEnabled: true, filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
       // v7.4: Dice is always-on; per-term routing renders unconditionally.
       sources: { greenhouse: [], lever: [], ashby: [], remoteConfigUrl: "" },
       queryEngines: Object.fromEntries(queries.map((q, i) => [q, i === 1 ? "hcafe" : i === 2 ? "dice" : "both"])),
       scrapeSources: "both",
       showSalary: true, skipCompanies: ["Deloitte", "Accenture"],
-      aiEnabled: true, aiHasKey: true, aiModel: "claude-opus-4-8", mutedTerms: ["palo alto"], cvTermCount: 34,
+      aiEnabled: true, aiRequireForDelivery: true, aiHasKey: true, aiProvider: "Anthropic", mutedTerms: ["palo alto"], cvTermCount: 34,
       email: { enabled: oauthEmailConnected, hasCreds: oauthEmailConnected, provider: oauthEmailConnected ? "gmail-oauth" : null, connectedEmail: oauthEmailConnected ? "owner@gmail.com" : "", oauthAvailable: true, to: oauthEmailConnected ? "helper@example.com" : "", autoSend: true } } }),
   "/api/config/backups": { ok: true, backups: ["config-2026-07-06T12-00-00-000Z-pre-setup.json", "config-2026-07-05T09-10-00-000Z-pre-rename.json"] },
-  "/api/profile/list": { ok: true, profiles: [ { slug: "default", active: true, hasCV: true }, { slug: "marketing", active: false, hasCV: false } ] },
+  "/api/profile/list": { ok: true, profiles: [
+    { slug: "default", active: true, hasCV: true, resumeName: "Justin-Cloud-Security.pdf", queryCount: 4, workplaceTypes: ["Remote"], targetJobs: 100, matchFloor: 35, scheduleEnabled: true, scheduleTime: "07:00", smartMatchEnabled: true, vaEmail: "helper@example.com", vaAutoSend: true },
+    { slug: "marketing", active: false, hasCV: false, resumeName: "", queryCount: 7, workplaceTypes: ["Remote", "Hybrid"], location: "New York, NY", targetJobs: 50, matchFloor: 60, scheduleEnabled: false, scheduleTime: "07:00", smartMatchEnabled: false, vaEmail: "marketing-va@example.com", vaAutoSend: false }
+  ] },
   "/api/hcafe/auth": { ok: true, authed: true, checkedAt: "2026-07-10T12:00:00Z" },
   // v7.3: Dice sign-in card (System page).
   "/api/dice/auth": { ok: true, authed: false, checkedAt: "2026-07-10T12:00:00Z", cached: true },

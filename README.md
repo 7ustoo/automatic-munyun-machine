@@ -2,7 +2,7 @@
 
 > Your resume in. Your best job matches out.
 
-**AMM** is a local-first desktop app that finds jobs, checks their requirements against your resume, and gives you up to **200 strong matches**. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
+**Automatic Munyun Machine (AMM)** is a local-first desktop app that finds jobs, checks their requirements against your resume, and gives you up to **200 strong matches**. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
 
 **Free · Private · Windows, macOS, and Linux · Built for any profession**
 
@@ -56,6 +56,9 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - Remote, hybrid, and on-site searches with optional location
 - Blocked companies, job age, experience, salary, clearance, and application-form controls
 - Multiple profiles, each with its own resume, searches, settings, and history
+- An always-visible profile switcher plus a resume evidence viewer showing the exact extracted text used for matching
+- A different VA email recipient and auto-send preference for each profile
+- A saved weekday-morning toggle per profile; one unattended run processes every enabled profile without changing the profile you left open
 - Trends and a search-term leaderboard to show which searches produce the best matches
 - Previous scrapes: every scrape is saved for 30 days — view or download any older batch (txt/csv/xlsx) from the Jobs page, so re-scraping never loses jobs
 - Dice.com built in alongside hiring.cafe: every scrape can run both, hiring.cafe only, or Dice only — with per-term routing (send "iam engineer" everywhere, keep a niche term on one source). Dice jobs carry structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline with a source badge on every ranked job. Sign in to Dice from the System page (same flow as hiring.cafe) so apply links open logged in
@@ -86,6 +89,8 @@ AMM uses the job card for a broad first pass, then loads the full description fo
 The optional **Consultant Slop Filter** reads those full descriptions before delivery. Balanced mode removes obvious consulting, professional-services, implementation, and customer-engagement roles. Strict mode also removes any role with explicit customer-facing duties or required travel. Rejected jobs do not consume the batch target; AMM keeps evaluating later candidates for replacement engineering roles.
 
 Optional **Smart Match** accepts a Google Gemini, Anthropic, or OpenAI API key. Paste the key once; AMM detects the provider, selects the model automatically, turns Smart Match on, and scores jobs inside the target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. The key stays in the private local secret file outside config backups.
+
+By default, Smart Match is strict: if the provider fails partway through a run, AMM holds back jobs the API did not review instead of presenting local-only scores as if they were AI-audited. The Jobs page shows batch coverage and labels every row `AI verified` or `local only`; Settings can allow local fallback when quantity matters more than full AI coverage.
 
 ---
 
@@ -274,6 +279,18 @@ Open **System → hiring.cafe → Sign in**, or run:
 ```bash
 npm run login
 ```
+
+If a batch reports **Saved: blocked**, AMM keeps the jobs queued and rotates
+failed entries behind unattempted ones. Sign in again, then run the next scrape;
+verified saves leave the queue automatically.
+
+### Smart Match reports high demand
+
+This is a temporary response from the selected AI provider, not a failed job
+search. AMM retries 429/5xx and network failures with increasing delays and
+uses the provider's requested retry interval when available. If every attempt
+fails, the batch is still published using local resume scoring; try the next
+scrape after the provider recovers.
 
 ### Telegram does not respond
 

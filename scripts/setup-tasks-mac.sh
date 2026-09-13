@@ -149,7 +149,7 @@ write_plist "com.amm.daily" "<?xml version=\"1.0\" encoding=\"UTF-8\"?>
   <key>ProgramArguments</key>
   <array>
     <string>$NODE</string>
-    <string>$ROOT/scripts/daily-batch.mjs</string>
+    <string>$ROOT/scripts/scheduled-batches.mjs</string>
   </array>
   <key>WorkingDirectory</key><string>$ROOT</string>
   <key>StartCalendarInterval</key>

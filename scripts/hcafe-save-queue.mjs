@@ -39,21 +39,25 @@ export async function ensureJobSaved(page, url) {
 
 export async function drainSaveQueue(file, save) {
   const pending = readSaveQueue(file);
-  let saved = 0, failures = 0;
-  for (let i = 0; i < pending.length;) {
+  const failed = [];
+  let saved = 0, failures = 0, attempted = 0;
+  while (pending.length) {
+    const job = pending.shift();
+    attempted++;
     try {
-      await save(pending[i].url);
-      pending.splice(i, 1);
+      await save(job.url);
       saved++;
       failures = 0;
     } catch {
-      pending[i].lastAttempt = new Date().toISOString();
-      pending[i].error = 'Save not verified; will retry next scrape';
-      i++;
+      job.lastAttempt = new Date().toISOString();
+      job.error = 'Save not verified; will retry next scrape';
+      failed.push(job);
       failures++;
     }
-    atomicWriteJson(file, { pending });
+    // Unattempted entries remain in front. Failed entries rotate to the back
+    // so the same three stale jobs cannot starve the entire queue forever.
+    atomicWriteJson(file, { pending: [...pending, ...failed] });
     if (failures >= 3) break;
   }
-  return { saved, pending: pending.length };
+  return { saved, pending: pending.length + failed.length, attempted, blocked: failures >= 3 };
 }

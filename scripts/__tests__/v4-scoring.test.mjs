@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   termAllowedInText, AMBIGUOUS_TERM_CONTEXT, OFF_FAMILY_RX, FAMILY_PENALTY,
-  jdScoreToPercent, salaryRank, compareJobs, SALARY_FLOOR_K,
+  jdScoreToPercent, salaryRank, compareJobs, SALARY_FLOOR_K, deliveryCandidates,
 } from '../daily-batch.mjs';
 import { AI_PROVIDERS, buildPrompt, candidateBatches, detectAiProvider, RATINGS_SCHEMA } from '../ai-rerank.mjs';
 
@@ -111,4 +111,10 @@ test('Smart Match batches all candidates instead of stopping at 40', () => {
   const batches = candidateBatches(jobs, 40);
   assert.deepEqual(batches.map(b => b.length), [40, 40, 40, 40, 40, 5]);
   assert.deepEqual(batches.flat(), jobs);
+});
+
+test('strict Smart Match delivery holds back every unaudited candidate', () => {
+  const rows = [{ title: 'verified', aiPct: 81 }, { title: 'local only' }, { title: 'verified zero', aiPct: 0 }];
+  assert.deepEqual(deliveryCandidates(rows, true).map(r => r.title), ['verified', 'verified zero']);
+  assert.equal(deliveryCandidates(rows, false).length, 3);
 });

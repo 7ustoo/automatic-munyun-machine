@@ -164,6 +164,8 @@
     color: var(--text-2); white-space: nowrap;
   }
   .profile-chip svg.ic { width: 13px; height: 13px; }
+  .profile-switch { padding: 3px 8px; }
+  .profile-switch select { width: auto; max-width: 170px; min-width: 90px; padding: 2px 24px 2px 4px; border: 0; background-color: transparent; font: inherit; color: inherit; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--gray); flex: none; }
   .dot.alive { background: var(--green); box-shadow: 0 0 0 3px rgba(63,185,80,.15); }
   .dot.stale { background: var(--yellow); box-shadow: 0 0 0 3px rgba(217,166,46,.15); }
@@ -519,6 +521,12 @@
   .why-journey .jarrow { color: var(--text-3); }
   .why-ai { display: block; margin: 8px 0 2px; padding: 8px 12px; border: 1px solid rgba(88,166,255,.35); border-radius: var(--r-sm); background: var(--surface); color: var(--text-2); font-size: 12px; max-width: 68ch; }
   .why-ai b { color: var(--accent-2); }
+  .ai-audit { margin: -4px 0 14px; padding: 10px 12px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--surface-2); font-size: 12px; color: var(--text-2); }
+  .ai-audit.good { border-color: rgba(63,185,80,.45); }
+  .ai-audit.warn { border-color: rgba(217,166,46,.55); background: rgba(217,166,46,.07); }
+  .ai-job-badge { display: inline-block; margin-top: 4px; padding: 1px 6px; border-radius: 999px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+  .ai-job-badge.checked { color: var(--green); background: rgba(63,185,80,.12); }
+  .ai-job-badge.local { color: var(--yellow); background: rgba(217,166,46,.12); }
   .kw.miss { border-color: rgba(217,166,46,.5); }
   .kw .kwbtn { border: none; background: none; padding: 0 0 0 6px; margin: 0; cursor: pointer; font-size: 10.5px; font-weight: 650; color: var(--text-3); }
   .kw .kwbtn.add { color: var(--accent-2); }
@@ -534,7 +542,18 @@
   .prof-item.active { border-color: rgba(88,166,255,.5); background: var(--accent-dim); }
   .prof-name { font-weight: 600; display: flex; align-items: center; gap: 8px; min-width: 0; }
   .prof-name small { color: var(--text-3); font-weight: 400; }
+  .prof-main { min-width: 0; }
+  .prof-meta { display: flex; flex-wrap: wrap; gap: 5px 12px; margin-top: 5px; color: var(--text-3); font-size: 11.5px; }
   .prof-actions { display: flex; gap: 5px; flex: none; }
+
+  .resume-proof { margin-top: 16px; }
+  .resume-proof-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .resume-proof pre { max-height: 520px; overflow: auto; margin: 0; padding: 16px; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--border-2); border-radius: var(--r-md); background: var(--surface-2); color: var(--text); font: 12.5px/1.55 ui-monospace, SFMono-Regular, Consolas, monospace; }
+  .resume-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: 8px 0; }
+  .resume-profile-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; margin: 10px 0; }
+  .resume-profile-block { padding: 12px; border: 1px solid var(--border-2); border-radius: var(--r-sm); background: var(--surface); }
+  .resume-profile-block b { display: block; margin-bottom: 6px; font-size: 12px; }
+  .resume-profile-block .muted-sm { line-height: 1.55; }
 
   /* ---- Toast ------------------------------------------------------------------ */
   #toast {
@@ -725,7 +744,7 @@
     #content { padding: 16px 14px 40px; }
     .watch-toggle span { display: none; }
     .top-help-btn span { display: none; }   /* icon-only Setup/Tour */
-    #top-profile { display: none; }         /* informational; lives on Profiles page */
+    .profile-switch select { max-width: 120px; }
   }
   @media (max-width: 720px) {
     td.yoe, th.yoe { display: none; }
@@ -1026,7 +1045,7 @@
   <aside id="sidebar">
     <div class="brand">
       <img src="/favicon.png" alt="" />
-      <div class="brand-name">Munyun<span>Machine</span></div>
+      <div class="brand-name">Automatic Munyun<span>Machine</span></div>
     </div>
     <nav id="nav">
       <a class="nav-item on" href="#jobs" data-view="jobs"><svg class="ic"><use href="#i-briefcase"/></svg><span>Jobs</span><em class="badge" id="nav-jobs-badge"></em></a>
@@ -1059,9 +1078,11 @@
         <button class="sm ghost top-help-btn" id="top-tour-btn" title="Take a tour">
           <svg class="ic"><use href="#i-eye"/></svg><span>Tour</span>
         </button>
-        <span class="profile-chip" id="top-profile" title="Active profile — manage on the Profiles page">
-          <svg class="ic"><use href="#i-users"/></svg><span id="profile-big">—</span>
-        </span>
+        <label class="profile-chip profile-switch" id="top-profile" title="Active job-search profile">
+          <svg class="ic"><use href="#i-users"/></svg>
+          <select id="top-profile-select" aria-label="Active job-search profile"></select>
+          <span id="profile-big" class="hidden">—</span>
+        </label>
         <span class="status-chip" aria-live="polite"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
         <label class="watch-toggle" title="Show the browser window so you can watch it search hiring.cafe">
           <input type="checkbox" id="watch-scrape" /><svg class="ic"><use href="#i-eye"/></svg><span>Watch</span>
@@ -1155,8 +1176,10 @@
           <div class="tile"><div class="t-label">Jobs in batch</div><div class="t-value" id="st-count">—</div><div class="t-sub" id="st-count-sub"></div></div>
           <div class="tile"><div class="t-label">Average match</div><div class="t-value" id="st-avg">—</div><div class="t-sub" id="st-avg-sub"></div></div>
           <div class="tile"><div class="t-label">Strong matches</div><div class="t-value" id="st-strong">—</div><div class="t-sub">70% match or better</div></div>
+          <div class="tile"><div class="t-label">AI audited</div><div class="t-value" id="st-ai">—</div><div class="t-sub" id="st-ai-sub">Smart Match coverage</div></div>
           <div class="tile"><div class="t-label">Batch date</div><div class="t-value" id="st-date">—</div><div class="t-sub" id="st-date-sub"></div></div>
         </div>
+        <div class="ai-audit hidden" id="ai-audit"></div>
         <div class="muted-sm" id="st-funnel" style="margin:-4px 0 14px"></div>
 
         <div class="card">
@@ -1276,6 +1299,20 @@
           <!-- v4.0: thin-CV warning — matching quality depends on extracted terms. -->
           <div class="note bad hidden" id="cv-warn"></div>
 
+          <div class="resume-proof" id="resume-proof">
+            <div class="resume-proof-head">
+              <div><b id="resume-proof-name">No resume attached</b><div class="muted-sm" id="resume-proof-meta">Upload a resume to see the exact text AMM uses.</div></div>
+              <button class="sm" id="resume-proof-refresh">Refresh evidence</button>
+            </div>
+            <div class="resume-tags" id="resume-proof-tags"></div>
+            <div class="resume-profile-grid" id="resume-profile-grid">
+              <div class="resume-profile-block"><b>Skills AMM recognized</b><div class="muted-sm" id="resume-skills">—</div></div>
+              <div class="resume-profile-block"><b>Experience AMM recognized</b><div class="muted-sm" id="resume-experience">—</div></div>
+              <div class="resume-profile-block"><b>Recommended searches</b><div class="muted-sm" id="resume-recommendations">—</div></div>
+            </div>
+            <pre id="resume-proof-text">No extracted resume text yet.</pre>
+          </div>
+
           <!-- v2.8: search-style toggle lives next to the suggestions it shapes. -->
           <div class="set-row" style="margin-top:14px"><label>Search style</label>
             <select id="set-mode"><option value="titles">Job titles (precise)</option><option value="keywords">Keywords (broad)</option></select></div>
@@ -1294,7 +1331,7 @@
       <section class="view" data-view="profiles">
         <div class="card">
           <h2>Profiles <span class="pill" id="prof-count">—</span></h2>
-          <div class="muted-sm">Each profile has its own resume, search terms, filters, and job history — one persona per job hunt.</div>
+          <div class="muted-sm">Each profile is a complete job hunt: its own resume, searches, filters, match floor, batch history, and VA recipient. Switch profiles from the top bar at any time.</div>
           <div id="prof-list" style="margin-top:12px"></div>
           <div class="row" style="margin-top:10px">
             <input type="text" id="prof-new" placeholder='new profile name, e.g. "marketing"' autocomplete="off" spellcheck="false" style="flex:1;min-width:200px" />
@@ -1399,7 +1436,11 @@
 
             <!-- CONNECTED view -->
             <div id="email-on" class="hidden">
-              <div class="stat-row"><span class="k">Sends to</span><span class="v" id="email-to-v">—</span></div>
+              <div class="stat-row"><span class="k">This profile's VA</span><span class="v" id="email-to-v">—</span></div>
+              <div class="row" style="margin-top:8px">
+                <input type="email" id="email-recipient-edit" placeholder="assistant@example.com" autocomplete="off" spellcheck="false" style="flex:1;min-width:210px" />
+                <button class="sm" id="email-recipient-save">Assign to this profile</button>
+              </div>
               <label class="watch-toggle" style="margin:10px 0"><input type="checkbox" id="email-autosend" /><span>Auto-send every morning after the scrape</span></label>
               <!-- v7.0: ONE format select — it persists as email.format (drives the
                    morning auto-send + default for manual sends) and is also the
@@ -1501,7 +1542,9 @@
             <select id="set-batch-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option><option value="200">200</option></select></div>
           <div class="set-row"><label>Show salary on jobs</label>
             <select id="set-show-salary"><option value="true">Yes</option><option value="false">No</option></select></div>
-          <div class="set-row"><label>Daily scrape time</label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
+          <div class="set-row"><label>Weekday morning scrape</label>
+            <select id="set-schedule-enabled"><option value="true">On — include this profile</option><option value="false">Off — manual scrapes only</option></select></div>
+          <div class="set-row"><label>Morning scrape time <span class="muted-sm">shared</span></label><input type="text" id="set-time" class="num" placeholder="07:00" /></div>
           <div class="set-row"><label>Drop gov-clearance jobs</label>
             <select id="set-clearance"><option value="true">Yes</option><option value="false">No</option></select></div>
           <div class="set-row"><label>Drop management &amp; tech-lead titles</label>
@@ -1531,6 +1574,8 @@
           <div class="muted-sm">Optional: paste a Google Gemini, Anthropic, or OpenAI API key. AMM detects the provider, picks the model automatically, and gives every evaluated job a second opinion. Requests are grouped into 40-job batches, but there is no 40-job total limit.</div>
           <div class="set-row" style="margin-top:8px"><label>Enable Smart match</label>
             <select id="set-ai-enabled"><option value="false">Off</option><option value="true">On</option></select></div>
+          <div class="set-row"><label>Require AI before delivery</label>
+            <select id="set-ai-required"><option value="true">Yes — hold back unaudited jobs</option><option value="false">No — allow local fallback</option></select></div>
           <div class="set-row"><label>API key</label>
             <input type="password" id="set-ai-key" class="num" style="width:230px" placeholder="Paste API key" autocomplete="new-password" spellcheck="false" /></div>
           <div class="set-row"><label>Detected provider</label><span id="ai-provider" class="muted-sm">Paste key to detect</span></div>
@@ -1538,7 +1583,7 @@
         </div>
       </section>
 
-      <footer>Local dashboard · auto-refresh every 5s · press <code>/</code> to search jobs</footer>
+      <footer>Automatic Munyun Machine runs locally · auto-refresh every 5s · press <code>/</code> to search jobs</footer>
     </main>
   </div>
 </div>
@@ -1883,7 +1928,16 @@ function render(s) {
     $("tg-off").classList.toggle("hidden", tgEnabled);
   }
 
-  $("profile-big").textContent = s.profile?.active || "—";
+  const activeProfile = s.profile?.active || "";
+  $("profile-big").textContent = activeProfile || "—";
+  const profileSelect = $("top-profile-select");
+  const profileNames = s.profile?.all || [];
+  const profileSig = profileNames.join("\n");
+  if (profileSelect.dataset.sig !== profileSig) {
+    profileSelect.innerHTML = profileNames.map(name => `<option value="${escapeAttr(name)}">${escapeHTML(name)}</option>`).join("");
+    profileSelect.dataset.sig = profileSig;
+  }
+  if (profileSelect.value !== activeProfile) profileSelect.value = activeProfile;
 
   // v3.0.1: fresh-batch detection. lastBatch.generatedAt rides the 5s status
   // poll, so this catches scrapes started ANYWHERE — the 7am scheduler,
@@ -2010,11 +2064,25 @@ function renderStats() {
     $("st-strong").textContent = "—";
     $("st-strong").classList.add("zero");
   }
+  const f = state.batchMeta.funnel;
+  const aiChecked = Number(f?.smartMatchEvaluated || 0);
+  const checked = Number(f?.smartMatchEligible ?? f?.descriptionEvaluated ?? f?.scored ?? 0);
+  $("st-ai").textContent = checked ? `${aiChecked}/${checked}` : "—";
+  $("st-ai-sub").textContent = f?.smartMatchStatus ? `status: ${String(f.smartMatchStatus).replace(/-/g, " ")}` : "Smart Match coverage";
+  const audit = $("ai-audit");
+  if (!f) {
+    audit.classList.add("hidden");
+  } else {
+    const complete = f.smartMatchStatus === "complete" && aiChecked === checked;
+    audit.className = "ai-audit " + (complete ? "good" : "warn");
+    audit.textContent = complete
+      ? `AI verified every evaluated job (${aiChecked}/${checked}) with ${f.smartMatchProvider || "the configured provider"}. Final scores blend 65% AI judgment with 35% local requirement scoring.`
+      : `AI did not verify every evaluated job (${aiChecked}/${checked}; status: ${f.smartMatchStatus || "unknown"}). Jobs without an AI check use local resume/requirement scoring only.${f.smartMatchError ? " Provider message: " + f.smartMatchError : ""}`;
+  }
   $("st-date").textContent = state.batchMeta.date || "—";
   $("st-date-sub").textContent = state.batchMeta.generatedAt
     ? "generated " + state.batchMeta.generatedAt.replace("T", " ").slice(0, 16) : "no batch yet";
   // v4.1: funnel breakdown — where the raw scrape went before the final list.
-  const f = state.batchMeta.funnel;
   $("st-funnel").textContent = f ? funnelLineJS(f) : "";
   $("nav-jobs-badge").textContent = jobs.length ? String(jobs.length) : "";
 }
@@ -2032,6 +2100,7 @@ function funnelLineJS(f) {
   const consultant = f.droppedConsultantSlop ? ` → ${f.droppedConsultantSlop} consultant/client-facing dropped` : "";
   let result = `${f.raw || 0} raw → ${unique} unique (−${duplicates} duplicates) → ${f.keptAfterFilter || 0} after filters → ${f.afterDedup || 0} fresh (−${seen} already seen) → ${checked} checked (${full} full descriptions${smart})${consultant} → ${aboveFloor} above ${f.matchFloorPercent || 0}% → ${f.sent || 0} delivered`;
   if (f.smartMatchStatus) result += ` · AI: ${f.smartMatchStatus}`;
+  if (f.smartMatchUnverifiedHeldBack) result += ` · ${f.smartMatchUnverifiedHeldBack} unaudited held back`;
   if (f.smartMatchError) result += ` (${f.smartMatchError})`;
   if (f.searchIncomplete) result += ' · Search incomplete — interrupted or capped searches, not exhausted supply';
   if (f.savedSync) result += ` · hiring.cafe Saved: ${f.savedSync.status}, ${f.savedSync.pending || 0} pending`;
@@ -2149,7 +2218,7 @@ function renderJobs() {
         <div class="j-company" title="${escapeAttr(j.company || "")}">${escapeHTML(j.company || "—")}</div>
         ${state.showSalary && j.salaryK ? `<div class="j-salary" title="Salary parsed from the posting">~$${j.salaryK}k</div>` : ""}
       </td>
-      <td class="match"><span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span></td>
+      <td class="match"><span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span><br><span class="ai-job-badge ${j.aiPct != null ? "checked" : "local"}">${j.aiPct != null ? "AI verified" : "local only"}</span></td>
       <td class="yoe">${j.yoe == null ? "—" : escapeHTML(String(j.yoe)) + " yr"}</td>
       <td class="src">${srcBadge(j.src)}${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
       <td class="actions">
@@ -2354,6 +2423,7 @@ async function loadSettings() {
     state.showSalary = s.showSalary !== false;
     $("set-show-salary").value = String(state.showSalary);
     $("set-time").value = s.scheduleTime;
+    $("set-schedule-enabled").value = String(s.scheduleEnabled !== false);
     $("set-clearance").value = String(s.filterClearance);
     $("set-management-titles").value = String(s.filterManagementTitles === true);
     $("set-sales-titles").value = String(s.filterSalesTitles === true);
@@ -2372,6 +2442,7 @@ async function loadSettings() {
     renderSkip(s.skipCompanies || []);
     // v4.0: Smart match config (key is write-only — server returns aiHasKey).
     $("set-ai-enabled").value = String(!!s.aiEnabled);
+    $("set-ai-required").value = String(s.aiRequireForDelivery !== false);
     $("ai-pill").textContent = s.aiEnabled ? "on" : "off";
     $("set-ai-key").value = "";
     $("set-ai-key").placeholder = s.aiHasKey ? "•••••••• saved — paste to replace" : "Paste API key";
@@ -2439,6 +2510,11 @@ $("set-floor").addEventListener("change", e => saveSetting("scoring.matchFloorPe
 $("set-batch-size").addEventListener("change", e => saveSetting("scoring.targetJobsPerBatch", e.target.value));
 $("set-show-salary").addEventListener("change", e => { state.showSalary = e.target.value === "true"; saveSetting("display.showSalary", e.target.value); renderJobs(); });
 $("set-time").addEventListener("change", e => saveSetting("schedule.time", e.target.value));
+$("set-schedule-enabled").addEventListener("change", async e => {
+  await saveSetting("schedule.enabled", e.target.value);
+  toast(e.target.value === "true" ? "This profile will run in the weekday morning search." : "Scheduled search disabled for this profile.", "good");
+  loadProfiles();
+});
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-management-titles").addEventListener("change", e => saveSetting("filters.filterManagementTitles", e.target.value));
 $("set-sales-titles").addEventListener("change", e => saveSetting("filters.filterSalesTitles", e.target.value));
@@ -2775,11 +2851,18 @@ function renderProfiles(profiles) {
   $("prof-list").innerHTML = profiles.map(p => {
     const badge = p.active ? '<span class="pill accent">active</span>' : '';
     const cvHint = p.hasCV ? '' : '<small>no resume yet</small>';
+    const workplaces = (p.workplaceTypes || []).join(", ") || "Remote";
+    const searchSummary = `${p.queryCount || 0} searches · ${escapeHTML(workplaces)}${p.location ? " · " + escapeHTML(p.location) : ""}`;
+    const vaSummary = p.vaEmail
+      ? `VA: ${escapeHTML(p.vaEmail)}${p.vaAutoSend ? " · auto-send on" : ""}`
+      : "No VA assigned";
     // Delete is disabled on the active profile (backend refuses too) and on
     // the only profile (there'd be nothing left to fall back to).
     const canDelete = !p.active && !onlyOne;
     return `<div class="prof-item ${p.active ? 'active' : ''}">
-      <span class="prof-name">${escapeHTML(p.slug)} ${badge}${cvHint}</span>
+      <div class="prof-main"><span class="prof-name">${escapeHTML(p.slug)} ${badge}${cvHint}</span>
+        <div class="prof-meta"><span>Resume: ${escapeHTML(p.resumeName || "none")}</span><span>${searchSummary}</span><span>${p.targetJobs || 0} jobs at ${escapeHTML(String(p.matchFloor ?? 70))}%+</span><span>${p.scheduleEnabled === false ? "Morning search off" : "Morning search " + escapeHTML(p.scheduleTime || "07:00")}</span><span>${p.smartMatchEnabled ? "Smart Match on" : "Smart Match off"}</span><span>${vaSummary}</span></div>
+      </div>
       <div class="prof-actions">
         ${p.active ? '' : `<button class="sm primary" data-pact="switch" data-slug="${escapeAttr(p.slug)}">Switch</button>`}
         <button class="sm" data-pact="rename" data-slug="${escapeAttr(p.slug)}"><svg class="ic" style="width:12px;height:12px"><use href="#i-edit"/></svg>Rename</button>
@@ -2788,6 +2871,21 @@ function renderProfiles(profiles) {
     </div>`;
   }).join("");
 }
+
+async function switchProfile(slug, control) {
+  if (!slug || slug === $("profile-big").textContent) return;
+  if (control) control.disabled = true;
+  const r = await postJSON("/api/profile/switch", { slug });
+  if (r.ok) {
+    toast(`Switched to "${slug}" — loading its resume, searches, jobs, and VA.`, "good");
+    setTimeout(() => location.reload(), 350);
+  } else {
+    toast(r.error || "Could not switch.", "bad");
+    if (control) control.disabled = false;
+  }
+}
+
+$("top-profile-select").addEventListener("change", e => switchProfile(e.target.value, e.target));
 
 async function addProfileFromInput() {
   const slug = $("prof-new").value.trim();
@@ -2814,16 +2912,7 @@ $("prof-list").addEventListener("click", async (ev) => {
   const slug = btn.dataset.slug;
 
   if (act === "switch") {
-    btn.disabled = true; btn.textContent = "…";
-    const r = await postJSON("/api/profile/switch", { slug });
-    if (r.ok) {
-      toast(`Switched to "${slug}" — reloading.`, "good");
-      // Reload so settings, batch, terms, resume all reload for the new profile.
-      setTimeout(() => location.reload(), 500);
-    } else {
-      toast(r.error || "Could not switch.", "bad");
-      btn.disabled = false; btn.textContent = "Switch";
-    }
+    await switchProfile(slug, btn);
     return;
   }
 
@@ -2952,6 +3041,7 @@ function renderEmail(e) {
   $("email-off").classList.toggle("hidden", connected);
   if (connected) {
     $("email-to-v").textContent = e.to || "—";
+    $("email-recipient-edit").value = e.to || "";
     $("email-autosend").checked = !!e.autoSend;
     $("email-send-format").value = e.format || "txt";   // v7.0: persisted attach format
     $("email-on-note").textContent = e.provider === "gmail-oauth"
@@ -3334,7 +3424,63 @@ function pollDiceSignin() {
   poll();
 }
 
-// ---- Resume rescan (v2.5) ----
+// ---- Resume evidence + rescan (v11) ----
+async function loadResumeEvidence() {
+  $("resume-proof-meta").textContent = "Reading active profile evidence…";
+  try {
+    const r = await (await fetch("/api/resume", { cache: "no-store" })).json();
+    if (!r.ok) throw new Error(r.error || "could not read resume");
+    if (!r.available) {
+      $("resume-proof-name").textContent = "No resume attached";
+      $("resume-proof-meta").textContent = "Upload a resume to see the exact text AMM uses.";
+      $("resume-proof-tags").innerHTML = "";
+      $("resume-skills").textContent = "—";
+      $("resume-experience").textContent = "—";
+      $("resume-recommendations").textContent = "—";
+      $("resume-proof-text").textContent = "No extracted resume text yet.";
+      return;
+    }
+    $("resume-proof-name").textContent = r.name || "Resume";
+    const aiNote = r.smartMatchTruncated
+      ? `Smart Match reads the first ${Number(r.smartMatchCharacters).toLocaleString()} characters; local matching reads all ${Number(r.rawCharacters).toLocaleString()}.`
+      : `Local matching and Smart Match read all ${Number(r.rawCharacters).toLocaleString()} extracted characters.`;
+    $("resume-proof-meta").textContent = `${r.parsedAt ? "Scanned " + String(r.parsedAt).replace("T", " ").slice(0, 16) + " · " : ""}${aiNote}`;
+    const tags = [
+      ...(r.primaryClusters || []).map(x => `Focus: ${x}`),
+      `${(r.titles || []).length} titles`, `${(r.skills || []).length} skills`,
+      `${(r.certs || []).length} certs`, `${r.careerYears || 0} career years detected`,
+    ];
+    $("resume-proof-tags").innerHTML = tags.map(x => `<span class="pill">${escapeHTML(x)}</span>`).join("");
+    const recognized = [...(r.skills || []), ...(r.certs || []), ...(r.compliance || [])];
+    $("resume-skills").textContent = recognized.join(" · ") || "No named skills were recognized.";
+    const roles = (r.employment || []).map(job => `${job.title || "Role"}${job.organization ? " at " + job.organization : ""} (${job.startYear || "?"}–${job.current ? "present" : job.endYear || "?"})`);
+    $("resume-experience").textContent = roles.join(" · ") || `${r.careerYears || 0} total career years detected; no dated roles were parsed.`;
+    $("resume-recommendations").textContent = (r.recommendedRoles || []).join(" · ") || "Add clearer target titles to the résumé for recommendations.";
+    $("resume-proof-text").textContent = r.raw || "The parser found no readable text.";
+  } catch (e) {
+    $("resume-proof-meta").textContent = "Could not load evidence: " + e.message;
+  }
+}
+
+$("email-recipient-save").addEventListener("click", async () => {
+  const to = $("email-recipient-edit").value.trim();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) return note("email-on-note", "Enter a valid VA email address.", false);
+  const r = await postJSON("/api/settings/set", { path: "email.to", value: to });
+  if (r.ok) {
+    $("email-to-v").textContent = to;
+    note("email-on-note", `✓ ${to} is assigned to profile "${$("profile-big").textContent}".`, true);
+    loadProfiles();
+  } else note("email-on-note", "✗ " + (r.error || "could not assign recipient"), false);
+});
+$("set-ai-required").addEventListener("change", async e => {
+  await saveSetting("scoring.ai.requireForDelivery", e.target.value);
+  toast(e.target.value === "true"
+    ? "AI coverage is strict — unaudited jobs will be held back."
+    : "Local fallback allowed — partial AI runs may include unaudited jobs.", "good");
+});
+
+$("resume-proof-refresh").addEventListener("click", loadResumeEvidence);
+
 $("resume-upload-btn").addEventListener("click", async () => {
   const input = $("resume-file");
   const file = input.files && input.files[0];
@@ -3350,6 +3496,7 @@ $("resume-upload-btn").addEventListener("click", async () => {
     if (!r.ok) { note("resume-note", "✗ " + (r.error || "could not parse"), false); return; }
     const p = r.parsed || {};
     note("resume-note", `✓ Scanned: ${p.titles} titles · ${p.certs} certs · ${p.skills} skills · ${p.compliance} compliance. Your CV is updated.`, true);
+    await loadResumeEvidence();
     const sugg = r.suggestions || [];
     if (sugg.length) {
       window.__resumeSuggest = sugg;
@@ -3457,6 +3604,7 @@ $("ub-update").addEventListener("click", async () => {
     loadSettings();
     loadProfiles();
     loadBackups();
+    loadResumeEvidence();
     loadHcafeAuthCached();
     loadDiceAuthCached(); // v7.4: Dice card is always visible now
     loadEmail();

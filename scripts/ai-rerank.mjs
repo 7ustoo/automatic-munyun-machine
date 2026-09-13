@@ -109,7 +109,22 @@ export function buildPrompt(cvSummary, candidates) {
  * @param {{apiKey:string, cvSummary:object, candidates:Array<{n:number,title:string,company:string,text:string}>, fetchImpl?:typeof fetch}} opts
  * @returns {Promise<Array<{n:number,fit:number,reason:string}>>}
  */
-export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetch }) {
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504, 529]);
+const RETRY_DELAYS_MS = [3000, 8000, 20000];
+
+function retryDelayMs(res, retryIndex) {
+  const raw = res?.headers?.get?.('retry-after');
+  if (raw) {
+    const seconds = Number(raw);
+    const dateMs = Date.parse(raw);
+    const requested = Number.isFinite(seconds) ? seconds * 1000
+      : Number.isFinite(dateMs) ? dateMs - Date.now() : NaN;
+    if (Number.isFinite(requested)) return Math.max(1000, Math.min(60000, requested));
+  }
+  return RETRY_DELAYS_MS[retryIndex] ?? RETRY_DELAYS_MS.at(-1);
+}
+
+export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetch, sleepImpl = ms => new Promise(r => setTimeout(r, ms)) }) {
   if (!apiKey) throw new Error('no API key configured');
   if (!candidates?.length) return [];
   const provider = detectAiProvider(apiKey);
@@ -117,10 +132,11 @@ export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetc
   const prompt = buildPrompt(cvSummary, candidates);
   const request = providerRequest(provider, apiKey, prompt);
 
-  // One retry on retryable statuses / network errors — this runs inside the
-  // (long) daily batch, so a transient 529 shouldn't cost the user the rerank.
+  // Demand spikes commonly last longer than a single three-second pause.
+  // Retry three times with increasing delays and honor the provider's
+  // Retry-After header when present, while retaining a bounded total wait.
   let lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
       const res = await fetchImpl(request.url, {
         method: 'POST',
@@ -131,9 +147,9 @@ export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetc
       if (!res.ok) {
         let detail = 'HTTP ' + res.status;
         try { const j = await res.json(); detail += ': ' + (j.error?.message || j.error?.type || ''); } catch {}
-        if ([429, 500, 502, 503, 529].includes(res.status) && attempt === 0) {
+        if (RETRYABLE_STATUS.has(res.status) && attempt < RETRY_DELAYS_MS.length) {
           lastErr = new Error(detail);
-          await new Promise(r => setTimeout(r, 3000));
+          await sleepImpl(retryDelayMs(res, attempt));
           continue;
         }
         throw new Error(detail); // 401 → bad key; 400 → bad request; surfaced (scrubbed) in the batch log
@@ -144,8 +160,8 @@ export async function aiRerank({ apiKey, cvSummary, candidates, fetchImpl = fetc
       return validateRatings(parsed.ratings, candidates);
     } catch (e) {
       lastErr = e;
-      if (attempt === 0 && /fetch failed|timeout|aborted/i.test(String(e.message))) {
-        await new Promise(r => setTimeout(r, 3000));
+      if (attempt < RETRY_DELAYS_MS.length && /fetch failed|timeout|aborted/i.test(String(e.message))) {
+        await sleepImpl(RETRY_DELAYS_MS[attempt]);
         continue;
       }
       throw lastErr;

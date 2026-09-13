@@ -99,3 +99,13 @@ test('Smart Match is key-only and shows the auto-detected provider', () => {
   assert.ok(dashboardApi.includes("cfgRW.set('scoring.ai.enabled', true)"), 'saving a key must enable Smart Match');
   assert.ok(dashboardApi.includes('detectAiProvider(value)'), 'saving a key must validate its provider locally');
 });
+
+test('v11 exposes profile, resume evidence, VA assignment, and AI coverage truth', () => {
+  for (const id of ['top-profile-select', 'resume-proof-text', 'resume-skills', 'resume-experience', 'resume-recommendations', 'email-recipient-edit', 'st-ai', 'ai-audit', 'set-ai-required', 'set-schedule-enabled']) {
+    assert.ok(html.includes(`id="${id}"`), `${id} missing`);
+  }
+  assert.ok(html.includes('fetch("/api/resume"'), 'resume evidence must come from the guarded local endpoint');
+  assert.ok(html.includes('AI verified') && html.includes('local only'), 'jobs must disclose whether AI reviewed them');
+  assert.ok(dashboardApi.includes("'scoring.ai.requireForDelivery'"), 'strict AI delivery setting must be editable');
+  assert.ok(html.includes('saveSetting("schedule.enabled"'), 'per-profile scheduled scrape toggle must persist');
+});

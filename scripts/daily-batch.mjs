@@ -648,11 +648,19 @@ const AI_CFG = {
   enabled: !!SCORING.ai?.enabled,
   apiKey: AI_KEY,
   provider: detectAiProvider(AI_KEY),
+  // v11: when Smart Match is configured, do not quietly pad a partial AI run
+  // with local-only candidates. Users can explicitly choose fail-open.
+  requireForDelivery: SCORING.ai?.requireForDelivery !== false,
 };
 
 const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
 let smartMatchFailedOpen = false;
 let smartMatchError = '';
+
+export function deliveryCandidates(evaluated, aiRequired) {
+  const rows = Array.isArray(evaluated) ? evaluated : [];
+  return aiRequired ? rows.filter(r => r?.aiPct != null) : rows;
+}
 
 async function applySmartMatch(rows) {
   if (!AI_CFG.enabled || !AI_CFG.apiKey || !rows.length || smartMatchFailedOpen) return 0;
@@ -1353,7 +1361,7 @@ function buildMessage(weather, top, directUrls, stats) {
 function buildBatchTxt(top, directUrls, weather, stats) {
   const today = new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
   const lines = [];
-  lines.push('Automatic Munyun Machine — Job Batch');
+  lines.push('Automatic Munyun Machine — Ranked Job Batch');
   lines.push(`Date: ${DATE} (${today})`);
   lines.push(weather.replace(/[^\x20-\x7E°]/g, '').trim());
   const filterBits = [];
@@ -1713,7 +1721,9 @@ if (IS_CLI) (async () => {
     if (JD_RESCORE) log(`description-rescored ${jdScored}/${descriptionEvaluatedCount}; full descriptions=${fullDescriptionCount}; not evaluated=${unevaluatedCandidates}`);
 
     evaluated.sort(compareJobs);
-    const aboveFloor = evaluated.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
+    const aiDeliveryRequired = AI_CFG.enabled && !!AI_CFG.apiKey && AI_CFG.requireForDelivery;
+    const deliveryPool = deliveryCandidates(evaluated, aiDeliveryRequired);
+    const aboveFloor = deliveryPool.filter(r => r.matchPct >= MATCH_FLOOR_PCT);
     const top = aboveFloor.slice(0, DELIVER_COUNT);
     const droppedBelowFloor = fresh.length - candidatePool.length
       + evaluated.filter(r => r.matchPct < MATCH_FLOOR_PCT).length;
@@ -1739,12 +1749,15 @@ if (IS_CLI) (async () => {
       descriptionEvaluated: descriptionEvaluatedCount,
       descriptionScored: jdScored,
       fullDescriptions: fullDescriptionCount,
+      smartMatchEligible: evaluated.length,
       smartMatchEvaluated,
       smartMatchProvider: AI_CFG.provider?.label || '',
       smartMatchModel: AI_CFG.provider?.model || '',
       smartMatchStatus: !AI_CFG.enabled ? 'disabled' : !AI_CFG.apiKey ? 'missing-key' : smartMatchFailedOpen ? (smartMatchEvaluated ? 'partial' : 'failed') : smartMatchEvaluated ? 'complete' : 'not-evaluated',
+      smartMatchRequiredForDelivery: aiDeliveryRequired,
+      smartMatchUnverifiedHeldBack: aiDeliveryRequired ? evaluated.filter(r => r.aiPct == null).length : 0,
       smartMatchError,
-      scorerVersion: '10.2.0',
+      scorerVersion: '11.0.0',
       searchCoverage: Object.values(searchCoverage),
       searchIncomplete: Object.values(searchCoverage).some(q => !q.complete) || Object.keys(searchCoverage).length < HCAFE_QUERIES.length,
       unevaluatedCandidates,
@@ -1775,7 +1788,7 @@ if (IS_CLI) (async () => {
             const syncPage = syncCtx.pages()[0] || await syncCtx.newPage();
             if (await isSignedIn(syncPage)) {
               const receipt = await drainSaveQueue(saveQueuePath, url => ensureJobSaved(syncPage, url));
-              funnel.savedSync = { ...receipt, status: receipt.pending ? 'pending' : 'complete' };
+              funnel.savedSync = { ...receipt, status: receipt.blocked ? 'blocked' : receipt.pending ? 'pending' : 'complete' };
             } else funnel.savedSync.status = 'sign-in-required';
           } finally { await syncCtx.close().catch(() => {}); }
         }
@@ -1853,7 +1866,7 @@ if (IS_CLI) (async () => {
           to,
           from: CFG.email.from || env.SMTP_USER,
           subject: renderSubject(CFG.email.subject, DATE),
-          text: `Attached: ${attachment.filename} — today's job batch (titles and direct apply links) from Automatic Munyun Machine.`,
+          text: `Attached: ${attachment.filename} — today's ranked job batch from Automatic Munyun Machine.`,
           attachments: [attachment],
         });
         log(`Emailed job batch (${emailFmt}) to ${to}`);
