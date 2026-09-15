@@ -416,11 +416,15 @@
   /* ---- Previous scrapes (v7.2) ---- */
   .arch-dl a { color: var(--accent); text-decoration: none; font-weight: 600; margin-right: 10px; }
   .arch-dl a:hover { text-decoration: underline; }
-  .arch-detail td { background: var(--surface-2); }
-  .arch-jobs { margin: 6px 0 6px 18px; padding: 0; max-height: 300px; overflow-y: auto; }
-  .arch-jobs li { padding: 3px 0; }
-  .arch-jobs a { color: var(--text); text-decoration: none; }
-  .arch-jobs a:hover { color: var(--accent); text-decoration: underline; }
+  .history-view-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    margin-bottom: 12px; padding: 12px 14px; border: 1px solid var(--accent);
+    border-radius: var(--r-md); background: color-mix(in srgb, var(--accent) 8%, var(--surface));
+  }
+  .history-view-bar b { display: block; margin-bottom: 2px; }
+  .history-view-bar .muted-sm { color: var(--text-2); }
+  .arch-view.on { border-color: var(--accent); color: var(--accent); }
+  details.menu.disabled { opacity: .45; pointer-events: none; }
   .lb-term { font-weight: 600; }
   .lb-weak td { opacity: .6; }
   td.yoe { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -1172,6 +1176,10 @@
 
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
+        <div class="history-view-bar hidden" id="history-view-bar" role="status">
+          <div><b id="history-view-title">Viewing a previous scrape</b><div class="muted-sm">This is the complete saved snapshot. Search, sort, inspect Why details, export, or open individual application links. Current-batch actions are disabled.</div></div>
+          <button class="sm primary" id="history-back">Back to latest jobs</button>
+        </div>
         <div class="stats">
           <div class="tile"><div class="t-label">Jobs in batch</div><div class="t-value" id="st-count">—</div><div class="t-sub" id="st-count-sub"></div></div>
           <div class="tile"><div class="t-label">Average match</div><div class="t-value" id="st-avg">—</div><div class="t-sub" id="st-avg-sub"></div></div>
@@ -1204,9 +1212,9 @@
             <details class="menu" id="export-menu">
               <summary class="btn sm"><svg class="ic"><use href="#i-download"/></svg>Export<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
-                <a href="/api/export?format=txt"><svg class="ic"><use href="#i-file"/></svg>Plain text <small>.txt</small></a>
-                <a href="/api/export?format=csv" title="Links are text — CSV can't carry hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Spreadsheet <small>.csv</small></a>
-                <a href="/api/export?format=xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
+                <a href="/api/export?format=txt" data-batch-export="txt"><svg class="ic"><use href="#i-file"/></svg>Plain text <small>.txt</small></a>
+                <a href="/api/export?format=csv" data-batch-export="csv" title="Links are text — CSV can't carry hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Spreadsheet <small>.csv</small></a>
+                <a href="/api/export?format=xlsx" data-batch-export="xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
               </div>
             </details>
             <button class="sm" id="open-all-btn" title="Open every job in this batch in your default browser"><svg class="ic"><use href="#i-external"/></svg>Open All</button>
@@ -1661,6 +1669,8 @@ const state = {
   loadedOnce: false,
   lastGen: null,       // v3.0.1: last seen lastBatch.generatedAt (null = no baseline yet)
   showSalary: true,    // v4.6: show the parsed salary badge on job rows (Settings toggle, display.showSalary)
+  archiveId: null,     // v11.2: non-null while the ranked dashboard shows a saved scrape
+  archiveLabel: "",
 };
 
 // ---- v3.0 view router — hash-based so refresh keeps your place ----
@@ -1677,7 +1687,7 @@ function setView(name) {
     el.classList.toggle("on", el.dataset.view === name));
   document.querySelectorAll("#nav .nav-item").forEach(el =>
     el.classList.toggle("on", el.dataset.view === name));
-  $("view-title").textContent = VIEW_TITLES[name];
+  $("view-title").textContent = name === "jobs" && state.archiveId ? "Ranked jobs · Previous scrape" : VIEW_TITLES[name];
 }
 // v3.0.2: internal navigation goes through replaceState, NOT location.hash /
 // plain anchor jumps — hash pushes grow the history stack, and Chrome only
@@ -1999,7 +2009,9 @@ function onFreshBatch(lb) {
   localScrapePending = false;
   $("scrapebar").classList.remove("active");
   clearTimeout(scrapeSafetyTimer);
-  loadBatch();
+  // Do not yank the user out of a historical snapshot when a scheduled or
+  // remote scrape finishes. The completion banner offers an explicit jump.
+  if (!state.archiveId) loadBatch();
   const what = lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
   $("bb-text").textContent = `Scrape complete — ${what}${lb?.date ? ` for ${lb.date}` : ""}.`;
   $("batch-banner").classList.remove("hidden");
@@ -2008,39 +2020,109 @@ function onFreshBatch(lb) {
   loadArchives();   // v7.2: the finished scrape was archived — refresh the list
 }
 $("bb-dismiss").addEventListener("click", () => $("batch-banner").classList.add("hidden"));
-$("bb-view").addEventListener("click", () => {
+$("bb-view").addEventListener("click", async () => {
   $("batch-banner").classList.add("hidden");
   navTo("jobs");
+  await loadBatch();
   window.scrollTo({ top: 0, behavior: "smooth" });
 });
 
 // ---- Ranked jobs (from /api/batch, refreshed on demand) ----
+function renderBatchMode() {
+  const historical = !!state.archiveId;
+  $("history-view-bar").classList.toggle("hidden", !historical);
+  $("history-view-title").textContent = historical
+    ? `Viewing saved scrape: ${state.archiveLabel || state.batchMeta.date || state.archiveId}`
+    : "Viewing a previous scrape";
+  if (currentView() === "jobs") {
+    $("view-title").textContent = historical ? "Ranked jobs · Previous scrape" : VIEW_TITLES.jobs;
+  }
+  const archiveQuery = historical ? `&archive=${encodeURIComponent(state.archiveId)}` : "";
+  document.querySelectorAll("[data-batch-export]").forEach(link => {
+    link.href = `/api/export?format=${encodeURIComponent(link.dataset.batchExport)}${archiveQuery}`;
+  });
+  $("open-all-btn").disabled = historical;
+  $("open-all-btn").title = historical
+    ? "Open All is disabled for saved snapshots; individual Apply links still work."
+    : "Open every job in this batch in your default browser";
+  $("email-menu").classList.toggle("disabled", historical);
+  $("email-menu").setAttribute("aria-disabled", String(historical));
+  $("email-btn").title = historical
+    ? "Email is disabled for saved snapshots; use Export to download this exact batch."
+    : "Email this batch to your recipient (e.g. your VA)";
+  $("refresh-btn").title = historical ? "Reload this saved scrape" : "Refresh the latest list";
+}
+
+async function useBatch(batch, { archiveId = null, archiveLabel = "" } = {}) {
+  state.archiveId = archiveId;
+  state.archiveLabel = archiveLabel;
+  state.jobs = Array.isArray(batch?.jobs) ? batch.jobs : [];
+  state.batchMeta = {
+    date: batch?.date || "",
+    jobCount: batch?.jobCount || state.jobs.length,
+    generatedAt: batch?.generatedAt || "",
+    funnel: batch?.funnel || null,
+  };
+  state.whyOpen.clear();
+  try {
+    state.__appliedKey = "amm-applied-" + (state.batchMeta.generatedAt || state.batchMeta.date || "x");
+    state.applied = new Set((JSON.parse(localStorage.getItem(state.__appliedKey) || "[]")).map(String));
+  } catch { state.applied = new Set(); }
+  if (archiveId) {
+    // Exclusions belong to the live batch. Reusing them by numeric index on a
+    // historical scrape would exclude unrelated old jobs.
+    state.excluded = new Set();
+  } else {
+    try {
+      const ex = await (await fetch("/api/exclusions", { cache: "no-store" })).json();
+      state.excluded = new Set(ex.ok && Array.isArray(ex.excluded) ? ex.excluded : []);
+    } catch { state.excluded = new Set(); }
+  }
+  state.loadedOnce = true;
+  renderBatchMode();
+  renderStats();
+  renderJobs();
+}
+
 async function loadBatch() {
   if (!state.loadedOnce) renderSkeleton();
   try {
     const res = await fetch("/api/batch", { cache: "no-store" });
     const batch = await res.json();
-    state.jobs = batch.jobs || [];
-    state.batchMeta = { date: batch.date || "", jobCount: batch.jobCount || state.jobs.length, generatedAt: batch.generatedAt || "", funnel: batch.funnel || null };
-    // v4.0: applied-marks persist across reloads, keyed per batch.
-    try {
-      state.__appliedKey = "amm-applied-" + (state.batchMeta.generatedAt || state.batchMeta.date || "x");
-      state.applied = new Set((JSON.parse(localStorage.getItem(state.__appliedKey) || "[]")).map(String));
-    } catch {}
-    // v7.7: pull the server-side ✕ list (auto-empty when a new batch lands).
-    try {
-      const ex = await (await fetch("/api/exclusions", { cache: "no-store" })).json();
-      state.excluded = new Set(ex.ok && Array.isArray(ex.excluded) ? ex.excluded : []);
-    } catch { state.excluded = new Set(); }
-    state.loadedOnce = true;
-    renderStats();
-    renderJobs();
+    await useBatch(batch);
   } catch (e) {
     state.loadedOnce = true;
     $("lb-body").innerHTML = '<div class="empty"><div class="e-icon">⚠️</div><div class="e-title">Could not load the batch</div><div class="e-sub">The wrapper did not answer. Try Refresh, or check the System page.</div></div>';
     $("lb-foot").textContent = "";
   }
 }
+
+async function loadArchivedBatch(id, label = "") {
+  if (!id) return;
+  renderSkeleton();
+  try {
+    const r = await (await fetch(`/api/archive/batch?id=${encodeURIComponent(id)}`, { cache: "no-store" })).json();
+    if (!r?.ok || !r.batch || !Array.isArray(r.batch.jobs)) throw new Error(r?.error || "That saved scrape is unavailable.");
+    await useBatch(r.batch, { archiveId: id, archiveLabel: label || archLabel(id) });
+    navTo("jobs");
+    await loadArchives();
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  } catch (e) {
+    toast(e.message || "Couldn't load that scrape.", "bad");
+    await loadBatch();
+  }
+}
+
+async function refreshActiveBatch() {
+  if (state.archiveId) return loadArchivedBatch(state.archiveId, state.archiveLabel);
+  return loadBatch();
+}
+
+$("history-back").addEventListener("click", async () => {
+  await loadBatch();
+  await loadArchives();
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
 
 function renderSkeleton() {
   $("lb-body").innerHTML = Array.from({ length: 6 }, (_, i) => `
@@ -2055,7 +2137,8 @@ function renderSkeleton() {
 function renderStats() {
   const jobs = state.jobs;
   $("st-count").textContent = jobs.length || "—";
-  $("st-count-sub").textContent = state.batchMeta.date ? "profile: " + ($("profile-big").textContent || "") : "";
+  $("st-count-sub").textContent = state.batchMeta.date
+    ? `${state.archiveId ? "saved scrape · " : ""}profile: ${$("profile-big").textContent || ""}` : "";
   if (jobs.length) {
     const avg = Math.round(jobs.reduce((a, j) => a + (j.matchPct || 0), 0) / jobs.length);
     const strong = jobs.filter(j => (j.matchPct || 0) >= 70).length;
@@ -2216,6 +2299,7 @@ function renderJobs() {
     const band = matchClass(pct);
     const isApplied = state.applied.has(String(j.idx));
     const isExcluded = state.excluded.has(j.idx); // v7.7: ✕'d out of sends
+    const liveActions = !state.archiveId;
     const main = `<tr data-idx="${j.idx}" class="job-row${isApplied ? " applied-row" : ""}${isExcluded ? " excluded-row" : ""}">
       <td class="idx">#${j.idx}</td>
       <td class="jobcell">
@@ -2229,9 +2313,9 @@ function renderJobs() {
       <td class="actions">
         <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">Apply<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
         <button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>
-        ${(j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
-        <button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>
-        <button class="sm ghost exclude-btn${isExcluded ? " on" : ""}" data-act="exclude" data-idx="${j.idx}" title="${isExcluded ? "Excluded from Export, Email & Open All — click to restore" : "Exclude from Export, Email & Open All (e.g. a duplicate)"}" aria-label="${isExcluded ? "restore job " + j.idx : "exclude job " + j.idx}">${isExcluded ? "↩" : "✕"}</button>
+        ${liveActions && (j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
+        ${liveActions ? `<button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>` : ""}
+        ${liveActions ? `<button class="sm ghost exclude-btn${isExcluded ? " on" : ""}" data-act="exclude" data-idx="${j.idx}" title="${isExcluded ? "Excluded from Export, Email & Open All — click to restore" : "Exclude from Export, Email & Open All (e.g. a duplicate)"}" aria-label="${isExcluded ? "restore job " + j.idx : "exclude job " + j.idx}">${isExcluded ? "↩" : "✕"}</button>` : ""}
       </td>
     </tr>`;
     const why = state.whyOpen.has(String(j.idx))
@@ -2242,7 +2326,7 @@ function renderJobs() {
     <thead><tr><th></th><th>Job</th><th>Match</th><th class="yoe">YOE</th><th class="src">Source</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
-  const exNote = state.excluded.size
+  const exNote = !state.archiveId && state.excluded.size
     ? ` · ${state.excluded.size} excluded (left out of Export, Email & Open All)` : "";
   $("lb-foot").textContent = (jobs.length === all.length
     ? all.length + " jobs" : jobs.length + " of " + all.length + " jobs") + exNote;
@@ -2267,6 +2351,7 @@ $("band-seg").addEventListener("click", (e) => {
 $("job-sort").addEventListener("change", (e) => { state.sort = e.target.value; renderJobs(); });
 
 $("open-all-btn").addEventListener("click", async () => {
+  if (state.archiveId) return toast("Open All is unavailable for saved scrapes. Individual Apply links still work.", "bad");
   const count = state.jobs.length;
   if (!count) return toast("No jobs are available to open.", "bad");
   const ok = await confirmModal({
@@ -2414,7 +2499,7 @@ $("scrape-btn").addEventListener("click", async () => {
     setTimeout(() => { btn.disabled = false; labelEl.textContent = label; }, 5000);
   }
 });
-$("refresh-btn").addEventListener("click", loadBatch);
+$("refresh-btn").addEventListener("click", refreshActiveBatch);
 // ---- Settings ----
 async function loadSettings() {
   try {
@@ -2689,7 +2774,8 @@ async function loadTrends(force) {
 
 // ---- Previous scrapes (v7.2) ----------------------------------------------
 // Full-batch snapshots from /api/archive (batch-archive/, 30-day retention).
-// Each row: when, counts, per-format download links, expandable job list.
+// Each row: when, counts, per-format download links, and a button that loads
+// the complete snapshot into the normal ranked-jobs dashboard.
 function archLabel(id) {
   // batch-2026-07-20T14-33-05 → "Jul 20, 2026 · 2:33 PM" (local words, not ISO)
   const m = /^batch-(\d{4})-(\d{2})-(\d{2})T(\d{2})-(\d{2})-(\d{2})$/.exec(id || "");
@@ -2716,31 +2802,21 @@ async function loadArchives() {
           <a class="sm" href="/api/export?format=csv&archive=${encodeURIComponent(e.id)}" title="Spreadsheet (links are text)">.csv</a>
           <a class="sm" href="/api/export?format=xlsx&archive=${encodeURIComponent(e.id)}" title="Excel workbook, clickable links">.xlsx</a>
         </td>
-        <td><button class="sm arch-view" data-id="${escapeHTML(e.id)}">View</button></td>
-      </tr>
-      <tr class="arch-detail hidden" data-detail="${escapeHTML(e.id)}"><td colspan="6"></td></tr>`).join("");
+        <td><button class="sm arch-view${state.archiveId === e.id ? " on" : ""}" data-id="${escapeHTML(e.id)}" data-label="${escapeAttr(archLabel(e.id))}" ${state.archiveId === e.id ? "disabled" : ""}>${state.archiveId === e.id ? "Viewing" : "View"}</button></td>
+      </tr>`).join("");
   } catch (e) {}
 }
 document.addEventListener("click", async ev => {
   const btn = ev.target.closest(".arch-view");
   if (!btn) return;
   const id = btn.dataset.id;
-  const row = document.querySelector(`[data-detail="${CSS.escape(id)}"]`);
-  if (!row) return;
-  if (!row.classList.contains("hidden")) { row.classList.add("hidden"); btn.textContent = "View"; return; }
+  document.querySelectorAll(".arch-view").forEach(x => x.disabled = true);
   btn.textContent = "…";
   try {
-    const r = await (await fetch(`/api/archive/batch?id=${encodeURIComponent(id)}`, { cache: "no-store" })).json();
-    const jobs = (r && r.ok && Array.isArray(r.batch?.jobs)) ? r.batch.jobs : [];
-    row.firstElementChild.innerHTML = jobs.length ? `<ol class="arch-jobs">` + jobs.map(j => {
-      const url = j.directUrl || j.viewjobUrl || "";
-      const t = `${escapeHTML(j.title || "Untitled")}${j.company ? " — " + escapeHTML(j.company) : ""}`;
-      return `<li>${url ? `<a href="${escapeHTML(url)}" target="_blank" rel="noopener">${t}</a>` : t}` +
-             `${j.matchPct != null ? ` <span class="muted-sm">· ${j.matchPct}%</span>` : ""}</li>`;
-    }).join("") + `</ol>` : `<div class="muted-sm">This snapshot has no jobs.</div>`;
-    row.classList.remove("hidden");
-    btn.textContent = "Hide";
-  } catch (e) { btn.textContent = "View"; toast("Couldn't load that scrape.", "bad"); }
+    await loadArchivedBatch(id, btn.dataset.label || archLabel(id));
+  } finally {
+    document.querySelectorAll(".arch-view").forEach(x => x.disabled = x.dataset.id === state.archiveId);
+  }
 });
 
 function renderTrendsChart(days) {
@@ -3214,6 +3290,10 @@ $("email-menu").addEventListener("click", (ev) => {
   const choice = ev.target.closest("button[data-email-format]");
   if (!choice) return;
   $("email-menu").open = false;
+  if (state.archiveId) {
+    toast("Use Export to download this exact saved scrape. Email sends the latest batch only.", "bad");
+    return;
+  }
   if (!window.__emailConnected) {
     navTo("system"); // v5.0: navTo (not setView) so hash + view stay in sync — the '/' shortcut and reload depend on it
     toast("Set up email first — see the Email card on this page.", "bad");

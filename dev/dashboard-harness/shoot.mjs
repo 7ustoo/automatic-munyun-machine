@@ -37,6 +37,12 @@ await shot("http://127.0.0.1:8765/#jobs", "03-jobs-filtered.png", async () => {
   await page.selectOption("#job-sort", "match");
   await page.waitForTimeout(200);
 });
+// Historical snapshot loaded into the full ranked dashboard.
+await shot("http://127.0.0.1:8765/#jobs", "03b-history-ranked.png", async () => {
+  await page.click('.arch-view[data-id="batch-2026-07-06T14-30-00"]');
+  await page.waitForSelector('#history-view-bar:not(.hidden)');
+  await page.waitForTimeout(200);
+});
 // 4. Searches view
 await shot("http://127.0.0.1:8765/#searches", "04-searches.png");
 // 5. Resume view

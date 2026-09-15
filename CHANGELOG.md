@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.2.0] — 2026-09-15
+
+### Changed
+
+- **Previous scrape View now opens the complete saved batch in Ranked jobs.** Historical batches use the normal statistics, AI-audit and funnel diagnostics, searchable/sortable job table, match bands, salary/source details, and full Why explanations instead of a small inline title list.
+- Historical mode is clearly labeled and includes **Back to latest jobs**. Dashboard exports automatically target the selected archive, while current-batch-only actions are disabled so an old numeric job index cannot mutate an unrelated live batch.
+- A newly completed scheduled or remote scrape no longer pulls the user out of a historical snapshot; its completion banner provides an explicit jump to the latest jobs.
+
 ## [11.1.0] — 2026-09-13
 
 ### Added

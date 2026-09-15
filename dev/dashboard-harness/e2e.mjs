@@ -62,14 +62,26 @@ if ((await exBtn.textContent()) !== '↩') throw new Error('exclude button did n
 await exBtn.click();
 await page.waitForFunction(() => !document.querySelector('tr.excluded-row'));
 
-// v7.2: Previous scrapes — list renders, snapshot expands, downloads carry the id.
+// v11.2: Previous scrapes — View loads the complete snapshot into the ranked
+// dashboard, preserves archive-specific exports, and makes live mutations unavailable.
 await page.waitForSelector('#arch-body tr[data-arch]');
 if (await page.locator('#arch-body tr[data-arch]').count() !== 3) throw new Error('archive list did not render 3 previous scrapes');
 const dlHref = await page.locator('#arch-body .arch-dl a').first().getAttribute('href');
 if (!/\/api\/export\?format=txt&archive=batch-2026-07-06T14-30-00$/.test(dlHref)) throw new Error('archive download link missing archive id: ' + dlHref);
 await page.click('.arch-view[data-id="batch-2026-07-06T14-30-00"]');
-await page.waitForSelector('[data-detail="batch-2026-07-06T14-30-00"]:not(.hidden) .arch-jobs li');
-if (await page.locator('[data-detail="batch-2026-07-06T14-30-00"] .arch-jobs li').count() < 20) throw new Error('archived jobs did not render');
+await page.waitForSelector('#history-view-bar:not(.hidden)');
+if ((await page.locator('#view-title').textContent()) !== 'Ranked jobs · Previous scrape') throw new Error('historical dashboard title missing');
+if (await page.locator('tr.job-row').count() < 20) throw new Error('archived jobs did not render in ranked dashboard');
+if (!(await page.locator('#st-funnel').textContent()).includes('640 raw')) throw new Error('archived funnel did not render');
+const historicalExport = await page.locator('[data-batch-export="xlsx"]').getAttribute('href');
+if (!historicalExport.endsWith('&archive=batch-2026-07-06T14-30-00')) throw new Error('ranked dashboard export is not archive-scoped: ' + historicalExport);
+if (!(await page.locator('#open-all-btn').isDisabled())) throw new Error('historical Open All must not act on the current batch');
+if (await page.locator('button[data-act="save"],button[data-act="applied"],button[data-act="exclude"]').count()) throw new Error('live batch actions leaked into historical view');
+await page.click('button[data-act="why"][data-idx="2"]');
+await page.waitForSelector('tr.why-row[data-why="2"]');
+await page.click('#history-back');
+await page.waitForFunction(() => document.querySelector('#history-view-bar')?.classList.contains('hidden'));
+if (await page.locator('#open-all-btn').isDisabled()) throw new Error('Back to latest did not restore current-batch actions');
 
 if (errors.length) throw new Error('dashboard console errors:\n' + errors.join('\n'));
 await browser.close();
