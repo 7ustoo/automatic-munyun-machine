@@ -1177,7 +1177,7 @@
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
         <div class="history-view-bar hidden" id="history-view-bar" role="status">
-          <div><b id="history-view-title">Viewing a previous scrape</b><div class="muted-sm">This is the complete saved snapshot. Search, sort, inspect Why details, export, or open individual application links. Current-batch actions are disabled.</div></div>
+          <div><b id="history-view-title">Viewing a previous scrape</b><div class="muted-sm">This is the complete saved snapshot. Search, sort, inspect Why details, export, email, or open every application link. Save, Applied, and Exclude stay disabled for history.</div></div>
           <button class="sm primary" id="history-back">Back to latest jobs</button>
         </div>
         <div class="stats">
@@ -2041,14 +2041,14 @@ function renderBatchMode() {
   document.querySelectorAll("[data-batch-export]").forEach(link => {
     link.href = `/api/export?format=${encodeURIComponent(link.dataset.batchExport)}${archiveQuery}`;
   });
-  $("open-all-btn").disabled = historical;
+  $("open-all-btn").disabled = false;
   $("open-all-btn").title = historical
-    ? "Open All is disabled for saved snapshots; individual Apply links still work."
+    ? "Open every job from this saved scrape in your default browser"
     : "Open every job in this batch in your default browser";
-  $("email-menu").classList.toggle("disabled", historical);
-  $("email-menu").setAttribute("aria-disabled", String(historical));
+  $("email-menu").classList.remove("disabled");
+  $("email-menu").setAttribute("aria-disabled", "false");
   $("email-btn").title = historical
-    ? "Email is disabled for saved snapshots; use Export to download this exact batch."
+    ? "Email this saved scrape to your recipient (e.g. your VA)"
     : "Email this batch to your recipient (e.g. your VA)";
   $("refresh-btn").title = historical ? "Reload this saved scrape" : "Refresh the latest list";
 }
@@ -2351,12 +2351,12 @@ $("band-seg").addEventListener("click", (e) => {
 $("job-sort").addEventListener("change", (e) => { state.sort = e.target.value; renderJobs(); });
 
 $("open-all-btn").addEventListener("click", async () => {
-  if (state.archiveId) return toast("Open All is unavailable for saved scrapes. Individual Apply links still work.", "bad");
   const count = state.jobs.length;
   if (!count) return toast("No jobs are available to open.", "bad");
+  const saved = !!state.archiveId;
   const ok = await confirmModal({
-    title: `Open all ${count} jobs?`,
-    body: `This will open ${count} browser tabs using each job's direct application link. Your browser may take a moment to load them all.`,
+    title: `Open all ${count} ${saved ? "saved " : ""}jobs?`,
+    body: `This will open ${count} browser tabs from ${saved ? "this previous scrape" : "the latest batch"} using each job's direct application link. Your browser may take a moment to load them all.`,
     confirmText: "Open All",
   });
   if (!ok) return;
@@ -2366,7 +2366,7 @@ $("open-all-btn").addEventListener("click", async () => {
   const label = btn.innerHTML;
   btn.textContent = "Opening…";
   try {
-    const r = await postJSON("/api/jobs/open-all");
+    const r = await postJSON("/api/jobs/open-all", { archive: state.archiveId || "" });
     if (!r.ok) return toast(r.error || "Could not open the job links.", "bad");
     const misses = (r.skipped || 0) + (r.failed || 0);
     toast(`Opened ${r.opened} job${r.opened === 1 ? "" : "s"}${misses ? `; ${misses} link${misses === 1 ? " was" : "s were"} unavailable` : ""}.`, misses ? "" : "good");
@@ -3247,13 +3247,13 @@ $("email-send-format").addEventListener("change", async e => {
   if (r.ok) setTimeout(() => note("email-on-note", ""), 2000);
 });
 
-async function sendEmailBatch(format, btn, noteId = "") {
+async function sendEmailBatch(format, btn, noteId = "", archiveId = "") {
   btn.disabled = true;
   const old = btn.innerHTML;
   btn.textContent = "Sending…";
   if (noteId) note(noteId, `Sending ${String(format).toUpperCase()}…`, true);
   try {
-    const r = await postJSON("/api/email/send", { format });
+    const r = await postJSON("/api/email/send", { format, archive: archiveId });
     const msg = r.ok
       ? `Emailed ${r.filename || "the batch"} to ${r.to}.`
       : `Email failed: ${r.error || "send failed"}`;
@@ -3285,21 +3285,17 @@ $("email-disable").addEventListener("click", async () => {
   if (r.ok) loadEmail();
 });
 
-// The Jobs toolbar Email menu sends the current batch in the chosen format.
+// The Jobs toolbar Email menu sends whichever batch is currently displayed.
 $("email-menu").addEventListener("click", (ev) => {
   const choice = ev.target.closest("button[data-email-format]");
   if (!choice) return;
   $("email-menu").open = false;
-  if (state.archiveId) {
-    toast("Use Export to download this exact saved scrape. Email sends the latest batch only.", "bad");
-    return;
-  }
   if (!window.__emailConnected) {
     navTo("system"); // v5.0: navTo (not setView) so hash + view stay in sync — the '/' shortcut and reload depend on it
     toast("Set up email first — see the Email card on this page.", "bad");
     return;
   }
-  sendEmailBatch(choice.dataset.emailFormat, choice);
+  sendEmailBatch(choice.dataset.emailFormat, choice, "", state.archiveId || "");
 });
 
 // ---- Hiring.cafe sign-in status (v4.1) ----

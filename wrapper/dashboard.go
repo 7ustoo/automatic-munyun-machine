@@ -771,6 +771,41 @@ func readFullBatch(installDir string) lastBatchInfo {
 	return info
 }
 
+// readArchivedFullBatch returns one immutable snapshot for Open All. The caller
+// validates archiveID before this function joins it into a path.
+func readArchivedFullBatch(installDir, archiveID string) lastBatchInfo {
+	info := lastBatchInfo{Jobs: []batchJob{}}
+	if !archiveIDRx.MatchString(archiveID) {
+		return info
+	}
+	active := activeProfileSlug(installDir)
+	if active == "" {
+		return info
+	}
+	data, err := os.ReadFile(filepath.Join(installDir, "data", "profiles", active, "batch-archive", archiveID+".json"))
+	if err != nil {
+		return info
+	}
+	var lb struct {
+		Date        string            `json:"date"`
+		Profile     string            `json:"profile"`
+		GeneratedAt string            `json:"generatedAt"`
+		Jobs        []json.RawMessage `json:"jobs"`
+		Funnel      json.RawMessage   `json:"funnel"`
+	}
+	if json.Unmarshal(data, &lb) != nil {
+		return info
+	}
+	info.Available = true
+	info.Date = lb.Date
+	info.Profile = lb.Profile
+	info.GeneratedAt = lb.GeneratedAt
+	info.JobCount = len(lb.Jobs)
+	info.Jobs = parseBatchJobs(lb.Jobs, 0)
+	info.Funnel = lb.Funnel
+	return info
+}
+
 // parseAnyRFC3339 accepts both nanosecond and second-precision ISO8601.
 // The bot writes nanosecond precision; older heartbeats might be RFC3339.
 func parseAnyRFC3339(s string) time.Time {

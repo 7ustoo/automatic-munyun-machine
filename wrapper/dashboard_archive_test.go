@@ -26,9 +26,24 @@ func writeArchive(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(ad, "index.json"), []byte(idx), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	snap := `{"date":"2026-07-20","jobs":[{"title":"IAM Engineer","matchPct":90},{"title":"Linux Admin","matchPct":40}]}`
+	snap := `{"date":"2026-07-20","generatedAt":"2026-07-20T14:33:05.000Z","jobs":[{"idx":1,"title":"IAM Engineer","matchPct":90,"directUrl":"https://jobs.example/iam"},{"idx":2,"title":"Linux Admin","matchPct":40,"viewjobUrl":"https://jobs.example/linux"}]}`
 	if err := os.WriteFile(filepath.Join(ad, "batch-2026-07-20T14-33-05.json"), []byte(snap), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestReadArchivedFullBatch_ReturnsExactSnapshotAndGuardsIDs(t *testing.T) {
+	dir := t.TempDir()
+	writeArchive(t, dir)
+	batch := readArchivedFullBatch(dir, "batch-2026-07-20T14-33-05")
+	if !batch.Available || batch.JobCount != 2 || len(batch.Jobs) != 2 {
+		t.Fatalf("unexpected archived batch: %+v", batch)
+	}
+	if batch.Jobs[0].Idx != 1 || batch.Jobs[0].DirectURL != "https://jobs.example/iam" {
+		t.Fatalf("archive jobs were not decoded: %+v", batch.Jobs[0])
+	}
+	if got := readArchivedFullBatch(dir, "../../config"); got.Available {
+		t.Fatal("path traversal id must not load an archive")
 	}
 }
 

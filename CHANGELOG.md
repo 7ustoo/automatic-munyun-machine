@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.2.1] — 2026-09-15
+
+### Fixed
+
+- Restored **Open All** and **Email** while viewing a previous scrape. Both actions are explicitly archive-scoped, so they operate on the saved jobs currently displayed instead of the latest batch.
+- Historical email attachments retain the scrape timestamp in their filename, making same-day batches easy to distinguish.
+
 ## [11.2.0] — 2026-09-15
 
 ### Changed

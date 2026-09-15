@@ -165,28 +165,41 @@ func (d *dashboardServer) handleJobAction(w http.ResponseWriter, r *http.Request
 	d.relayDashboardAPI(w, 100*time.Second, "job-action", action, b["idx"])
 }
 
-// handleJobsOpenAll opens every job in the active batch in the user's default
-// browser. This lives behind guardPost because opening up to 200 browser tabs
-// is a visible side effect. Invalid or missing URLs are skipped, and URL values
-// are never written to logs.
+// handleJobsOpenAll opens every job in the requested live or archived batch in
+// the user's default browser. This lives behind guardPost because opening up to
+// 200 browser tabs is a visible side effect. Invalid or missing URLs are skipped,
+// and URL values are never written to logs.
 func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Request) {
-	batch := readFullBatch(d.installDir)
+	body := readBody(r)
+	archiveID := body["archive"]
+	var batch lastBatchInfo
+	if archiveID != "" {
+		if !archiveIDRx.MatchString(archiveID) {
+			writeJSONError(w, http.StatusOK, "Invalid saved scrape")
+			return
+		}
+		batch = readArchivedFullBatch(d.installDir, archiveID)
+	} else {
+		batch = readFullBatch(d.installDir)
+	}
 	if !batch.Available || len(batch.Jobs) == 0 {
-		writeJSONError(w, http.StatusOK, "No jobs are available to open")
+		writeJSONError(w, http.StatusOK, "No jobs are available to open in this batch")
 		return
 	}
 
 	// v7.7: honor the dashboard's ✕ exclusions — never open a job the user
-	// took out of the batch.
+	// took out of the live batch. Archives are immutable snapshots.
 	jobs := batch.Jobs
-	if excluded := readBatchExclusions(d.installDir, batch.GeneratedAt); len(excluded) > 0 {
-		kept := jobs[:0:0]
-		for _, j := range jobs {
-			if !excluded[j.Idx] {
-				kept = append(kept, j)
+	if archiveID == "" {
+		if excluded := readBatchExclusions(d.installDir, batch.GeneratedAt); len(excluded) > 0 {
+			kept := jobs[:0:0]
+			for _, j := range jobs {
+				if !excluded[j.Idx] {
+					kept = append(kept, j)
+				}
 			}
+			jobs = kept
 		}
-		jobs = kept
 	}
 	if len(jobs) == 0 {
 		writeJSONError(w, http.StatusOK, "Every job in this batch is excluded — restore one first")
@@ -436,11 +449,20 @@ func (d *dashboardServer) handleEmailOAuthCallback(w http.ResponseWriter, r *htt
 }
 
 func (d *dashboardServer) handleEmailSend(w http.ResponseWriter, r *http.Request) {
-	format := readBody(r)["format"]
+	body := readBody(r)
+	format := body["format"]
 	if format != "csv" && format != "xlsx" {
 		format = "txt"
 	}
-	d.relayDashboardAPI(w, 40*time.Second, "email-send", format)
+	args := []string{"email-send", format}
+	if archiveID := body["archive"]; archiveID != "" {
+		if !archiveIDRx.MatchString(archiveID) {
+			writeJSONError(w, http.StatusOK, "Invalid saved scrape")
+			return
+		}
+		args = append(args, archiveID)
+	}
+	d.relayDashboardAPI(w, 40*time.Second, args...)
 }
 
 func (d *dashboardServer) handleEmailDisable(w http.ResponseWriter, r *http.Request) {

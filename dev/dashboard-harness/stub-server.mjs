@@ -121,7 +121,7 @@ const postReplies = {
     }
     return { ok: true, idx: n, excluded: body?.excluded === "true", list: [...stubExcluded].sort((a, b) => a - b) };
   },
-  "/api/jobs/open-all": { ok: true, opened: 42, skipped: 0, failed: 0 },
+  "/api/jobs/open-all": body => ({ ok: true, opened: body?.archive ? 30 : 42, skipped: 0, failed: 0 }),
   "/api/settings/set": { ok: true },
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
   "/api/jobs/remove": { ok: true, list: queries.slice(0, 3) },
@@ -137,7 +137,8 @@ const postReplies = {
   "/api/email/oauth/start": { ok: true, authUrl: "http://127.0.0.1:8765/oauth/google/callback?stub=1" },
   "/api/email/send": body => {
     const format = ["txt", "csv", "xlsx"].includes(body?.format) ? body.format : "txt";
-    return { ok: true, to: "helper@example.com", filename: `apply-links(2026-07-06).${format}` };
+    const stamp = body?.archive ? String(body.archive).replace(/^batch-/, "") : "2026-07-06";
+    return { ok: true, to: "helper@example.com", filename: `apply-links(${stamp}).${format}` };
   },
   "/api/profile/add": { ok: true },
 };

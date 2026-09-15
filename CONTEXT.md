@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.2.0
-**Active release branch:** `v11.2.0`
+**Version:** 11.2.1
+**Active release branch:** `v11.2.1`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-09-05
 
@@ -27,6 +27,7 @@
 - Previous-scrape **View** loads the archived `last-batch.json` snapshot into the same client-side ranked-jobs state and renderer as the current batch, preserving its jobs, funnel, AI coverage, score journeys, requirements, sources, and generated timestamp.
 - Historical mode scopes `.txt`, `.csv`, and `.xlsx` links to the selected archive and disables live-only Email, Open All, Save, Applied, and Exclude actions. Individual application links, Why details, search, score bands, sorting, and archive exports remain available.
 - The historical-mode banner provides an explicit return to the latest batch. Background scrape completion announces the new batch without silently replacing the snapshot being inspected.
+- **Open All**, toolbar **Email**, and downloads are archive-aware: each action targets the saved scrape currently displayed. Live-only mutations (Save, Applied, and Exclude) remain hidden for immutable snapshots.
 
 ### v10.2 search/scoring changes
 
