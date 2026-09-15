@@ -60,7 +60,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - A different VA email recipient and auto-send preference for each profile
 - A saved weekday-morning toggle per profile; one unattended run processes every enabled profile without changing the profile you left open
 - Trends and a search-term leaderboard to show which searches produce the best matches
-- Previous scrapes: every scrape is saved for 30 days. **View** opens the complete older batch in Ranked jobs with its original stats, AI coverage, funnel, filters, Why details, and jobs; archive-specific `.txt`, `.csv`, and `.xlsx` exports remain available
+- Previous scrapes: every scrape is saved for 30 days. **View** opens the complete older batch in Ranked jobs with its original stats, AI coverage, funnel, filters, Why details, and jobs; **Open All**, **Email**, and archive-specific `.txt`, `.csv`, and `.xlsx` exports act on the displayed saved scrape
 - Dice.com built in alongside hiring.cafe: every scrape can run both, hiring.cafe only, or Dice only — with per-term routing (send "iam engineer" everywhere, keep a niche term on one source). Dice jobs carry structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline with a source badge on every ranked job. Sign in to Dice from the System page (same flow as hiring.cafe) so apply links open logged in
 - Light and dark themes, desktop notifications, exports, and one-click manual scrapes
 

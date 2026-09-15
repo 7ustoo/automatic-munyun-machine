@@ -69,14 +69,14 @@ test('email-to-VA button + setup card are present', () => {
   for (const format of ['txt', 'csv', 'xlsx']) {
     assert.ok(html.includes(`data-email-format="${format}"`), `Jobs email menu missing ${format}`);
   }
-  assert.ok(html.includes('postJSON("/api/email/send", { format })'), 'selected email format must reach the guarded action');
+  assert.ok(html.includes('postJSON("/api/email/send", { format, archive: archiveId })'), 'selected email format and archive must reach the guarded action');
   assert.ok(html.includes('id="email-setup-start"'), 'email-setup-start (System card) missing');
   assert.ok(html.includes('id="email-validate"') && html.includes('id="email-save"'), 'email connect steps missing');
 });
 
 test('Open All jobs action is present and uses the guarded dashboard endpoint', () => {
   assert.ok(html.includes('id="open-all-btn"'), 'open-all-btn missing from Jobs toolbar');
-  assert.ok(html.includes('postJSON("/api/jobs/open-all")'), 'Open All must use the guarded local action');
+  assert.ok(html.includes('postJSON("/api/jobs/open-all", { archive: state.archiveId || "" })'), 'Open All must use the guarded archive-aware action');
 });
 
 test('Consultant Slop Filter exposes off, balanced, and strict modes', () => {
@@ -118,4 +118,6 @@ test('previous scrapes load into the full ranked-jobs dashboard', () => {
   assert.ok(html.includes('loadArchivedBatch(id'), 'archive View must load the saved batch into dashboard state');
   assert.ok(html.includes('data-batch-export="xlsx"'), 'dashboard exports must be switchable to an archive id');
   assert.ok(html.includes('const liveActions = !state.archiveId'), 'historical rows must not expose current-batch mutations');
+  assert.ok(html.includes('{ archive: state.archiveId || "" }'), 'historical Open All must identify the displayed archive');
+  assert.ok(html.includes('state.archiveId || ""'), 'historical Email must identify the displayed archive');
 });

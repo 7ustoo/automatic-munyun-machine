@@ -865,8 +865,8 @@ export function emailAttachmentFromExport(ex) {
   return { ok: true, format: ex.format, filename: ex.filename, date: ex.date, count: ex.count, content };
 }
 
-function resolveBatchAttachment(format) {
-  return emailAttachmentFromExport(loadExport(normalizeEmailFormat(format)));
+function resolveBatchAttachment(format, archiveId) {
+  return emailAttachmentFromExport(loadExport(normalizeEmailFormat(format), archiveId));
 }
 
 // Step 1: confirm the Gmail app password can log in (no message sent).
@@ -945,7 +945,7 @@ async function emailSave(user, pass, to, subject, autoSend) {
 // Manual "Email batch" actions: email the current batch in the format chosen
 // for this send, defaulting to the saved email.format preference. Automatic
 // post-scrape delivery honors the same preference (v7.0).
-async function emailSend(format) {
+async function emailSend(format, archiveId) {
   const env = readEmailEnv();
   const delivery = emailDeliveryStatus(env);
   if (!delivery.connected) return out({ ok: false, error: 'Email isn’t connected yet — set it up in System → Email.' });
@@ -954,13 +954,13 @@ async function emailSend(format) {
   if (!isEmailAddress(to)) return out({ ok: false, error: 'No recipient set — add one in System → Email.' });
   // v7.0: an explicit per-send choice (menu click) wins; otherwise fall back
   // to the saved email.format preference — same default the auto-send uses.
-  const att = resolveBatchAttachment(format || cfg.email?.format);
+  const att = resolveBatchAttachment(format || cfg.email?.format, archiveId);
   if (!att.ok) return out({ ok: false, error: att.error || 'No batch yet — run a scrape first.' });
   const subject = renderSubject(cfg.email?.subject, att.date);
   try {
     await sendConfiguredEmail({
       env, to, from: cfg.email?.from || delivery.email, subject,
-      text: `Attached: ${att.filename} — today's ranked job batch from Automatic Munyun Machine.`,
+      text: `Attached: ${att.filename} — ranked job batch from Automatic Munyun Machine.`,
       attachments: [{ filename: att.filename, content: att.content }]
     });
     return out({ ok: true, to, filename: att.filename });
@@ -1049,7 +1049,7 @@ if (isMain) (async () => {
     case 'email-oauth-complete': return emailOAuthComplete(a, b, a3);
     case 'email-validate': return emailValidate(a, b);
     case 'email-save':     return emailSave(a, b, a3, a4, a5);
-    case 'email-send':     return emailSend(a);
+    case 'email-send':     return emailSend(a, b);
     case 'email-disable':  return emailDisable();
     default:
       out({ ok: false, error: 'usage: dashboard-api.mjs <settings-get|settings-set|jobs-add|jobs-remove|jobs-clear|jobs-mode|skip-add|skip-remove|suggest-current|job-action|resume-get|resume-parse|resume-apply|profile-list|profile-add|profile-rename|profile-delete|profile-switch|setup-geocode|setup-hcafe-login-start|setup-hcafe-login-status|hcafe-auth-get|hcafe-auth-check|setup-init|setup-finalize|email-oauth-start|email-oauth-complete|email-validate|email-save|email-send|email-disable> [args]' });

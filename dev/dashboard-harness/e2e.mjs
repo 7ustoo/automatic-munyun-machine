@@ -63,7 +63,7 @@ await exBtn.click();
 await page.waitForFunction(() => !document.querySelector('tr.excluded-row'));
 
 // v11.2: Previous scrapes — View loads the complete snapshot into the ranked
-// dashboard, preserves archive-specific exports, and makes live mutations unavailable.
+// dashboard, preserves archive-specific actions, and keeps live mutations unavailable.
 await page.waitForSelector('#arch-body tr[data-arch]');
 if (await page.locator('#arch-body tr[data-arch]').count() !== 3) throw new Error('archive list did not render 3 previous scrapes');
 const dlHref = await page.locator('#arch-body .arch-dl a').first().getAttribute('href');
@@ -75,7 +75,14 @@ if (await page.locator('tr.job-row').count() < 20) throw new Error('archived job
 if (!(await page.locator('#st-funnel').textContent()).includes('640 raw')) throw new Error('archived funnel did not render');
 const historicalExport = await page.locator('[data-batch-export="xlsx"]').getAttribute('href');
 if (!historicalExport.endsWith('&archive=batch-2026-07-06T14-30-00')) throw new Error('ranked dashboard export is not archive-scoped: ' + historicalExport);
-if (!(await page.locator('#open-all-btn').isDisabled())) throw new Error('historical Open All must not act on the current batch');
+if (await page.locator('#open-all-btn').isDisabled()) throw new Error('historical Open All should be available');
+await page.click('#open-all-btn');
+await page.click('#modal-ok');
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Opened 30 jobs'));
+if (await page.locator('#email-menu').getAttribute('aria-disabled') !== 'false') throw new Error('historical Email should be available');
+await page.locator('#email-menu summary').click();
+await page.locator('#email-menu button[data-email-format="xlsx"]').click();
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('apply-links(2026-07-06T14-30-00).xlsx'));
 if (await page.locator('button[data-act="save"],button[data-act="applied"],button[data-act="exclude"]').count()) throw new Error('live batch actions leaked into historical view');
 await page.click('button[data-act="why"][data-idx="2"]');
 await page.waitForSelector('tr.why-row[data-why="2"]');
