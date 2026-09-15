@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.1.0
-**Active release branch:** `v11.1.0`
+**Version:** 11.2.0
+**Active release branch:** `v11.2.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-09-05
 
@@ -21,6 +21,12 @@
 - The profile's `cv-parsed.json` stores the provider, model, timestamp, resume-content hash, summary, seniority, evidence-backed skills, target roles, and search keywords. A changed resume hash invalidates stale analysis.
 - AI-generated skills enter local matching only when their returned evidence is a literal phrase in the scanned resume. Suggested roles guide searches but are not treated as prior employment.
 - Resume upload analyzes automatically when Smart Match is enabled and configured. `/api/resume/analyze` provides an explicit guarded refresh; provider failures preserve the local parser and its suggestions.
+
+### v11.2 historical ranked dashboard
+
+- Previous-scrape **View** loads the archived `last-batch.json` snapshot into the same client-side ranked-jobs state and renderer as the current batch, preserving its jobs, funnel, AI coverage, score journeys, requirements, sources, and generated timestamp.
+- Historical mode scopes `.txt`, `.csv`, and `.xlsx` links to the selected archive and disables live-only Email, Open All, Save, Applied, and Exclude actions. Individual application links, Why details, search, score bands, sorting, and archive exports remain available.
+- The historical-mode banner provides an explicit return to the latest batch. Background scrape completion announces the new batch without silently replacing the snapshot being inspected.
 
 ### v10.2 search/scoring changes
 

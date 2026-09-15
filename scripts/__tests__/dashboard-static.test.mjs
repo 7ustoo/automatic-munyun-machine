@@ -110,3 +110,12 @@ test('v11 exposes profile, resume evidence, VA assignment, and AI coverage truth
   assert.ok(dashboardApi.includes("'scoring.ai.requireForDelivery'"), 'strict AI delivery setting must be editable');
   assert.ok(html.includes('saveSetting("schedule.enabled"'), 'per-profile scheduled scrape toggle must persist');
 });
+
+test('previous scrapes load into the full ranked-jobs dashboard', () => {
+  for (const id of ['history-view-bar', 'history-view-title', 'history-back']) {
+    assert.ok(html.includes(`id="${id}"`), `${id} missing`);
+  }
+  assert.ok(html.includes('loadArchivedBatch(id'), 'archive View must load the saved batch into dashboard state');
+  assert.ok(html.includes('data-batch-export="xlsx"'), 'dashboard exports must be switchable to an archive id');
+  assert.ok(html.includes('const liveActions = !state.archiveId'), 'historical rows must not expose current-batch mutations');
+});

@@ -97,7 +97,11 @@ const routes = (needsSetup, opts = {}) => ({
     { id: "batch-2026-07-06T08-00-00", date: "2026-07-06", generatedAt: "2026-07-06T08:00:00.000Z", sent: 77, avgPct: 58, strongCount: 15 },
     { id: "batch-2026-07-05T08-00-00", date: "2026-07-05", generatedAt: "2026-07-05T08:00:00.000Z", sent: 91, avgPct: 55, strongCount: 12 },
   ] },
-  "/api/archive/batch": () => ({ ok: true, batch: { date: "2026-07-06", generatedAt: "2026-07-06T14:30:00.000Z", jobs: liveJobs() } }),
+  "/api/archive/batch": () => ({ ok: true, batch: {
+    date: "2026-07-06", generatedAt: "2026-07-06T14:30:00.000Z", jobCount: jobs.length,
+    funnel: { raw: 640, uniqueBeforeFilter: 590, droppedDuplicates: 50, keptAfterFilter: 210, afterDedup: 126, descriptionEvaluated: 42, fullDescriptions: 42, smartMatchEligible: 42, smartMatchEvaluated: 42, smartMatchStatus: "complete", smartMatchProvider: "OpenAI", matchFloorPercent: 35, qualifyingMatches: 42, sent: 42, targetJobsPerBatch: 100 },
+    jobs,
+  } }),
   // v7.7: batch exclusions (✕ on job rows). Stateful so e2e can toggle.
   "/api/exclusions": () => ({ ok: true, excluded: [...stubExcluded].sort((a, b) => a - b) }),
 });
