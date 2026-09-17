@@ -51,7 +51,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 
 - Native Windows app window with AMM's own taskbar icon and pinning identity
 - Ranked jobs with search, sorting, match filters, salary, and source details
-- **Apply**, **Open All**, **Save**, **Applied**, and **Why this matched** actions
+- **Apply**, **Save**, **Applied**, and **Why this matched** actions, plus an **Open jobs** menu with 50/100/150/200 presets and a custom amount
 - Resume rescan, one-click AI analysis, and profile-saved search-term suggestions
 - Remote, hybrid, and on-site searches with optional location
 - Blocked companies, job age, experience, salary, clearance, and application-form controls
@@ -61,7 +61,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - A different VA email recipient and auto-send preference for each profile
 - A saved weekday-morning toggle per profile; one unattended run processes every enabled profile without changing the profile you left open
 - Trends and a search-term leaderboard to show which searches produce the best matches
-- Previous scrapes: every scrape is saved for 30 days. **View** opens the complete older batch in Ranked jobs with its original stats, AI coverage, funnel, filters, Why details, and jobs; **Open All**, **Email**, and archive-specific `.txt`, `.csv`, and `.xlsx` exports act on the displayed saved scrape
+- Previous scrapes: every scrape is saved for 30 days. **View** opens the complete older batch in Ranked jobs with its original stats, AI coverage, funnel, filters, Why details, and jobs; **Open jobs**, **Email**, and archive-specific `.txt`, `.csv`, and `.xlsx` exports act on the displayed saved scrape
 - Dice.com built in alongside hiring.cafe: every scrape can run both, hiring.cafe only, or Dice only — with per-term routing (send "iam engineer" everywhere, keep a niche term on one source). Dice jobs carry structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline with a source badge on every ranked job. Sign in to Dice from the System page (same flow as hiring.cafe) so apply links open logged in
 - Light and dark themes, desktop notifications, exports, and one-click manual scrapes
 

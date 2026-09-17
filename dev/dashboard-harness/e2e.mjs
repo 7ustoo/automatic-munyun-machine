@@ -29,11 +29,23 @@ await page.waitForFunction(() => document.querySelector('#auto-scrape-label')?.t
 if (await page.locator('#auto-scrape').isChecked()) throw new Error('auto scrape state did not survive reload');
 await page.click('#auto-scrape-toggle');
 await page.waitForFunction(() => document.querySelector('#auto-scrape-label')?.textContent === 'Auto on');
-await page.click('#open-all-btn');
+await page.click('#open-jobs-btn');
+if (await page.locator('button[data-open-count]').count() !== 4) throw new Error('Open jobs presets are missing');
+const openPresetRequest = page.waitForRequest(r => r.url().endsWith('/api/jobs/open-all') && r.method() === 'POST');
+await page.click('button[data-open-count="50"]');
 await page.waitForSelector('#modal');
-if (!/^Open all \d+ jobs\?$/.test(await page.locator('#modal h3').textContent())) throw new Error('Open All confirmation did not include the batch size');
+if ((await page.locator('#modal h3').textContent()) !== 'Open 27 jobs?') throw new Error('Open jobs confirmation did not cap to the batch size');
 await page.click('#modal-ok');
-await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Opened 42 jobs'));
+if ((await openPresetRequest).postDataJSON().limit !== '50') throw new Error('Open jobs preset did not send its limit');
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Opened 27 jobs'));
+await page.click('#open-jobs-btn');
+await page.fill('#open-custom-count', '17');
+const openCustomRequest = page.waitForRequest(r => r.url().endsWith('/api/jobs/open-all') && r.method() === 'POST');
+await page.click('#open-custom-submit');
+if ((await page.locator('#modal h3').textContent()) !== 'Open 17 jobs?') throw new Error('custom Open jobs count was not used');
+await page.click('#modal-ok');
+if ((await openCustomRequest).postDataJSON().limit !== '17') throw new Error('custom Open jobs count did not reach the server');
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Opened 17 jobs'));
 await page.click('button[data-act="why"][data-idx="2"]');
 await page.waitForSelector('tr.why-row[data-why="2"]');
 
@@ -89,8 +101,9 @@ if (await page.locator('tr.job-row').count() < 20) throw new Error('archived job
 if (!(await page.locator('#st-funnel').textContent()).includes('640 raw')) throw new Error('archived funnel did not render');
 const historicalExport = await page.locator('[data-batch-export="xlsx"]').getAttribute('href');
 if (!historicalExport.endsWith('&archive=batch-2026-07-06T14-30-00')) throw new Error('ranked dashboard export is not archive-scoped: ' + historicalExport);
-if (await page.locator('#open-all-btn').isDisabled()) throw new Error('historical Open All should be available');
-await page.click('#open-all-btn');
+if (await page.locator('#open-jobs-menu').getAttribute('aria-disabled') !== 'false') throw new Error('historical Open jobs should be available');
+await page.click('#open-jobs-btn');
+await page.click('button[data-open-count="50"]');
 await page.click('#modal-ok');
 await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Opened 30 jobs'));
 if (await page.locator('#email-menu').getAttribute('aria-disabled') !== 'false') throw new Error('historical Email should be available');
@@ -102,7 +115,7 @@ await page.click('button[data-act="why"][data-idx="2"]');
 await page.waitForSelector('tr.why-row[data-why="2"]');
 await page.click('#history-back');
 await page.waitForFunction(() => document.querySelector('#history-view-bar')?.classList.contains('hidden'));
-if (await page.locator('#open-all-btn').isDisabled()) throw new Error('Back to latest did not restore current-batch actions');
+if (await page.locator('#open-jobs-menu').getAttribute('aria-disabled') !== 'false') throw new Error('Back to latest did not restore current-batch actions');
 
 if (errors.length) throw new Error('dashboard console errors:\n' + errors.join('\n'));
 await browser.close();

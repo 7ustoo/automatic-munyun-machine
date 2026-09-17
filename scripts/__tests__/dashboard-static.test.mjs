@@ -74,9 +74,13 @@ test('email-to-VA button + setup card are present', () => {
   assert.ok(html.includes('id="email-validate"') && html.includes('id="email-save"'), 'email connect steps missing');
 });
 
-test('Open All jobs action is present and uses the guarded dashboard endpoint', () => {
-  assert.ok(html.includes('id="open-all-btn"'), 'open-all-btn missing from Jobs toolbar');
-  assert.ok(html.includes('postJSON("/api/jobs/open-all", { archive: state.archiveId || "" })'), 'Open All must use the guarded archive-aware action');
+test('Open jobs menu offers presets and a custom guarded action', () => {
+  assert.ok(html.includes('id="open-jobs-btn"'), 'open-jobs-btn missing from Jobs toolbar');
+  for (const count of ['50', '100', '150', '200']) {
+    assert.ok(html.includes(`data-open-count="${count}"`), `Open jobs menu missing ${count} preset`);
+  }
+  assert.ok(html.includes('id="open-custom-count"'), 'custom Open jobs input missing');
+  assert.ok(html.includes('limit: String(parsed)'), 'Open jobs limit must reach the guarded archive-aware action');
 });
 
 test('Ranked jobs exposes a profile-scoped auto scrape switch', () => {
@@ -126,6 +130,6 @@ test('previous scrapes load into the full ranked-jobs dashboard', () => {
   assert.ok(html.includes('loadArchivedBatch(id'), 'archive View must load the saved batch into dashboard state');
   assert.ok(html.includes('data-batch-export="xlsx"'), 'dashboard exports must be switchable to an archive id');
   assert.ok(html.includes('const liveActions = !state.archiveId'), 'historical rows must not expose current-batch mutations');
-  assert.ok(html.includes('{ archive: state.archiveId || "" }'), 'historical Open All must identify the displayed archive');
+  assert.ok(html.includes('{ archive: state.archiveId || "", limit: String(parsed) }'), 'historical Open jobs must identify the displayed archive and requested count');
   assert.ok(html.includes('state.archiveId || ""'), 'historical Email must identify the displayed archive');
 });

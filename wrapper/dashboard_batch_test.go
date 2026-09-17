@@ -117,3 +117,25 @@ func TestOpenBatchJobs_ContinuesAfterOpenFailure(t *testing.T) {
 		t.Fatalf("got calls %d, opened %d, skipped %d, failed %d", calls, opened, skipped, failed)
 	}
 }
+
+func TestParseOpenJobsLimit(t *testing.T) {
+	tests := []struct {
+		raw  string
+		want int
+		bad  bool
+	}{
+		{"", 200, false},
+		{"1", 1, false},
+		{"50", 50, false},
+		{"200", 200, false},
+		{"0", 0, true},
+		{"201", 0, true},
+		{"lots", 0, true},
+	}
+	for _, tc := range tests {
+		got, err := parseOpenJobsLimit(tc.raw)
+		if (err != nil) != tc.bad || got != tc.want {
+			t.Errorf("parseOpenJobsLimit(%q) = %d, %v; want %d, bad=%v", tc.raw, got, err, tc.want, tc.bad)
+		}
+	}
+}

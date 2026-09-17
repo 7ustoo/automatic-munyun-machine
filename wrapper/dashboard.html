@@ -382,6 +382,22 @@
   }
   details.menu .menu-panel a:hover, details.menu .menu-panel button:hover { background: var(--surface-3); }
   details.menu .menu-panel a small, details.menu .menu-panel button small { color: var(--text-3); margin-left: auto; padding-left: 12px; }
+  .open-jobs-panel { min-width: 248px !important; }
+  .open-jobs-panel .menu-label {
+    padding: 5px 10px 7px; color: var(--text-2); font-size: 11px;
+    font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+  }
+  .open-jobs-panel .menu-note { padding: 7px 10px 3px; color: var(--text-3); font-size: 11.5px; line-height: 1.4; }
+  .open-custom {
+    display: flex; gap: 6px; margin-top: 4px; padding: 8px 6px 4px;
+    border-top: 1px solid var(--border);
+  }
+  .open-custom input { min-width: 0; flex: 1; padding: 7px 9px; font-size: 13px; }
+  details.menu .open-custom button {
+    width: auto; flex: 0 0 auto; padding: 7px 11px; border: 1px solid var(--accent);
+    background: var(--accent); color: #07101e; font-weight: 700;
+  }
+  details.menu .open-custom button:hover { background: var(--accent-2); }
 
   /* ---- Jobs table ----------------------------------------------------------- */
   .table-wrap { overflow-x: auto; }
@@ -1221,7 +1237,21 @@
                 <a href="/api/export?format=xlsx" data-batch-export="xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
               </div>
             </details>
-            <button class="sm" id="open-all-btn" title="Open every job in this batch in your default browser"><svg class="ic"><use href="#i-external"/></svg>Open All</button>
+            <details class="menu" id="open-jobs-menu">
+              <summary class="btn sm" id="open-jobs-btn" title="Choose how many jobs to open in your default browser"><svg class="ic"><use href="#i-external"/></svg>Open jobs<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
+              <div class="menu-panel open-jobs-panel">
+                <div class="menu-label">How many jobs?</div>
+                <button type="button" data-open-count="50">Open 50 <small>jobs</small></button>
+                <button type="button" data-open-count="100">Open 100 <small>jobs</small></button>
+                <button type="button" data-open-count="150">Open 150 <small>jobs</small></button>
+                <button type="button" data-open-count="200">Open 200 <small>jobs</small></button>
+                <form class="open-custom" id="open-custom-form">
+                  <input id="open-custom-count" type="number" min="1" max="200" step="1" inputmode="numeric" placeholder="Custom amount" aria-label="Custom number of jobs to open" required />
+                  <button type="submit" id="open-custom-submit">Open</button>
+                </form>
+                <div class="menu-note" id="open-jobs-note">Up to 200 jobs per action.</div>
+              </div>
+            </details>
             <details class="menu" id="email-menu">
               <summary class="btn sm" id="email-btn" title="Email this batch to your recipient (e.g. your VA)"><svg class="ic"><use href="#i-send"/></svg>Email<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
@@ -2047,10 +2077,13 @@ function renderBatchMode() {
   document.querySelectorAll("[data-batch-export]").forEach(link => {
     link.href = `/api/export?format=${encodeURIComponent(link.dataset.batchExport)}${archiveQuery}`;
   });
-  $("open-all-btn").disabled = false;
-  $("open-all-btn").title = historical
-    ? "Open every job from this saved scrape in your default browser"
-    : "Open every job in this batch in your default browser";
+  $("open-jobs-menu").classList.remove("disabled");
+  $("open-jobs-menu").setAttribute("aria-disabled", "false");
+  $("open-jobs-btn").title = historical
+    ? "Choose how many jobs to open from this saved scrape"
+    : "Choose how many jobs to open from this batch";
+  const available = state.jobs.length;
+  $("open-jobs-note").textContent = `${available} job${available === 1 ? "" : "s"} available. Larger choices open all ${available}.`;
   $("email-menu").classList.remove("disabled");
   $("email-menu").setAttribute("aria-disabled", "false");
   $("email-btn").title = historical
@@ -2333,7 +2366,7 @@ function renderJobs() {
     <tbody>${rows}</tbody>
   </table>`;
   const exNote = !state.archiveId && state.excluded.size
-    ? ` · ${state.excluded.size} excluded (left out of Export, Email & Open All)` : "";
+    ? ` · ${state.excluded.size} excluded (left out of Export, Email & Open jobs)` : "";
   $("lb-foot").textContent = (jobs.length === all.length
     ? all.length + " jobs" : jobs.length + " of " + all.length + " jobs") + exNote;
   // Stash full job objects for the "Why" expander (v4.0: journey + misses + AI).
@@ -2356,32 +2389,48 @@ $("band-seg").addEventListener("click", (e) => {
 });
 $("job-sort").addEventListener("change", (e) => { state.sort = e.target.value; renderJobs(); });
 
-$("open-all-btn").addEventListener("click", async () => {
-  const count = state.jobs.length;
-  if (!count) return toast("No jobs are available to open.", "bad");
+async function openSelectedJobs(requested) {
+  const parsed = Number(requested);
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 200) {
+    return toast("Choose a number between 1 and 200.", "bad");
+  }
+  const available = state.jobs.length;
+  if (!available) return toast("No jobs are available to open.", "bad");
+  const count = Math.min(parsed, available);
   const saved = !!state.archiveId;
+  $("open-jobs-menu").open = false;
   const ok = await confirmModal({
-    title: `Open all ${count} ${saved ? "saved " : ""}jobs?`,
-    body: `This will open ${count} browser tabs from ${saved ? "this previous scrape" : "the latest batch"} using each job's direct application link. Your browser may take a moment to load them all.`,
-    confirmText: "Open All",
+    title: `Open ${count} ${saved ? "saved " : ""}job${count === 1 ? "" : "s"}?`,
+    body: `${parsed > available ? `This batch has ${available} jobs, so AMM will open all ${available}. ` : ""}Each job will open in a browser tab using its direct application link. Your browser may take a moment to load them.`,
+    confirmText: `Open ${count}`,
   });
   if (!ok) return;
 
-  const btn = $("open-all-btn");
-  btn.disabled = true;
-  const label = btn.innerHTML;
-  btn.textContent = "Opening…";
+  const menu = $("open-jobs-menu");
+  menu.classList.add("disabled");
+  menu.setAttribute("aria-disabled", "true");
   try {
-    const r = await postJSON("/api/jobs/open-all", { archive: state.archiveId || "" });
+    const r = await postJSON("/api/jobs/open-all", { archive: state.archiveId || "", limit: String(parsed) });
     if (!r.ok) return toast(r.error || "Could not open the job links.", "bad");
     const misses = (r.skipped || 0) + (r.failed || 0);
     toast(`Opened ${r.opened} job${r.opened === 1 ? "" : "s"}${misses ? `; ${misses} link${misses === 1 ? " was" : "s were"} unavailable` : ""}.`, misses ? "" : "good");
   } catch (e) {
     toast("Could not open the job links: " + e.message, "bad");
   } finally {
-    btn.disabled = false;
-    btn.innerHTML = label;
+    menu.classList.remove("disabled");
+    menu.setAttribute("aria-disabled", "false");
   }
+}
+
+$("open-jobs-menu").addEventListener("click", (e) => {
+  const choice = e.target.closest("button[data-open-count]");
+  if (choice) openSelectedJobs(Number(choice.dataset.openCount));
+});
+$("open-custom-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const input = $("open-custom-count");
+  if (!input.reportValidity()) return;
+  openSelectedJobs(Number(input.value));
 });
 
 // Event delegation for the per-job action buttons.
