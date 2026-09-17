@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.3.0] — 2026-09-17
+
+### Added
+
+- Added a simple **Auto on / Auto off** switch beside the active profile on Ranked jobs. It saves independently for each profile and controls whether that profile participates in scheduled scrapes.
+- Turning automatic scraping off leaves **Scrape now** available for on-demand runs. The switch and the existing Settings control stay synchronized.
+
 ## [11.2.1] — 2026-09-15
 
 ### Fixed

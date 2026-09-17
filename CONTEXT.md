@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.2.1
-**Active release branch:** `v11.2.1`
+**Version:** 11.3.0
+**Active release branch:** `v11.3.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-09-05
 
@@ -12,6 +12,7 @@
 - Profile names accept single spaces between words (for example `Cloud DevOps`) while continuing to reject path separators and punctuation that would make profile directories unsafe.
 - The top bar switches complete profile-scoped job hunts. Profiles retain separate resumes, queries, filters, source routing, scoring, histories, and VA delivery recipients.
 - The unattended morning runner executes every profile with `schedule.enabled !== false` sequentially via `scheduled-batches.mjs`; `AMM_PROFILE` selects profile state without changing the dashboard's saved active profile.
+- Ranked jobs exposes that active profile's `schedule.enabled` value as a compact **Auto on / Auto off** switch. It is profile-scoped, synchronized with Settings, and never disables the manual **Scrape now** action.
 - The Resume page renders the exact extracted text local scoring reads, recognized skills and employment, suggested roles, and how much Smart Match receives (up to 24,000 characters).
 - Jobs and batch diagnostics distinguish AI-verified scores from local-only scores. `scoring.ai.requireForDelivery` defaults true, holding unaudited jobs back during partial provider failures instead of silently padding the batch.
 

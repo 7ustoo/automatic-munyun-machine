@@ -15,6 +15,20 @@ page.on('response', r => { if (r.status() >= 400) errors.push(`${r.status()} ${r
 await page.goto('http://127.0.0.1:8765/#jobs', { waitUntil: 'networkidle' });
 await page.waitForSelector('tr.job-row');
 if (await page.locator('tr.job-row').count() < 20) throw new Error('jobs did not render');
+// v11.3: the active profile's scheduled scrape can be disabled directly from
+// Ranked jobs without disabling the manual Scrape now action.
+if (!(await page.locator('#auto-scrape').isChecked())) throw new Error('active profile auto scrape should load as on');
+const autoOffRequest = page.waitForRequest(r => r.url().endsWith('/api/settings/set') && r.method() === 'POST' && r.postDataJSON()?.path === 'schedule.enabled');
+await page.click('#auto-scrape-toggle');
+const autoOffBody = (await autoOffRequest).postDataJSON();
+if (autoOffBody.value !== 'false') throw new Error('auto scrape switch did not persist false');
+await page.waitForFunction(() => document.querySelector('#auto-scrape-label')?.textContent === 'Auto off');
+if (await page.locator('#scrape-btn').isDisabled()) throw new Error('manual Scrape now must remain available when auto scrape is off');
+await page.reload({ waitUntil: 'networkidle' });
+await page.waitForFunction(() => document.querySelector('#auto-scrape-label')?.textContent === 'Auto off');
+if (await page.locator('#auto-scrape').isChecked()) throw new Error('auto scrape state did not survive reload');
+await page.click('#auto-scrape-toggle');
+await page.waitForFunction(() => document.querySelector('#auto-scrape-label')?.textContent === 'Auto on');
 await page.click('#open-all-btn');
 await page.waitForSelector('#modal');
 if (!/^Open all \d+ jobs\?$/.test(await page.locator('#modal h3').textContent())) throw new Error('Open All confirmation did not include the batch size');
