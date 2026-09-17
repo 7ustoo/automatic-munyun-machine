@@ -181,6 +181,7 @@
   .watch-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
   .watch-toggle:has(input:checked) { color: var(--accent-2); border-color: rgba(88,166,255,.4); background: var(--accent-dim); }
   .watch-toggle:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #auto-scrape-toggle:not(:has(input:checked)) { color: var(--text-3); }
 
   /* Scrape progress — indeterminate bar pinned under the topbar. */
   #scrapebar { height: 2px; background: transparent; position: sticky; top: var(--topbar-h); z-index: 14; overflow: hidden; }
@@ -1087,6 +1088,9 @@
           <select id="top-profile-select" aria-label="Active job-search profile"></select>
           <span id="profile-big" class="hidden">—</span>
         </label>
+        <label class="watch-toggle" id="auto-scrape-toggle" title="Include this profile in scheduled scrapes">
+          <input type="checkbox" id="auto-scrape" /><svg class="ic"><use href="#i-zap"/></svg><span id="auto-scrape-label">Auto on</span>
+        </label>
         <span class="status-chip" aria-live="polite"><span class="dot" id="header-dot"></span><span id="header-label">connecting…</span></span>
         <label class="watch-toggle" title="Show the browser window so you can watch it search hiring.cafe">
           <input type="checkbox" id="watch-scrape" /><svg class="ic"><use href="#i-eye"/></svg><span>Watch</span>
@@ -1669,6 +1673,7 @@ const state = {
   loadedOnce: false,
   lastGen: null,       // v3.0.1: last seen lastBatch.generatedAt (null = no baseline yet)
   showSalary: true,    // v4.6: show the parsed salary badge on job rows (Settings toggle, display.showSalary)
+  scheduleEnabled: true, // v11.3: active profile's unattended scrape switch
   archiveId: null,     // v11.2: non-null while the ranked dashboard shows a saved scrape
   archiveLabel: "",
 };
@@ -1688,6 +1693,7 @@ function setView(name) {
   document.querySelectorAll("#nav .nav-item").forEach(el =>
     el.classList.toggle("on", el.dataset.view === name));
   $("view-title").textContent = name === "jobs" && state.archiveId ? "Ranked jobs · Previous scrape" : VIEW_TITLES[name];
+  $("auto-scrape-toggle").classList.toggle("hidden", name !== "jobs");
 }
 // v3.0.2: internal navigation goes through replaceState, NOT location.hash /
 // plain anchor jumps — hash pushes grow the history stack, and Chrome only
@@ -2513,7 +2519,7 @@ async function loadSettings() {
     state.showSalary = s.showSalary !== false;
     $("set-show-salary").value = String(state.showSalary);
     $("set-time").value = s.scheduleTime;
-    $("set-schedule-enabled").value = String(s.scheduleEnabled !== false);
+    renderAutoScrape(s.scheduleEnabled !== false, s.scheduleTime);
     $("set-clearance").value = String(s.filterClearance);
     $("set-management-titles").value = String(s.filterManagementTitles === true);
     $("set-sales-titles").value = String(s.filterSalesTitles === true);
@@ -2594,16 +2600,46 @@ async function saveSetting(path, value) {
   if (r.ok) setTimeout(() => note("set-note", ""), 1500);
   return r;
 }
+
+function renderAutoScrape(enabled, scheduleTime = $("set-time").value || "07:00") {
+  state.scheduleEnabled = !!enabled;
+  $("auto-scrape").checked = !!enabled;
+  $("auto-scrape-label").textContent = enabled ? "Auto on" : "Auto off";
+  $("auto-scrape-toggle").title = enabled
+    ? `Scheduled scrape is on for this profile (${scheduleTime})`
+    : "Scheduled scrape is off for this profile; Scrape now still works";
+  $("set-schedule-enabled").value = String(!!enabled);
+}
+
+async function setProfileAutoScrape(enabled, control) {
+  const previous = state.scheduleEnabled !== false;
+  if (control) control.disabled = true;
+  const r = await saveSetting("schedule.enabled", enabled);
+  if (r.ok) {
+    renderAutoScrape(enabled);
+    toast(enabled
+      ? `Auto scrape enabled for ${$("profile-big").textContent} at ${$("set-time").value}.`
+      : `Auto scrape disabled for ${$("profile-big").textContent}. Scrape now still works.`, "good");
+    loadProfiles();
+  } else {
+    renderAutoScrape(previous);
+    toast(r.error || "Could not change auto scrape.", "bad");
+  }
+  if (control) control.disabled = false;
+}
+
+$("auto-scrape").addEventListener("change", e => setProfileAutoScrape(e.target.checked, e.target));
 $("set-yoe").addEventListener("change", e => saveSetting("user.maxYoeAcceptable", e.target.value));
 $("set-salary").addEventListener("change", e => saveSetting("user.salaryFloorUsd", e.target.value));
 $("set-floor").addEventListener("change", e => saveSetting("scoring.matchFloorPercent", e.target.value));
 $("set-batch-size").addEventListener("change", e => saveSetting("scoring.targetJobsPerBatch", e.target.value));
 $("set-show-salary").addEventListener("change", e => { state.showSalary = e.target.value === "true"; saveSetting("display.showSalary", e.target.value); renderJobs(); });
-$("set-time").addEventListener("change", e => saveSetting("schedule.time", e.target.value));
+$("set-time").addEventListener("change", async e => {
+  const r = await saveSetting("schedule.time", e.target.value);
+  if (r.ok) renderAutoScrape(state.scheduleEnabled, e.target.value);
+});
 $("set-schedule-enabled").addEventListener("change", async e => {
-  await saveSetting("schedule.enabled", e.target.value);
-  toast(e.target.value === "true" ? "This profile will run in the weekday morning search." : "Scheduled search disabled for this profile.", "good");
-  loadProfiles();
+  await setProfileAutoScrape(e.target.value === "true", e.target);
 });
 $("set-clearance").addEventListener("change", e => saveSetting("filters.filterClearance", e.target.value));
 $("set-management-titles").addEventListener("change", e => saveSetting("filters.filterManagementTitles", e.target.value));

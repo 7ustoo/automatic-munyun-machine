@@ -12,6 +12,7 @@ const companies = ["Cloudscale Systems", "Meridian Health", "Vertex Financial", 
 const titles = ["IAM Engineer", "Identity & Access Management Analyst", "Cloud Security Engineer", "Security Operations Analyst", "Systems Administrator", "M365 Administrator", "Infrastructure Engineer", "IT Security Specialist", "Access Management Engineer", "Cybersecurity Analyst"];
 const queries = ["iam", "cloud security", "m365", "linux"];
 let oauthEmailConnected = false;
+let scheduleEnabled = true;
 const jobs = Array.from({ length: 42 }, (_, i) => ({
   idx: i + 1,
   title: titles[i % titles.length] + (i > 19 ? ` ${["II","III","Sr.","Lead"][i % 4]}` : ""),
@@ -61,7 +62,7 @@ const routes = (needsSetup, opts = {}) => ({
     jobs: liveJobs() }),
   "/api/resume": { ok: true, available: true, name: "Justin-Cloud-Security.pdf", parsedAt: "2026-07-05T19:14:00.000Z", rawCharacters: 1842, smartMatchCharacters: 1842, smartMatchTruncated: false, primaryClusters: ["iam", "cloud"], titles: ["IAM Engineer", "Security Engineer"], skills: ["Okta", "Entra ID", "AWS", "Terraform"], certs: ["Security+"], compliance: ["SOC 2"], careerYears: 7, employment: [{ title: "Cloud Security Engineer", organization: "Demo Corp", startYear: 2021, endYear: 2026, current: true }], analysisSource: "ai", aiConfigured: true, aiAnalysis: { provider: "OpenAI", model: "gpt-5-mini", analyzedAt: "2026-09-13T12:00:00.000Z", summary: "Cloud security engineer specializing in identity platforms and infrastructure automation.", seniority: "Senior", skills: [{ name: "Okta", evidence: "operated Okta" }, { name: "Terraform", evidence: "Terraform controls" }], targetRoles: [{ title: "Identity Security Engineer", reason: "Direct identity experience", evidence: "Cloud Security & Identity Engineer" }], searchKeywords: [{ term: "identity security", reason: "Direct identity experience", evidence: "Cloud Security & Identity Engineer" }] }, recommendedRoles: ["Identity Security Engineer", "Cloud Security Engineer"], recommendedKeywords: ["identity security", "cloud IAM"], raw: "JUSTIN DEMO\nCloud Security & Identity Engineer\n\nEXPERIENCE\nBuilt and operated Okta, Entra ID, AWS IAM, and Terraform controls across production environments.\nLed MFA and SSO rollouts and automated access reviews." },
   "/api/resume/analyze": { ok: true, mode: "titles", source: "ai", suggestions: ["Identity Security Engineer", "Cloud Security Engineer"] },
-  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", scheduleEnabled: true, filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
+  "/api/settings": () => ({ ok: true, settings: { maxYoeAcceptable: 5, salaryFloorUsd: 90000, matchFloorPercent: 35, targetJobsPerBatch: 100, scheduleTime: "07:00", scheduleEnabled, filterClearance: true, applicationFormEase: "all", maxJobAge: "any", searchMode: "keywords", queries,
       // v7.4: Dice is always-on; per-term routing renders unconditionally.
       sources: { greenhouse: [], lever: [], ashby: [], remoteConfigUrl: "" },
       queryEngines: Object.fromEntries(queries.map((q, i) => [q, i === 1 ? "hcafe" : i === 2 ? "dice" : "both"])),
@@ -70,10 +71,10 @@ const routes = (needsSetup, opts = {}) => ({
       aiEnabled: true, aiRequireForDelivery: true, aiHasKey: true, aiProvider: "Anthropic", mutedTerms: ["palo alto"], cvTermCount: 34,
       email: { enabled: oauthEmailConnected, hasCreds: oauthEmailConnected, provider: oauthEmailConnected ? "gmail-oauth" : null, connectedEmail: oauthEmailConnected ? "owner@gmail.com" : "", oauthAvailable: true, to: oauthEmailConnected ? "helper@example.com" : "", autoSend: true } } }),
   "/api/config/backups": { ok: true, backups: ["config-2026-07-06T12-00-00-000Z-pre-setup.json", "config-2026-07-05T09-10-00-000Z-pre-rename.json"] },
-  "/api/profile/list": { ok: true, profiles: [
-    { slug: "default", active: true, hasCV: true, resumeName: "Justin-Cloud-Security.pdf", queryCount: 4, workplaceTypes: ["Remote"], targetJobs: 100, matchFloor: 35, scheduleEnabled: true, scheduleTime: "07:00", smartMatchEnabled: true, vaEmail: "helper@example.com", vaAutoSend: true },
+  "/api/profile/list": () => ({ ok: true, profiles: [
+    { slug: "default", active: true, hasCV: true, resumeName: "Justin-Cloud-Security.pdf", queryCount: 4, workplaceTypes: ["Remote"], targetJobs: 100, matchFloor: 35, scheduleEnabled, scheduleTime: "07:00", smartMatchEnabled: true, vaEmail: "helper@example.com", vaAutoSend: true },
     { slug: "marketing", active: false, hasCV: false, resumeName: "", queryCount: 7, workplaceTypes: ["Remote", "Hybrid"], location: "New York, NY", targetJobs: 50, matchFloor: 60, scheduleEnabled: false, scheduleTime: "07:00", smartMatchEnabled: false, vaEmail: "marketing-va@example.com", vaAutoSend: false }
-  ] },
+  ] }),
   "/api/hcafe/auth": { ok: true, authed: true, checkedAt: "2026-07-10T12:00:00Z" },
   // v7.3: Dice sign-in card (System page).
   "/api/dice/auth": { ok: true, authed: false, checkedAt: "2026-07-10T12:00:00Z", cached: true },
@@ -122,7 +123,10 @@ const postReplies = {
     return { ok: true, idx: n, excluded: body?.excluded === "true", list: [...stubExcluded].sort((a, b) => a - b) };
   },
   "/api/jobs/open-all": body => ({ ok: true, opened: body?.archive ? 30 : 42, skipped: 0, failed: 0 }),
-  "/api/settings/set": { ok: true },
+  "/api/settings/set": body => {
+    if (body?.path === "schedule.enabled") scheduleEnabled = body.value === "true";
+    return { ok: true };
+  },
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
   "/api/jobs/remove": { ok: true, list: queries.slice(0, 3) },
   "/api/jobs/clear": { ok: true, list: [] },

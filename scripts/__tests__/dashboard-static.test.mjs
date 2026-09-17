@@ -79,6 +79,14 @@ test('Open All jobs action is present and uses the guarded dashboard endpoint', 
   assert.ok(html.includes('postJSON("/api/jobs/open-all", { archive: state.archiveId || "" })'), 'Open All must use the guarded archive-aware action');
 });
 
+test('Ranked jobs exposes a profile-scoped auto scrape switch', () => {
+  assert.ok(html.includes('id="auto-scrape"'), 'auto-scrape checkbox missing from the dashboard');
+  assert.ok(html.includes('id="auto-scrape-label"'), 'auto-scrape state label missing');
+  assert.ok(html.includes('setProfileAutoScrape(e.target.checked'), 'dashboard switch must persist the selected state');
+  assert.ok(html.includes('saveSetting("schedule.enabled", enabled)'), 'auto scrape must use the profile-owned schedule setting');
+  assert.ok(html.includes('Scrape now still works'), 'off state must explain that manual scrapes remain available');
+});
+
 test('Consultant Slop Filter exposes off, balanced, and strict modes', () => {
   assert.ok(html.includes('id="set-consultant-slop"'), 'consultant filter setting missing');
   for (const mode of ['off', 'balanced', 'strict']) {
