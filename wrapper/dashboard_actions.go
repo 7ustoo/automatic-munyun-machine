@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -165,12 +166,17 @@ func (d *dashboardServer) handleJobAction(w http.ResponseWriter, r *http.Request
 	d.relayDashboardAPI(w, 100*time.Second, "job-action", action, b["idx"])
 }
 
-// handleJobsOpenAll opens every job in the requested live or archived batch in
-// the user's default browser. This lives behind guardPost because opening up to
-// 200 browser tabs is a visible side effect. Invalid or missing URLs are skipped,
-// and URL values are never written to logs.
+// handleJobsOpenAll opens the requested number of jobs from the live or archived
+// batch in the user's default browser. This lives behind guardPost because
+// opening up to 200 browser tabs is a visible side effect. Invalid or missing
+// URLs are skipped, and URL values are never written to logs.
 func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Request) {
 	body := readBody(r)
+	limit, err := parseOpenJobsLimit(body["limit"])
+	if err != nil {
+		writeJSONError(w, http.StatusOK, err.Error())
+		return
+	}
 	archiveID := body["archive"]
 	var batch lastBatchInfo
 	if archiveID != "" {
@@ -205,6 +211,9 @@ func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Reque
 		writeJSONError(w, http.StatusOK, "Every job in this batch is excluded — restore one first")
 		return
 	}
+	if len(jobs) > limit {
+		jobs = jobs[:limit]
+	}
 
 	opened, skipped, failed := openBatchJobs(jobs, openURL)
 	if opened == 0 {
@@ -221,6 +230,19 @@ func (d *dashboardServer) handleJobsOpenAll(w http.ResponseWriter, r *http.Reque
 		"skipped": skipped,
 		"failed":  failed,
 	})
+}
+
+// parseOpenJobsLimit keeps the browser-opening action deliberately bounded.
+// Missing values preserve compatibility with older dashboard clients.
+func parseOpenJobsLimit(raw string) (int, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 200, nil
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 || n > 200 {
+		return 0, fmt.Errorf("Choose a number of jobs between 1 and 200")
+	}
+	return n, nil
 }
 
 // readBatchExclusions loads the active profile's ✕ list (v7.7). The sidecar

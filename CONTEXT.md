@@ -2,8 +2,8 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.3.0
-**Active release branch:** `v11.3.0`
+**Version:** 11.4.0
+**Active release branch:** `v11.4.0`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-09-05
 
@@ -26,9 +26,9 @@
 ### v11.2 historical ranked dashboard
 
 - Previous-scrape **View** loads the archived `last-batch.json` snapshot into the same client-side ranked-jobs state and renderer as the current batch, preserving its jobs, funnel, AI coverage, score journeys, requirements, sources, and generated timestamp.
-- Historical mode scopes `.txt`, `.csv`, and `.xlsx` links to the selected archive and disables live-only Email, Open All, Save, Applied, and Exclude actions. Individual application links, Why details, search, score bands, sorting, and archive exports remain available.
+- Historical mode scopes `.txt`, `.csv`, and `.xlsx` links to the selected archive and disables live-only Save, Applied, and Exclude actions. Individual application links, Why details, search, score bands, sorting, archive exports, Email, and Open jobs remain available.
 - The historical-mode banner provides an explicit return to the latest batch. Background scrape completion announces the new batch without silently replacing the snapshot being inspected.
-- **Open All**, toolbar **Email**, and downloads are archive-aware: each action targets the saved scrape currently displayed. Live-only mutations (Save, Applied, and Exclude) remain hidden for immutable snapshots.
+- **Open jobs**, toolbar **Email**, and downloads are archive-aware: each action targets the saved scrape currently displayed. Open jobs offers 50/100/150/200 presets and a custom 1–200 amount, capped to the jobs available. Live-only mutations (Save, Applied, and Exclude) remain hidden for immutable snapshots.
 
 ### v10.2 search/scoring changes
 
@@ -100,11 +100,12 @@ email send. Both the Jobs toolbar and System email card pass the selection
 through the guarded local action and reuse the existing export builders.
 Automatic post-scrape email remains `.txt`.
 
-v6.1.0 adds an **Open All** action to the Jobs dashboard. After confirming the
-batch size, the guarded local action opens each ranked job's direct application
-URL in the default browser, falling back to its source listing when necessary.
-Invalid links are skipped without weakening the dashboard's loopback and CSRF
-protections.
+v11.4.0 turns the original **Open All** action into an **Open jobs** menu. Users
+can choose 50, 100, 150, or 200 jobs or type any custom amount from 1–200. The
+guarded local action caps the request to the current or archived batch, opens
+each ranked job's direct application URL, and falls back to its source listing
+when necessary. Invalid links are skipped without weakening the dashboard's
+loopback and CSRF protections.
 
 v5.0 removes owner-specific defaults and expands the product beyond remote technology roles:
 

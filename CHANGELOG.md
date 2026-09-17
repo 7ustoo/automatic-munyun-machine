@@ -8,6 +8,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [11.4.0] — 2026-09-17
+
+### Added
+
+- Replaced **Open All** with an **Open jobs** menu offering 50, 100, 150, and 200-job presets plus a custom 1–200 amount.
+- Open counts work on both the latest batch and previous scrapes. Choices larger than the displayed batch safely open only the jobs available, and the local endpoint enforces the same 200-job ceiling.
+
 ## [11.3.0] — 2026-09-17
 
 ### Added

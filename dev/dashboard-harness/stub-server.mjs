@@ -122,7 +122,11 @@ const postReplies = {
     }
     return { ok: true, idx: n, excluded: body?.excluded === "true", list: [...stubExcluded].sort((a, b) => a - b) };
   },
-  "/api/jobs/open-all": body => ({ ok: true, opened: body?.archive ? 30 : 42, skipped: 0, failed: 0 }),
+  "/api/jobs/open-all": body => {
+    const available = body?.archive ? 30 : liveJobs().length;
+    const requested = Math.max(1, Math.min(200, parseInt(body?.limit, 10) || 200));
+    return { ok: true, opened: Math.min(requested, available), skipped: 0, failed: 0 };
+  },
   "/api/settings/set": body => {
     if (body?.path === "schedule.enabled") scheduleEnabled = body.value === "true";
     return { ok: true };

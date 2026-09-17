@@ -65,6 +65,11 @@ await shot("http://127.0.0.1:8765/#jobs", "11-export-menu.png", async () => {
   await page.click("#export-menu summary");
   await page.waitForTimeout(200);
 });
+// 11b. Open jobs count menu with presets and custom amount.
+await shot("http://127.0.0.1:8765/#jobs", "11b-open-jobs-menu.png", async () => {
+  await page.click("#open-jobs-btn");
+  await page.waitForTimeout(200);
+});
 // 12. Narrow viewport (responsive rail)
 await page.setViewportSize({ width: 820, height: 900 });
 await shot("http://127.0.0.1:8765/#jobs", "12-narrow.png");
