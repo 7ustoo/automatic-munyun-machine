@@ -13,7 +13,7 @@ const shots = path.join(here, 'shots');
 fs.mkdirSync(shots, { recursive: true });
 
 let fail = 0;
-for (const s of ['shoot.mjs', 'shoot-banner.mjs']) {
+for (const s of ['shoot.mjs', 'shoot-banner.mjs', 'v12-preview.mjs']) {
   // Each suite gets a fresh stub clock. shoot-banner asserts the pre-scrape
   // 27-job state before the stub flips at 15s; sharing the stub with the
   // screenshot suite made that precondition depend on the first suite's

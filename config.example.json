@@ -4,13 +4,15 @@
     "name": "",
     "salaryFloorUsd": 0,
     "maxYoeAcceptable": 100,
-    "_comment": "Filled in during setup. salaryFloorUsd 0 = no floor; maxYoeAcceptable 100 = effectively no cap (setup asks for real values)."
+    "_comment": "salaryFloorUsd 0 = no floor; maxYoeAcceptable 100 = effectively no cap. Quick setup keeps these defaults unless you change them under More preferences."
   },
   "queries": [],
   "_queriesComment": "Left EMPTY on a fresh install — setup fills these from YOUR resume (role-suggester), so the app is never pre-tailored to someone else's field. Add/remove terms anytime from the dashboard Searches page or the bot's /jobs add. With zero queries the batch is empty until you add some (that is intentional — no jobs beats wrong-field jobs).",
   "search": {
     "mode": "titles",
-    "_comment": "v2.0.3: what /jobs suggest and wizard step 5 propose. titles (default) = full job titles like 'IAM Engineer' \u2014 precise searches. keywords = short domain terms like 'iam', 'm365', 'linux' \u2014 broader nets; the CV-match scorer and matchFloorPercent handle precision. Switch anytime from the bot: /jobs mode titles|keywords. The scraper itself just searches whatever strings are in queries[].",
+    "scrapeSources": "both",
+    "_scrapeSourcesValues": "both | hcafe | dice. The three-step dashboard setup defaults new users to dice; existing installs and manual configuration use both.",
+    "_comment": "Resume suggestions use titles (full role names) or keywords (broader terms). The scraper searches selected queries on selected sources.",
     "workplaceTypes": [
       "Remote"
     ],
@@ -23,7 +25,7 @@
     "greenhouse": [],
     "lever": [],
     "ashby": [],
-    "_diceComment": "v7.4: dice.com is a built-in source like hiring.cafe — no enable toggle. search.scrapeSources picks what a scrape runs: both | hcafe | dice (default both); each queries[] entry may carry engines: both | hcafe | dice to route a single term. Optional Dice sign-in (System page) makes apply links open logged in. Salary ranges come structured; top results per term get full-JD scoring.",
+    "_diceComment": "Dice is a built-in source like hiring.cafe. search.scrapeSources chooses both | hcafe | dice; each query may also route to a source. Optional Dice sign-in lives on Connections.",
     "remoteConfigUrl": "",
     "_remoteConfigUrlComment": "v5.0: optional URL to a JSON file (e.g. a GitHub raw link) that can add source companies / adapter tweaks remotely, so a site change is a same-day fix without an app update. Empty = off. Fetched read-only, cached, and merged over local sources."
   },

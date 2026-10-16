@@ -62,7 +62,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - A saved weekday-morning toggle per profile; one unattended run processes every enabled profile without changing the profile you left open
 - Trends and a search-term leaderboard to show which searches produce the best matches
 - Previous scrapes: every scrape is saved for 30 days. **View** opens the complete older batch in Ranked jobs with its original stats, AI coverage, funnel, filters, Why details, and jobs; **Open jobs**, **Email**, and archive-specific `.txt`, `.csv`, and `.xlsx` exports act on the displayed saved scrape
-- Dice.com built in alongside hiring.cafe: every scrape can run both, hiring.cafe only, or Dice only — with per-term routing (send "iam engineer" everywhere, keep a niche term on one source). Dice jobs carry structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline with a source badge on every ranked job. Sign in to Dice from the System page (same flow as hiring.cafe) so apply links open logged in
+- Dice.com built in alongside hiring.cafe: every scrape can run both, hiring.cafe only, or Dice only — with per-term routing (send "iam engineer" everywhere, keep a niche term on one source). Dice jobs carry structured salary ranges, posted dates, and workplace type, merged into the same ranking pipeline with a source badge on every ranked job. Sign in to Dice from Connections (same flow as hiring.cafe) so apply links open logged in
 - Light and dark themes, desktop notifications, exports, and one-click manual scrapes
 
 ### More than one job source
@@ -161,15 +161,13 @@ AMM uses an installed Chrome or Edge browser for job collection when available. 
 
 The dashboard walks you through:
 
-1. Uploading your resume and confirming suggested searches
-2. Setting basic experience, salary, filter, and schedule preferences
-3. Preparing the hiring.cafe browser session and optionally signing in
-4. Optionally connecting Telegram
-5. Saving the schedule and running your first batch
+1. **Add your resume.** AMM suggests job searches; you can add your own terms.
+2. **Choose your preferences.** Pick remote, hybrid, or on-site work and an optional location. The daily search time is already filled in.
+3. **Start searching.** Use Dice immediately, or prepare hiring.cafe in a browser to search both sources.
 
-Fresh installs start with no profession-specific searches or company filters. Your searches are built from your resume, so AMM does not assume your career field.
+Fresh installs start with no profession-specific searches, salary floor, experience cap, or company filters. Your searches are built from your resume, so AMM does not assume your career field. The app keeps your resume and settings on this computer.
 
-After setup, use **Settings** for workplace type, location, batch size, and advanced filters. You can independently drop management/tech-lead titles, sales titles, and consultant/customer-facing work. Gmail and company-board sources can be connected from the main dashboard.
+After setup, **My matches** shows the ranked shortlist and **Scrape now** runs a search on demand. **Settings** shows everyday choices first; open **Fine-tune matching** for detailed filters or **Smart Match** for optional AI. **Searches** holds your terms, with company boards and blocked companies under optional sections. Telegram, Gmail, and hiring.cafe sign-in are under **Connections** and can be added later.
 
 ## How it works
 

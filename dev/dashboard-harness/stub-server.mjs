@@ -43,10 +43,10 @@ const liveJobs = () => scrapeDone() ? jobs : jobs.slice(0, 27);
 const routes = (needsSetup, opts = {}) => ({
   "/api/update/check": opts.update
     ? { ok: true, hasUpdate: true, current: "3.0.1", latest: "3.0.2", canAutoUpdate: true, releaseUrl: "https://example.com/rel" }
-    : { ok: true, hasUpdate: false, current: "3.0.0" },
+    : { ok: true, hasUpdate: false, current: "12.0.0" },
   "/api/status": () => ({
-    wrapper: { version: "3.0.0", pid: 4242, installDir: "C:\\Users\\demo\\AppData\\Local\\AMM" },
-    bot: { state: "alive", pid: 3131, version: "3.0.0", uptimeSec: 19620, lastHeartbeatAgeSec: 21, lastHeartbeatTs: "2026-07-06T12:00:00Z" },
+    wrapper: { version: "12.0.0", pid: 4242, installDir: "C:\\Users\\demo\\AppData\\Local\\AMM" },
+    bot: { state: "alive", pid: 3131, version: "12.0.0", uptimeSec: 19620, lastHeartbeatAgeSec: 21, lastHeartbeatTs: "2026-07-06T12:00:00Z" },
     telegram: { enabled: false, connected: false, lastPollOk: false, consecutiveFailures: 0 },
     profile: { active: "default", all: ["default", "marketing"] },
     lastBatch: { available: true, date: "2026-07-06", jobCount: liveJobs().length, generatedAt: genAt() },
@@ -76,6 +76,7 @@ const routes = (needsSetup, opts = {}) => ({
     { slug: "marketing", active: false, hasCV: false, resumeName: "", queryCount: 7, workplaceTypes: ["Remote", "Hybrid"], location: "New York, NY", targetJobs: 50, matchFloor: 60, scheduleEnabled: false, scheduleTime: "07:00", smartMatchEnabled: false, vaEmail: "marketing-va@example.com", vaAutoSend: false }
   ] }),
   "/api/hcafe/auth": { ok: true, authed: true, checkedAt: "2026-07-10T12:00:00Z" },
+  "/api/setup/hcafe-login/status": { ok: true, running: false, authed: true },
   // v7.3: Dice sign-in card (System page).
   "/api/dice/auth": { ok: true, authed: false, checkedAt: "2026-07-10T12:00:00Z", cached: true },
   "/api/setup/dice-login/status": { ok: true, running: false, authed: true },
@@ -112,6 +113,7 @@ const stubExcluded = new Set();
 
 // POST endpoints reply generically so buttons can be exercised.
 const postReplies = {
+  "/api/resume/upload": { ok: true, parsed: { titles: 2, certs: 1, skills: 4, compliance: 0 }, suggestions: ["Cloud Security Engineer", "Identity Engineer", "Security Analyst"], mode: "titles" },
   "/api/scrape": { ok: true },
   "/api/job/action": { ok: true },
   // v7.7: toggle a job's ✕ (mirrors dashboard-api job-exclude).

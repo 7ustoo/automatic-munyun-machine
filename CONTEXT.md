@@ -2,10 +2,19 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 11.4.0
-**Active release branch:** `v11.4.0`
+**Version:** 12.0.0
+**Active release branch:** `v12.0.0`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-09-05
+**Last refreshed:** 2026-10-16
+
+### v12 simplified first run and dashboard
+
+- First run has three steps: resume and search suggestions, work preferences, and job feed. Dice can run without a browser warmup; choosing both sources requires preparing hiring.cafe first. Telegram and email are available later under Connections.
+- Resume suggestions can be supplemented with a manual search term during setup. New installs default to no salary floor or experience cap and no clearance exclusion.
+- Settings keeps schedule, batch size, recency, workplace, and location visible. Less common matching filters and optional Smart Match are behind disclosures. Searches uses disclosures for blocked companies and company boards.
+- The dashboard has a lighter visual system, clearer primary navigation, and refreshed responsive layout while retaining all existing views and guarded APIs.
+- `dev/dashboard-harness/v12-preview.mjs` checks the quick-start request with synthetic data and captures the review images. The Windows wrapper Makefile now reads the package version without POSIX-only redirection, so local builds embed `12.0.0` correctly.
+- A skipped first run can be resumed without resetting other profiles or optional configuration: the dashboard hydrates visible choices, sends only touched fields, and `mergeSetupConfig` merges them into the active profile. After setup is complete, the Setup shortcut opens Settings.
 
 ### v11 profile workspace and scoring truth
 
@@ -181,12 +190,12 @@ The wrapper serves `wrapper/dashboard.html` and API routes from `wrapper/dashboa
 
 Views:
 
-- Jobs
+- My matches (`jobs` route)
 - Searches and company sources
-- Resume
+- My resume (`resume` route)
 - Profiles
 - Trends
-- System
+- Connections (`system` route)
 - Settings
 
 State-changing routes use `guardPost` with a per-process CSRF token and loopback Host validation. Read-only data routes use `guardGet`.

@@ -24,12 +24,18 @@
 #   make tidy        →  go mod tidy
 #   make print-version → echoes resolved version (used by CI)
 
-VERSION := $(shell node -p "require('../package.json').version" 2>/dev/null || echo "0.0.0")
+# Node is required by AMM. Avoid /dev/null redirection here: Windows make uses
+# cmd.exe, where that path fails and silently stamped local builds as 0.0.0.
+VERSION ?= $(shell node -p "require('../package.json').version")
 LDFLAGS_WIN := -ldflags="-H windowsgui -s -w -X main.AMMVersion=$(VERSION)"
 LDFLAGS_POSIX := -ldflags="-s -w -X main.AMMVersion=$(VERSION)"
 
 DIST := dist
-UNAME_S := $(shell uname -s 2>/dev/null || echo Windows)
+ifeq ($(OS),Windows_NT)
+UNAME_S := Windows
+else
+UNAME_S := $(shell uname -s)
+endif
 
 .PHONY: build build-win build-mac build-linux clean run tidy print-version
 

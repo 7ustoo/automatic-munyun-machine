@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { buildInitConfig } from '../dashboard-api.mjs';
+import { buildInitConfig, mergeSetupConfig } from '../dashboard-api.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..', '..');
@@ -107,6 +107,14 @@ test('browser section survives merge (non-profile top-level default)', () => {
   assert.equal(cfg.browser.channel, EXAMPLE.browser.channel);
 });
 
+test('fresh profile carries every optional settings block from shipping defaults', () => {
+  const p = buildInitConfig({ search: { scrapeSources: 'dice' } }, EXAMPLE).profiles.default;
+  assert.equal(p.search.scrapeSources, 'dice');
+  assert.deepEqual(p.sources, EXAMPLE.sources);
+  assert.deepEqual(p.display, EXAMPLE.display);
+  assert.deepEqual(p.email, EXAMPLE.email);
+});
+
 test('empty defaults still produces valid shape (no example available)', () => {
   const cfg = buildInitConfig({ user: { name: 'X' } }, {});
   assert.equal(cfg.active_profile, 'default');
@@ -123,4 +131,44 @@ test('_comment field on defaults is dropped from output profile', () => {
   assert.ok(cfg._comment);
   assert.match(cfg._comment, /dashboard setup/);
   assert.notEqual(cfg._comment, EXAMPLE._comment);
+});
+
+test('resuming setup keeps other profiles and untouched settings', () => {
+  const existing = {
+    active_profile: 'default',
+    profiles: {
+      default: {
+        user: { name: 'Alex', salaryFloorUsd: 125000 },
+        queries: [{ key: 'old', term: 'Old role', engines: 'hcafe' }],
+        search: { workplaceTypes: ['Hybrid'], location: 'Boston', scrapeSources: 'both' },
+        filters: { filterClearance: true, skipCompanies: ['Blocked Co'] },
+        scoring: { matchFloorPercent: 80 },
+        email: { enabled: true, to: 'helper@example.com' },
+      },
+      second: { user: { name: 'Second' } },
+    },
+  };
+  const cfg = mergeSetupConfig(existing, {
+    queries: ['New role'],
+    search: { scrapeSources: 'dice' },
+  }, EXAMPLE);
+  assert.equal(cfg.profiles.default.queries[0].term, 'New role');
+  assert.equal(cfg.profiles.default.search.scrapeSources, 'dice');
+  assert.equal(cfg.profiles.default.search.location, 'Boston');
+  assert.equal(cfg.profiles.default.user.salaryFloorUsd, 125000);
+  assert.equal(cfg.profiles.default.filters.filterClearance, true);
+  assert.deepEqual(cfg.profiles.default.filters.skipCompanies, ['Blocked Co']);
+  assert.deepEqual(cfg.profiles.default.scoring, existing.profiles.default.scoring);
+  assert.deepEqual(cfg.profiles.default.email, existing.profiles.default.email);
+  assert.deepEqual(cfg.profiles.second, existing.profiles.second);
+});
+
+test('resuming setup retains routing for searches the user keeps', () => {
+  const existing = { active_profile: 'default', profiles: { default: {
+    queries: [{ key: 'iam', term: 'IAM Engineer', engines: 'hcafe' }],
+  } } };
+  const cfg = mergeSetupConfig(existing, { queries: ['IAM Engineer', 'Security Analyst'] }, EXAMPLE);
+  assert.equal(cfg.profiles.default.queries[0].engines, 'hcafe');
+  assert.equal(cfg.profiles.default.queries[0].key, 'iam');
+  assert.equal(cfg.profiles.default.queries[1].term, 'Security Analyst');
 });
