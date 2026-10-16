@@ -727,11 +727,14 @@ export function buildInitConfig(input, defaults = {}) {
     user: { ...(def.user || {}), ...(src.user || {}) },
     queries,
     search: { ...(def.search || {}), ...(src.search || {}) },
+    sources: def.sources || {},
     filters: { ...(def.filters || {}), ...(src.filters || {}) },
     scoring: def.scoring || {},
+    display: def.display || {},
     weather: { ...(def.weather || {}), ...(src.weather || {}) },
     schedule: { ...(def.schedule || {}), ...(src.schedule || {}) },
-    telegram: def.telegram || {}
+    telegram: def.telegram || {},
+    email: def.email || {}
   };
 
   const cfg = {
@@ -741,6 +744,39 @@ export function buildInitConfig(input, defaults = {}) {
   };
   if (def.browser) cfg.browser = def.browser;
   return cfg;
+}
+
+// A user may skip first-run setup, change settings in the dashboard, then
+// return to finish. Keep their existing profile and other profiles intact;
+// apply only the choices sent by the resumed wizard.
+export function mergeSetupConfig(existing, input, defaults = {}) {
+  const slug = existing?.active_profile;
+  const current = slug && existing?.profiles?.[slug];
+  if (!current) return buildInitConfig(input, defaults);
+  const previousQueries = new Map((Array.isArray(current.queries) ? current.queries : [])
+    .filter(q => q && typeof q.term === 'string')
+    .map(q => [q.term.toLowerCase(), q]));
+  const incomingQueries = Array.isArray(input?.queries)
+    ? buildInitConfig({ queries: input.queries }, defaults).profiles.default.queries.map(q => {
+        const previous = previousQueries.get(q.term.toLowerCase());
+        return previous ? { ...previous, term: q.term } : q;
+      })
+    : current.queries;
+  return {
+    ...existing,
+    profiles: {
+      ...existing.profiles,
+      [slug]: {
+        ...current,
+        user: { ...(current.user || {}), ...(input.user || {}) },
+        queries: incomingQueries,
+        search: { ...(current.search || {}), ...(input.search || {}) },
+        filters: { ...(current.filters || {}), ...(input.filters || {}) },
+        weather: { ...(current.weather || {}), ...(input.weather || {}) },
+        schedule: { ...(current.schedule || {}), ...(input.schedule || {}) },
+      },
+    },
+  };
 }
 
 // setup-init: one-shot write of config.json in the v1.0 profile shape. Called
@@ -758,7 +794,13 @@ function setupInit(jsonBlob) {
     defaults = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
   } catch { /* fall through with empty defaults */ }
 
-  const cfg = buildInitConfig(input, defaults);
+  let cfg = buildInitConfig(input, defaults);
+  if (input.preserveExisting && fs.existsSync(path.join(ROOT, 'config.json'))) {
+    try {
+      const existing = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.json'), 'utf8'));
+      cfg = mergeSetupConfig(existing, input, defaults);
+    } catch (e) { return out({ ok: false, error: 'could not read existing settings: ' + e.message }); }
+  }
 
   try {
     atomicWriteJson(path.join(ROOT, 'config.json'), cfg);

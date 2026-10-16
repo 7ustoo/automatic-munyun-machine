@@ -8,6 +8,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [12.0.0] — 2026-10-16
+
+- Rebuilt first-run setup as three steps: add a resume, pick work preferences, and start a job feed. Dice is ready without a sign-in; preparing hiring.cafe is an optional route to using both sources.
+- Made optional delivery and detailed matching controls easier to find when needed, while keeping everyday settings short and clear.
+- Refreshed the dashboard with a calmer layout, clearer navigation, and a new light default. Existing dark-theme preferences still work.
+- Setup now starts without a salary floor, experience cap, or government-clearance exclusion unless you choose them.
+- Returning to an unfinished setup preserves existing profile settings, connected delivery, and other profiles. Completed installs open Settings from the Setup shortcut instead of replaying first-run setup.
+
 ## [11.4.0] — 2026-09-17
 
 ### Added

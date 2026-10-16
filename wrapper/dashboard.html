@@ -774,6 +774,134 @@
     .plabel { display: none; }
     .pstep { width: 52px; }
   }
+
+  /* v12: a quieter workspace with clear primary actions and progressive detail. */
+  :root, :root[data-theme="light"] {
+    --bg: #f5f6f4; --surface: #ffffff; --surface-2: #f4f6f5;
+    --surface-3: #e9eeeb; --border: #e1e6e2; --border-2: #ccd6cf;
+    --text: #172a25; --text-2: #53675e; --text-3: #718079;
+    --accent: #157a5b; --accent-2: #0d6b50; --accent-dim: #e6f4ed;
+    --green: #157a5b; --green-dim: #e6f4ed; --yellow: #a76917;
+    --yellow-dim: #fff4dd; --red: #bb4747; --red-dim: #fff0ef;
+    --r-lg: 18px; --r-md: 11px; --r-sm: 8px;
+    --shadow-1: 0 2px 12px rgba(21,46,35,.035);
+    --shadow-2: 0 16px 46px rgba(21,46,35,.15);
+    --sidebar-w: 238px; --topbar-h: 72px;
+    --topbar-bg: rgba(245,246,244,.94);
+  }
+  :root[data-theme="dark"] {
+    --bg: #121b18; --surface: #1a2722; --surface-2: #22342c;
+    --surface-3: #2a4034; --border: #2d4035; --border-2: #45604f;
+    --text: #f2f7f2; --text-2: #b4c5b7; --text-3: #8da393;
+    --accent: #79d6aa; --accent-2: #a6e4c3; --accent-dim: #244335;
+    --green: #79d6aa; --green-dim: #244335;
+    --yellow: #f1c570; --yellow-dim: #44391e;
+    --red: #f09393; --red-dim: #442b2b;
+    --r-lg: 18px; --r-md: 11px; --r-sm: 8px;
+    --shadow-1: 0 2px 12px rgba(0,0,0,.10);
+    --shadow-2: 0 16px 46px rgba(0,0,0,.3);
+    --sidebar-w: 238px; --topbar-h: 72px;
+    --topbar-bg: rgba(18,27,24,.94);
+  }
+  #sidebar { background: #173d30; border-right: 0; padding: 26px 15px 18px; }
+  .brand { gap: 12px; padding: 3px 13px 40px; color: #fff; }
+  .brand img { width: 38px; height: 38px; border-radius: 11px; }
+  .brand-name { font-size: 15px; letter-spacing: -.015em; }
+  .brand-name span { color: #a9cbb8; font-size: 12px; margin-top: 2px; }
+  .nav-group-label { color: #94b8a4; padding: 0 13px 9px; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+  .nav-group-more { padding-top: 30px; }
+  .nav-item { color: #c7dfce; padding: 11px 13px; font-size: 13.5px; border-radius: 11px; gap: 12px; }
+  .nav-item:hover { background: rgba(255,255,255,.09); color: #fff; }
+  .nav-item.on { background: #fff; border-color: #fff; color: #174432; box-shadow: 0 5px 18px rgba(0,0,0,.1); }
+  .nav-item.on .badge { color: #174432; background: #dff1e6; }
+  .nav-item .badge { color: #c7dfce; background: rgba(255,255,255,.12); }
+  .side-foot { border-top-color: rgba(255,255,255,.16); color: #a9cbb8; }
+  #topbar { padding: 0 30px; border-bottom-color: var(--border); }
+  #view-title { font-size: 16px; font-weight: 750; }
+  .top-actions { gap: 8px; }
+  .status-chip, .profile-chip, .watch-toggle { border-radius: 10px; padding: 8px 10px; }
+  #scrape-btn { padding: 9px 16px; }
+  #content { max-width: 1270px; padding: 30px 34px 70px; }
+  .view-intro { display: flex; justify-content: space-between; margin: 4px 0 28px; }
+  .view-intro h2 { font-size: clamp(25px, 2.5vw, 34px); line-height: 1.15; margin: 7px 0 7px; letter-spacing: -.04em; }
+  .view-intro p { color: var(--text-2); margin: 0; font-size: 14px; }
+  .eyebrow { font-size: 11px; font-weight: 800; color: var(--accent-2); letter-spacing: .14em; }
+  .card { padding: 24px; box-shadow: var(--shadow-1); }
+  .card h2 { font-size: 13px; letter-spacing: .015em; text-transform: none; color: var(--text); }
+  .stats { gap: 12px; }
+  .tile { border-radius: 16px; padding: 20px; box-shadow: var(--shadow-1); }
+  .tile .t-label { font-size: 12px; font-weight: 650; color: var(--text-2); }
+  .tile .t-value { font-size: 29px; letter-spacing: -.04em; }
+  .toolbar { gap: 9px; padding-bottom: 18px; margin-bottom: 8px; }
+  .searchbox input { min-height: 38px; }
+  th { background: var(--surface); }
+  th, td { padding-top: 13px; padding-bottom: 13px; }
+  td.jobcell .j-title { font-size: 14px; font-weight: 700; }
+  button.primary, .btn.primary { color: #fff; }
+  button.primary:hover:not(:disabled), .btn.primary:hover { color: #fff; }
+  .mode-toggle button.on { color: #fff; }
+  .settings-lead { margin: -5px 0 18px; color: var(--text-2); }
+  .set-row { padding: 12px 0; }
+  .set-row label { color: var(--text); font-weight: 600; }
+  .settings-advanced, .extra-searches, .setup-advanced { border: 1px solid var(--border); border-radius: 14px; margin-top: 18px; background: var(--surface-2); }
+  .settings-advanced summary, .extra-searches summary, .setup-advanced summary { cursor: pointer; padding: 16px 18px; font-weight: 700; list-style-position: inside; }
+  .settings-advanced summary span, .extra-searches summary span, .setup-advanced summary span { float: right; color: var(--text-3); font-size: 12px; font-weight: 500; }
+  .advanced-fields { padding: 0 18px 18px; }
+  .extra-searches { background: var(--surface); }
+  .extra-searches .card { border: none; box-shadow: none; margin: 0; padding-top: 5px; }
+  .extra-searches .card h2 { display: none; }
+  .ai-settings { margin: 0; }
+  .ai-settings .advanced-fields { padding-top: 3px; }
+  #setup-overlay { background: radial-gradient(1000px 650px at 50% 0%, #e1f3e8, transparent 72%), var(--bg); padding-top: 42px; }
+  :root[data-theme="dark"] #setup-overlay { background: radial-gradient(1000px 650px at 50% 0%, #1e4835, transparent 72%), var(--bg); }
+  .setup-container { max-width: 760px; }
+  .setup-header { margin-bottom: 26px; }
+  .setup-header h1 { font-size: 30px; letter-spacing: -.04em; }
+  .setup-header .sub { font-size: 15px; }
+  .setup-header img { width: 50px; height: 50px; }
+  .setup-progress { margin-top: 30px; }
+  .pstep { width: 142px; }
+  .setup-progress .pdot { width: 30px; height: 30px; font-size: 12px; }
+  .pstep:not(:first-child)::before { top: 14px; }
+  .plabel { font-size: 12px; }
+  .setup-step .card { padding: 34px; }
+  .setup-step h2 { font-size: 12px; color: var(--accent-2); letter-spacing: .13em; }
+  .setup-step .lead { font-size: 23px; letter-spacing: -.025em; }
+  .setup-step .desc { font-size: 14px; }
+  .setup-welcome .hero { font-size: 27px; letter-spacing: -.035em; }
+  .setup-welcome .blurb { max-width: 570px; font-size: 15px; }
+  .welcome-points { max-width: 490px; gap: 14px; }
+  .welcome-points li { font-size: 14px; }
+  .setup-basics-grid { gap: 16px 20px; }
+  .setup-basics-grid label { font-size: 13px; color: var(--text); }
+  .setup-basics-grid input[type=time] { width: 100%; font: inherit; padding: 8px 10px; color: var(--text); background: var(--bg); border: 1px solid var(--border-2); border-radius: var(--r-md); }
+  .setup-manual-search { margin-top: 18px; }
+  .setup-manual-search input { flex: 1; min-width: 180px; }
+  .setup-source-choice { display: grid; gap: 10px; margin: 18px 0; }
+  .setup-source-choice label { display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; border: 1px solid var(--border-2); border-radius: 13px; cursor: pointer; background: var(--surface); }
+  .setup-source-choice label:has(input:checked) { border-color: var(--accent); background: var(--accent-dim); }
+  .setup-source-choice input { margin-top: 4px; accent-color: var(--accent); }
+  .setup-source-choice b, .setup-source-choice small { display: block; }
+  .setup-source-choice small { color: var(--text-2); margin-top: 3px; }
+  .setup-ready { display: flex; gap: 15px; flex-wrap: wrap; color: var(--text-2); font-size: 12px; margin: 22px 0 16px; }
+  .setup-finish-primary { width: 100%; padding: 12px 18px; font-size: 15px; }
+  .setup-nav { margin-top: 14px; }
+  @media (max-width: 900px) {
+    :root, :root[data-theme="light"], :root[data-theme="dark"] { --sidebar-w: 66px; }
+    .nav-group-label { display: none; }
+    #sidebar { padding: 17px 7px; }
+    #content { padding: 22px 18px 45px; }
+    .brand { padding-bottom: 24px; }
+  }
+  @media (max-width: 720px) {
+    #topbar { min-height: var(--topbar-h); height: auto; padding: 9px 12px; }
+    .top-actions { flex-wrap: wrap; justify-content: flex-end; }
+    .top-help-btn { display: none; }
+    .view-intro h2 { font-size: 25px; }
+    .pstep { width: 76px; }
+    .setup-step .card { padding: 22px; }
+    .setup-header h1 { font-size: 25px; }
+  }
 </style>
 </head>
 <body>
@@ -787,10 +915,10 @@
      overlay (100), so the wizard paints seamlessly over the veil. -->
 <div id="boot-veil"><img src="/favicon.png" alt="" /></div>
 <script>
-  // v4.6: apply the saved theme (or follow the OS) before first paint — no flash.
+  // Apply a saved preference before first paint; new installs start in light mode.
   try {
     var _t = localStorage.getItem("amm-theme");
-    if (_t !== "light" && _t !== "dark") _t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+    if (_t !== "light" && _t !== "dark") _t = "light";
     document.documentElement.dataset.theme = _t;
   } catch (e) {}
   // v5.0: guarded — if a browser blocks site data, localStorage throws; without
@@ -840,14 +968,12 @@
   <div class="setup-container">
     <div class="setup-header">
       <img src="/favicon.png" alt="" />
-      <h1>Welcome to Automatic Munyun Machine</h1>
-      <div class="sub">~100 job matches every morning, ranked against your resume.</div>
+      <h1>Let’s find work worth your time.</h1>
+      <div class="sub">Three quick steps to your first ranked shortlist.</div>
       <div class="setup-progress" id="setup-progress">
         <div class="pstep"><span class="pdot" data-pstep="1"></span><span class="plabel">Resume</span></div>
-        <div class="pstep"><span class="pdot" data-pstep="2"></span><span class="plabel">Basics</span></div>
-        <div class="pstep"><span class="pdot" data-pstep="3"></span><span class="plabel">Job feed</span></div>
-        <div class="pstep"><span class="pdot" data-pstep="4"></span><span class="plabel">Telegram</span></div>
-        <div class="pstep"><span class="pdot" data-pstep="5"></span><span class="plabel">Finish</span></div>
+        <div class="pstep"><span class="pdot" data-pstep="2"></span><span class="plabel">Preferences</span></div>
+        <div class="pstep"><span class="pdot" data-pstep="3"></span><span class="plabel">Start searching</span></div>
       </div>
       <div class="setup-skip" id="setup-skip-wrap"><a id="setup-skip-link">Skip setup for now</a></div>
     </div>
@@ -857,16 +983,15 @@
          step 1; the progress dots + Back/Next nav are hidden on this step. -->
     <div class="setup-step setup-welcome" data-step="0">
       <div class="card">
-        <div class="hero">Your <span>automatic</span> job machine</div>
-        <div class="blurb">Every morning, AMM scrapes hiring.cafe, ranks ~100 fresh jobs against your resume, and lays them out here — strongest matches first. It can text them to you on Telegram too.</div>
+        <div class="hero">A calmer way to find your next role.</div>
+        <div class="blurb">Add your resume, choose where you want to work, and get a ranked list of jobs you can act on. Your information stays on this computer.</div>
         <ul class="welcome-points">
-          <li><span class="wp-num">1</span><span>Scan your resume so we know what you're great at.</span></li>
-          <li><span class="wp-num">2</span><span>Pick what to search for — job titles or keywords.</span></li>
-          <li><span class="wp-num">3</span><span>Sign in to hiring.cafe once so we can pull jobs.</span></li>
-          <li><span class="wp-num">4</span><span>Telegram is optional — connect it now or later.</span></li>
+          <li><span class="wp-num">1</span><span>Add a resume. We suggest searches from your experience.</span></li>
+          <li><span class="wp-num">2</span><span>Choose your work preferences.</span></li>
+          <li><span class="wp-num">3</span><span>Start with Dice or connect hiring.cafe too.</span></li>
         </ul>
         <div class="welcome-actions">
-          <button class="primary big" id="setup-welcome-start">Let's set it up →</button>
+          <button class="primary big" id="setup-welcome-start">Get started →</button>
           <button class="skip-btn" id="setup-welcome-skip">Skip for now — I'll explore first</button>
         </div>
       </div>
@@ -875,7 +1000,7 @@
     <!-- Step 1: Resume -->
     <div class="setup-step" data-step="1">
       <div class="card">
-        <h2>Step 1 of 5 — Your resume</h2>
+        <h2>01 / Your resume</h2>
         <div class="lead">Upload your CV so AMM can match jobs to your skills.</div>
         <div class="desc">PDF, DOCX, MD, or TXT. Up to 8 MB. Everything stays on this computer.</div>
         <div class="row">
@@ -893,36 +1018,47 @@
           </div>
           <div class="muted-sm" id="setup-resume-label">Here's what we'll hunt for each morning — tap to add or remove:</div>
           <div id="setup-resume-terms" class="terms"></div>
-          <div class="muted-sm">These are the searches AMM runs on hiring.cafe every day. You can change them anytime.</div>
+          <div class="muted-sm">These are the searches AMM runs on your chosen job sources. You can change them anytime.</div>
         </div>
+        <div class="row setup-manual-search"><input type="text" id="setup-manual-term" maxlength="100" placeholder="Add a job title or search term" /><button id="setup-manual-add">Add search</button></div>
       </div>
     </div>
 
     <!-- Step 2: Basics + filters -->
     <div class="setup-step" data-step="2">
       <div class="card">
-        <h2>Step 2 of 5 — Your basics</h2>
-        <div class="lead">A few settings so AMM knows what to look for.</div>
-        <div class="desc">You can change any of these later from the dashboard.</div>
+        <h2>02 / Your preferences</h2>
+        <div class="lead">What kind of work fits your life?</div>
+        <div class="desc">Start broad. You can fine-tune these choices in Settings anytime.</div>
         <div class="setup-basics-grid">
-          <div>
-            <label>Your first name</label>
-            <input type="text" id="setup-name" placeholder="Justin" />
-          </div>
-          <div>
-            <label>Max years of experience</label>
-            <input type="text" id="setup-yoe" class="num" style="width:100%" placeholder="5" />
-          </div>
-          <div>
-            <label>Salary floor ($)</label>
-            <input type="text" id="setup-salary" class="num" style="width:100%" placeholder="90000" />
-          </div>
-          <div>
-            <label>Daily scrape time</label>
-            <input type="text" id="setup-time" class="num" style="width:100%" placeholder="07:00" />
+          <div class="full">
+            <label for="setup-workplace">Where do you want to work?</label>
+            <select id="setup-workplace"><option value="Remote">Remote</option><option value="Hybrid">Hybrid</option><option value="On-Site">On-site</option><option value="Remote,Hybrid,On-Site">Any workplace</option></select>
           </div>
           <div class="full">
-            <label>Your city (for weather in the daily greeting)</label>
+            <label for="setup-location">Location for hybrid or on-site work</label>
+            <input type="text" id="setup-location" placeholder="City, state, or country (optional)" />
+          </div>
+          <div>
+            <label for="setup-name">What should we call you?</label>
+            <input type="text" id="setup-name" placeholder="Your first name (optional)" />
+          </div>
+          <div>
+            <label for="setup-time">Daily search time</label>
+            <input type="time" id="setup-time" value="07:00" />
+          </div>
+        </div>
+        <details class="setup-advanced"><summary>More preferences <span>Optional</span></summary><div class="setup-basics-grid">
+          <div>
+            <label>Maximum years of experience</label>
+            <input type="text" id="setup-yoe" class="num" style="width:100%" placeholder="No limit" />
+          </div>
+          <div>
+            <label>Minimum salary ($)</label>
+            <input type="text" id="setup-salary" class="num" style="width:100%" placeholder="No minimum" />
+          </div>
+          <div class="full">
+            <label>City for daily weather greeting (optional)</label>
             <div class="row">
               <input type="text" id="setup-city" placeholder="Miami" style="flex:1" />
               <button class="sm" id="setup-city-btn">Look up</button>
@@ -931,7 +1067,7 @@
           </div>
           <div>
             <label>Drop government-clearance jobs</label>
-            <select id="setup-clearance"><option value="true">Yes</option><option value="false">No</option></select>
+            <select id="setup-clearance"><option value="false">No</option><option value="true">Yes</option></select>
           </div>
           <div>
             <label>Application forms</label>
@@ -958,79 +1094,24 @@
               <option value="keywords">Keywords</option>
             </select>
           </div>
-        </div>
+        </div></details>
       </div>
     </div>
 
-    <!-- Step 3: Hiring.cafe warmup (required) -->
+    <!-- Step 3: Choose a source and finish. Hiring.cafe warmup is optional. -->
     <div class="setup-step" data-step="3">
       <div class="card">
-        <h2>Step 3 of 5 — Prepare your job feed</h2>
-        <div class="lead">Open hiring.cafe once so AMM can start pulling jobs.</div>
-        <div class="desc">
-          Clicking Launch opens a real Chrome window at hiring.cafe. The site checks that you're
-          not a bot (this can take ~30s). Once you see job listings, close the window and continue.
-          If you already have a hiring.cafe account, sign in — that unlocks the "Save" button in
-          your ranked-jobs list.
-          <br><br>
-          <b>This step is required.</b> Without it, your first daily scrape will fail against
-          hiring.cafe's bot check.
+        <h2>03 / Start searching</h2>
+        <div class="lead">Choose how to find jobs.</div>
+        <div class="desc">Dice works right away. To include hiring.cafe, open it once in the browser and wait until job listings appear. You can add it later from Connections. After setup, click <b>Scrape now</b> for your first shortlist.</div>
+        <div class="setup-source-choice">
+          <label><input type="radio" name="setup-source" value="dice" checked /> <span><b>Start with Dice</b><small>No login or extra setup</small></span></label>
+          <label><input type="radio" name="setup-source" value="both" /> <span><b>Dice + hiring.cafe</b><small>Prepare hiring.cafe in your browser first</small></span></label>
         </div>
-        <button class="primary" id="setup-hcafe-btn">🚀 Launch browser</button>
+        <button id="setup-hcafe-btn">Open hiring.cafe browser</button>
         <div class="setup-hcafe-state hidden" id="setup-hcafe-state"></div>
-      </div>
-    </div>
-
-    <!-- Step 4: Telegram (optional) -->
-    <div class="setup-step" data-step="4">
-      <div class="card">
-        <h2>Step 4 of 5 — Telegram (optional)</h2>
-        <div class="lead">Want batches pushed to your phone too?</div>
-        <div class="desc">
-          AMM's main UI is this dashboard. Telegram is a bonus — it pushes each morning's ranked
-          list to your phone so you can skim over coffee. You can connect it now or from the
-          System page after setup.
-        </div>
-        <div class="row" style="margin-top:8px">
-          <button class="sm primary" id="setup-tg-connect">Connect Telegram now</button>
-          <button class="sm" id="setup-tg-skip">Skip — desktop only</button>
-        </div>
-
-        <div id="setup-tg-panel" class="hidden">
-          <div class="step">
-            <div class="muted-sm">1. In Telegram, message <b>@BotFather</b> → <code>/newbot</code>, then paste the token:</div>
-            <input type="text" id="setup-tg-token" placeholder="123456789:ABCdef…" autocomplete="off" spellcheck="false" />
-            <button class="sm primary" id="setup-tg-validate" style="margin-top:8px">Validate token</button>
-            <div class="note" id="setup-tg-vnote"></div>
-          </div>
-          <div class="step hidden" id="setup-tg-chatstep">
-            <div class="muted-sm">2. Open your new bot in Telegram and send any message, then:</div>
-            <div class="row">
-              <button class="sm primary" id="setup-tg-detect">Detect my chat</button>
-              <span class="muted-sm">or paste chat id</span>
-              <input type="text" id="setup-tg-chat" placeholder="chat id" style="width:140px" autocomplete="off" />
-            </div>
-            <div class="note" id="setup-tg-dnote"></div>
-          </div>
-          <div class="step hidden" id="setup-tg-savestep">
-            <button class="sm primary" id="setup-tg-savebtn">Save &amp; enable</button>
-            <div class="note" id="setup-tg-snote"></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Step 5: Finish -->
-    <div class="setup-step" data-step="5">
-      <div class="card">
-        <h2>Step 5 of 5 — Finish setup</h2>
-        <div class="lead">Ready to go.</div>
-        <div class="desc">
-          Clicking Finish saves your settings and schedules the daily scrape. AMM starts running
-          in your system tray; the dashboard will refresh into its normal view. Your first batch
-          is one click away — the <b>Scrape now</b> button at the top of the dashboard.
-        </div>
-        <button class="primary" id="setup-finish-btn">✓ Finish setup</button>
+        <div class="setup-ready"><span>✓ Your resume and preferences stay local.</span><span>✓ Telegram and email can be added later.</span></div>
+        <button class="primary setup-finish-primary" id="setup-finish-btn">Finish setup &amp; open dashboard →</button>
         <div class="note" id="setup-finish-note"></div>
       </div>
     </div>
@@ -1069,12 +1150,14 @@
       <div class="brand-name">Automatic Munyun<span>Machine</span></div>
     </div>
     <nav id="nav">
-      <a class="nav-item on" href="#jobs" data-view="jobs"><svg class="ic"><use href="#i-briefcase"/></svg><span>Jobs</span><em class="badge" id="nav-jobs-badge"></em></a>
+      <div class="nav-group-label">YOUR JOB HUNT</div>
+      <a class="nav-item on" href="#jobs" data-view="jobs"><svg class="ic"><use href="#i-briefcase"/></svg><span>My matches</span><em class="badge" id="nav-jobs-badge"></em></a>
       <a class="nav-item" href="#searches" data-view="searches"><svg class="ic"><use href="#i-search"/></svg><span>Searches</span><em class="badge" id="nav-terms-badge"></em></a>
-      <a class="nav-item" href="#resume" data-view="resume"><svg class="ic"><use href="#i-file"/></svg><span>Resume</span></a>
+      <a class="nav-item" href="#resume" data-view="resume"><svg class="ic"><use href="#i-file"/></svg><span>My resume</span></a>
+      <div class="nav-group-label nav-group-more">MORE TOOLS</div>
       <a class="nav-item" href="#profiles" data-view="profiles"><svg class="ic"><use href="#i-users"/></svg><span>Profiles</span></a>
       <a class="nav-item" href="#trends" data-view="trends"><svg class="ic"><use href="#i-chart"/></svg><span>Trends</span></a>
-      <a class="nav-item" href="#system" data-view="system"><svg class="ic"><use href="#i-activity"/></svg><span>System</span></a>
+      <a class="nav-item" href="#system" data-view="system"><svg class="ic"><use href="#i-activity"/></svg><span>Connections</span></a>
       <a class="nav-item" href="#settings" data-view="settings"><svg class="ic"><use href="#i-sliders"/></svg><span>Settings</span></a>
     </nav>
     <div class="side-foot">
@@ -1093,7 +1176,7 @@
         </button>
         <!-- v4.3: onboarding entry points live here, always visible (moved out
              of the System view's "Getting started" card). -->
-        <button class="sm ghost top-help-btn" id="top-setup-btn" title="Run setup walkthrough">
+        <button class="sm ghost top-help-btn" id="top-setup-btn" title="Edit setup and preferences">
           <svg class="ic"><use href="#i-zap"/></svg><span>Setup</span>
         </button>
         <button class="sm ghost top-help-btn" id="top-tour-btn" title="Take a tour">
@@ -1181,7 +1264,7 @@
            says signed OUT (never on unknown). Signed-in dedup lives on the
            account and follows the user across computers; signed-out it's
            local-only. Dismiss is session-only — the nudge gently returns next
-           launch, and the System page's hiring.cafe card stays the permanent
+           launch, and the Connections page's hiring.cafe card stays the permanent
            surface. -->
       <div id="hcafe-banner" class="update-banner setup-banner hidden" role="status">
         <div class="ub-main">
@@ -1196,6 +1279,7 @@
 
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
+        <div class="view-intro"><div><span class="eyebrow">YOUR DAILY SHORTLIST</span><h2>Find your next move.</h2><p>Fresh opportunities ranked against your experience. Start a search any time.</p></div></div>
         <div class="history-view-bar hidden" id="history-view-bar" role="status">
           <div><b id="history-view-title">Viewing a previous scrape</b><div class="muted-sm">This is the complete saved snapshot. Search, sort, inspect Why details, export, email, or open every application link. Save, Applied, and Exclude stay disabled for history.</div></div>
           <button class="sm primary" id="history-back">Back to latest jobs</button>
@@ -1282,9 +1366,10 @@
 
       <!-- =================== View: Searches =================== -->
       <section class="view" data-view="searches">
+        <div class="view-intro"><div><span class="eyebrow">SEARCH PLAN</span><h2>Tell us what to look for.</h2><p>Add the roles and words that describe your next job.</p></div></div>
         <div class="card">
           <h2>What we search for <span class="pill" id="terms-count"></span></h2>
-          <div class="muted-sm">Every term below is searched on hiring.cafe during each scrape. Mix full titles ("IAM Engineer") and short keywords ("iam") freely.</div>
+          <div class="muted-sm">Every term below is searched on your selected sources. Mix full titles ("IAM Engineer") and short keywords ("iam") freely.</div>
           <div class="row" style="margin-top:10px">
             <input type="text" id="term-input" placeholder='add a title or keyword, e.g. "iam"' autocomplete="off" style="flex:1;min-width:200px" />
             <button class="sm primary" id="term-add"><svg class="ic"><use href="#i-plus"/></svg>Add</button>
@@ -1313,7 +1398,7 @@
         </div>
         <div class="card">
           <h2>Job sources <span class="pill">optional</span></h2>
-          <div class="muted-sm">Beyond hiring.cafe, pull jobs straight from company career boards — public, official feeds, no login, more reliable. Enter the board slug from a company's careers URL (comma-separated). Leave blank to use hiring.cafe only.</div>
+          <div class="muted-sm">Add official company career boards alongside your selected search sources. Enter the board slug from a company's careers URL (comma-separated), or leave these blank.</div>
           <div class="src-row"><label for="src-greenhouse">Greenhouse <span class="muted-sm">boards.greenhouse.io/<b>slug</b></span></label>
             <input type="text" id="src-greenhouse" placeholder="e.g. stripe, gitlab" autocomplete="off" spellcheck="false" /></div>
           <div class="src-row"><label for="src-lever">Lever <span class="muted-sm">jobs.lever.co/<b>slug</b></span></label>
@@ -1330,6 +1415,7 @@
 
       <!-- =================== View: Resume =================== -->
       <section class="view" data-view="resume">
+        <div class="view-intro"><div><span class="eyebrow">YOUR EXPERIENCE</span><h2>Make every match personal.</h2><p>Your resume stays on this computer and guides your shortlist.</p></div></div>
         <div class="card">
           <h2>Resume &amp; matching</h2>
           <div class="muted-sm">Upload a new resume to re-scan your skills and get fresh search-term suggestions from it.</div>
@@ -1376,6 +1462,7 @@
 
       <!-- =================== View: Profiles =================== -->
       <section class="view" data-view="profiles">
+        <div class="view-intro"><div><span class="eyebrow">WORKSPACES</span><h2>Keep every search focused.</h2><p>Each profile has its own resume, searches, preferences, and results.</p></div></div>
         <div class="card">
           <h2>Profiles <span class="pill" id="prof-count">—</span></h2>
           <div class="muted-sm">Each profile is a complete job hunt: its own resume, searches, filters, match floor, batch history, and VA recipient. Switch profiles from the top bar at any time.</div>
@@ -1405,6 +1492,7 @@
       <!-- Daily snapshots from batch-history.json: how the hunt is going over
            time, plus which search terms earn their keep. -->
       <section class="view" data-view="trends">
+        <div class="view-intro"><div><span class="eyebrow">PROGRESS</span><h2>See what’s working.</h2><p>Review recent searches and the terms that bring strong matches.</p></div></div>
         <div class="card">
           <h2>Your batches over time <span class="pill" id="tr-days-pill">—</span></h2>
           <div class="muted-sm">Bars = jobs delivered each day · line = average match. History builds up as daily scrapes run.</div>
@@ -1426,14 +1514,15 @@
       <!-- v4.3: the "Getting started" card moved to the topbar (#top-setup-btn /
            #top-tour-btn) so setup + tour are reachable from every view. -->
       <section class="view" data-view="system">
+        <div class="view-intro"><div><span class="eyebrow">CONNECTIONS</span><h2>Everything in one place.</h2><p>Check the app, connect optional delivery, and manage job-site sign-ins.</p></div></div>
         <div class="grid">
           <div class="card">
-            <h2>Bot</h2>
+            <h2>Background service</h2>
             <div class="big" id="bot-big"><span class="dot" id="bot-dot"></span><span id="bot-state">—</span></div>
             <div class="stat-row"><span class="k">PID</span><span class="v" id="bot-pid">—</span></div>
             <div class="stat-row"><span class="k">Uptime</span><span class="v" id="bot-uptime">—</span></div>
             <div class="stat-row"><span class="k">Last heartbeat</span><span class="v" id="bot-hb">—</span></div>
-            <div class="stat-row"><span class="k">Bot version</span><span class="v" id="bot-version">—</span></div>
+            <div class="stat-row"><span class="k">Service version</span><span class="v" id="bot-version">—</span></div>
           </div>
 
           <div class="card">
@@ -1580,8 +1669,10 @@
 
       <!-- =================== View: Settings =================== -->
       <section class="view" data-view="settings">
+        <div class="view-intro"><div><span class="eyebrow">PREFERENCES</span><h2>Make the search yours.</h2><p>Changes save automatically. Start with the essentials; fine-tune when you need to.</p></div></div>
         <div class="card">
-          <h2>Matching &amp; schedule</h2>
+          <h2>Your everyday settings</h2>
+          <p class="settings-lead">The essentials for each search. Your current profile has its own preferences.</p>
           <div class="set-row"><label>Max years of experience</label><input type="text" id="set-yoe" class="num" /></div>
           <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
           <div class="set-row"><label>Strong-match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
@@ -1710,8 +1801,8 @@ const state = {
 
 // ---- v3.0 view router — hash-based so refresh keeps your place ----
 const VIEW_TITLES = {
-  jobs: "Ranked jobs", searches: "Search terms", resume: "Resume & matching",
-  profiles: "Profiles", trends: "Trends", system: "System & Telegram", settings: "Settings",
+  jobs: "My matches", searches: "Searches", resume: "My resume",
+  profiles: "Profiles", trends: "Trends", system: "Connections", settings: "Settings",
 };
 function currentView() {
   const h = (location.hash || "#jobs").slice(1);
@@ -1744,6 +1835,39 @@ document.getElementById("nav").addEventListener("click", (e) => {
 });
 window.addEventListener("hashchange", () => { const v = currentView(); setView(v); if (v === "trends") loadTrends(); });
 setView(currentView());
+
+// Keep everyday choices visible and tuck rarely changed controls behind clear
+// disclosure labels. The existing control IDs and save handlers stay intact.
+function organizePreferences() {
+  const settings = document.querySelector('section[data-view="settings"]');
+  const main = settings.querySelector('.card');
+  const detail = document.createElement('details');
+  detail.className = 'settings-advanced';
+  detail.innerHTML = '<summary>Fine-tune matching <span>Optional filters and display</span></summary><div class="advanced-fields"></div>';
+  main.append(detail);
+  const fields = detail.querySelector('.advanced-fields');
+  ['set-yoe', 'set-salary', 'set-floor', 'set-show-salary', 'set-clearance', 'set-management-titles', 'set-sales-titles', 'set-consultant-slop', 'set-forms'].forEach(id => {
+    const row = $(id).closest('.set-row');
+    if (row) fields.append(row);
+  });
+  const aiCard = settings.querySelectorAll('.card')[1];
+  const aiDetail = document.createElement('details');
+  aiDetail.className = 'settings-advanced ai-settings';
+  aiDetail.innerHTML = '<summary>Smart Match with AI <span>Optional</span></summary><div class="advanced-fields"></div>';
+  while (aiCard.firstChild) aiDetail.querySelector('.advanced-fields').append(aiCard.firstChild);
+  aiCard.append(aiDetail);
+
+  const searches = document.querySelector('section[data-view="searches"]');
+  const extraCards = [...searches.querySelectorAll(':scope > .card')].slice(1);
+  extraCards.forEach((card, i) => {
+    const wrap = document.createElement('details');
+    wrap.className = 'extra-searches';
+    wrap.innerHTML = `<summary>${i === 0 ? 'Blocked companies' : 'Company career boards'} <span>Optional</span></summary>`;
+    card.before(wrap);
+    wrap.append(card);
+  });
+}
+organizePreferences();
 
 // `/` focuses the job search from anywhere (except while typing).
 document.addEventListener("keydown", (e) => {
@@ -2131,7 +2255,7 @@ async function loadBatch() {
     await useBatch(batch);
   } catch (e) {
     state.loadedOnce = true;
-    $("lb-body").innerHTML = '<div class="empty"><div class="e-icon">⚠️</div><div class="e-title">Could not load the batch</div><div class="e-sub">The wrapper did not answer. Try Refresh, or check the System page.</div></div>';
+    $("lb-body").innerHTML = '<div class="empty"><div class="e-icon">⚠️</div><div class="e-title">Could not load the batch</div><div class="e-sub">The app did not answer. Try Refresh, or check Connections.</div></div>';
     $("lb-foot").textContent = "";
   }
 }
@@ -3882,8 +4006,8 @@ const TOUR_STEPS = [
   { sel: "#nav",                title: "Your control center",       body: "Jump between ranked Jobs, your Searches, Resume, Profiles, and System from this sidebar." },
   { sel: "#scrape-btn",         title: "Get jobs on demand",        body: "Scrape now pulls today's ~100 jobs immediately. It also runs on its own every weekday morning." },
   { sel: ".stats",              title: "Your matches at a glance",  body: "How many jobs came in, your average match, and how many are strong (70%+) — each scored against your resume." },
-  { sel: "[data-view='system']", title: "Health & hiring.cafe",     body: "Check the bot's status and sign in to hiring.cafe on the System page." },
-  { sel: "#top-setup-btn",       title: "Help is always up here",    body: "Re-run the setup walkthrough or this tour anytime from these buttons. That's the tour — you're all set!" },
+  { sel: "[data-view='system']", title: "Connections & app health", body: "Check background activity and optional connections here." },
+  { sel: "#top-setup-btn",       title: "Help is always up here",    body: "Return to your setup preferences or take this tour anytime. That's the tour — you're all set!" },
 ];
 
 function startTour() {
@@ -3941,7 +4065,7 @@ function tourEnd() {
 }
 
 // ============================================================================
-// v2.7: dashboard-native first-run setup. State machine spanning 5 steps.
+// v12: dashboard-native first-run setup. Three-step state machine.
 // Only wires up when status.needsSetup becomes true. All backend calls hit
 // /api/setup/* + /api/resume/* + /api/telegram/* (all existing endpoints).
 // ============================================================================
@@ -3950,14 +4074,12 @@ const setupState = {
   resumeUploaded: false,
   suggestions: [],
   selected: new Set(),
+  manualTerms: new Set(),
+  touched: new Set(),
   modePref: null,     // v4.1.1: titles|keywords chosen at scan time (null = let the parser pick)
   cityGeo: null,      // { lat, lon, city, admin, country, timezone }
   hcafeAuthed: false,
-  hcafeChildStarted: false,
   hcafePollTimer: null,
-  tgToken: "",
-  tgChat: "",
-  tgSaved: false,
   finalizing: false,
 };
 
@@ -3978,28 +4100,32 @@ function setupShowStep(n) {
     el.classList.toggle("current", s === n);
   });
   $("setup-back").disabled = (n <= 1);
-  // Step 5's transition is the Finish button, not Next — hide Next there.
-  $("setup-next").classList.toggle("hidden", n === 5);
-  $("setup-next").textContent = "Next →";
+  // The third step has its own Finish button.
+  $("setup-next").classList.toggle("hidden", n === 3);
+  $("setup-next").textContent = n === 2 ? "Choose job feed →" : "Continue →";
   $("setup-next").disabled = !setupCanProceed(n);
+  if (n === 3) setupUpdateFinish();
+  $("setup-overlay").scrollTop = 0;
   window.scrollTo(0, 0);
 }
 
 function setupCanProceed(step) {
   if (step === 0) return true; // welcome splash — advance via its own button
-  // Zero suggestions (unusual CV) still passes — setup-init backfills the
-  // example's default queries so the first scrape isn't a no-op.
+  // A scanned resume with at least one selected search is needed for a useful first batch.
   if (step === 1) return setupState.resumeUploaded &&
-    (setupState.suggestions.length === 0 || setupState.selected.size > 0);
+    setupState.selected.size > 0;
   if (step === 2) {
-    const name = $("setup-name").value.trim();
     const timeOk = /^\d{1,2}:\d{2}$/.test($("setup-time").value.trim() || "07:00");
-    return !!name && !!setupState.cityGeo && timeOk;
+    return timeOk;
   }
-  if (step === 3) return setupState.hcafeAuthed;
-  if (step === 4) return setupState.tgSaved || window.__setupTgSkipped === true;
-  if (step === 5) return true; // Finish button drives the transition
+  if (step === 3) return $("setup-overlay").querySelector('input[name="setup-source"]:checked')?.value === "dice" || setupState.hcafeAuthed;
   return true;
+}
+
+function setupUpdateFinish() {
+  const needsBrowser = $("setup-overlay").querySelector('input[name="setup-source"]:checked')?.value !== "dice";
+  $("setup-finish-btn").disabled = needsBrowser && !setupState.hcafeAuthed;
+  $("setup-hcafe-btn").classList.toggle("primary", needsBrowser && !setupState.hcafeAuthed);
 }
 
 function setupWire() {
@@ -4015,11 +4141,29 @@ function setupWire() {
 
   // ---- Step 1: resume ----
   $("setup-resume-btn").addEventListener("click", () => setupScanResume(setupState.modePref));
+  const addManualTerm = () => {
+    const input = $("setup-manual-term");
+    const term = input.value.trim();
+    if (!term) return;
+    const existing = setupState.suggestions.find(s => s.toLowerCase() === term.toLowerCase());
+    if (!existing) {
+      setupState.suggestions.push(term);
+      setupState.manualTerms.add(term);
+    }
+    setupState.selected.add(existing || term);
+    $("setup-resume-suggest").classList.remove("hidden");
+    setupRenderSuggestChips();
+    $("setup-next").disabled = !setupCanProceed(1);
+    input.value = "";
+  };
+  $("setup-manual-add").addEventListener("click", addManualTerm);
+  $("setup-manual-term").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); addManualTerm(); } });
   $("setup-mode-toggle").addEventListener("click", (ev) => {
     const b = ev.target.closest("button[data-mode]");
     if (!b || b.classList.contains("on")) return;
     const m = b.dataset.mode;
     setupState.modePref = m;
+    setupState.touched.add("setup-mode");
     setupSyncModeToggle(m);
     $("setup-mode").value = m;
     // Suggested searches are mode-specific — re-scan if a resume is loaded.
@@ -4039,6 +4183,10 @@ function setupWire() {
   // ---- Step 2: basics + geocode ----
   $("setup-city-btn").addEventListener("click", setupGeocodeLookup);
   $("setup-city").addEventListener("keydown", e => { if (e.key === "Enter") { e.preventDefault(); setupGeocodeLookup(); } });
+  $("setup-overlay").querySelectorAll('.setup-step[data-step="2"] input, .setup-step[data-step="2"] select').forEach(el => {
+    el.addEventListener("change", () => setupState.touched.add(el.id));
+    el.addEventListener("input", () => setupState.touched.add(el.id));
+  });
   // Any change to a step-2 input re-checks the Next gate.
   ["setup-name", "setup-yoe", "setup-salary", "setup-time"].forEach(id => {
     $(id).addEventListener("input", () => { $("setup-next").disabled = !setupCanProceed(2); });
@@ -4046,67 +4194,9 @@ function setupWire() {
 
   // ---- Step 3: hcafe warmup ----
   $("setup-hcafe-btn").addEventListener("click", setupLaunchHcafe);
+  $("setup-overlay").querySelectorAll('input[name="setup-source"]').forEach(input => input.addEventListener("change", setupUpdateFinish));
 
-  // ---- Step 4: Telegram ----
-  $("setup-tg-skip").addEventListener("click", () => {
-    window.__setupTgSkipped = true;
-    $("setup-tg-connect").disabled = true;
-    $("setup-tg-skip").textContent = "Skipped ✓";
-    $("setup-next").disabled = !setupCanProceed(4);
-  });
-  $("setup-tg-connect").addEventListener("click", () => {
-    $("setup-tg-panel").classList.remove("hidden");
-    $("setup-tg-connect").classList.add("hidden");
-    $("setup-tg-token").focus();
-  });
-  $("setup-tg-validate").addEventListener("click", async () => {
-    const token = $("setup-tg-token").value.trim();
-    if (!token) return note("setup-tg-vnote", "Paste the token first.", false);
-    note("setup-tg-vnote", "Validating…", true);
-    const r = await postJSON("/api/telegram/validate", { token });
-    if (r.ok) {
-      setupState.tgToken = token;
-      note("setup-tg-vnote", "✓ Connected as @" + r.username, true);
-      $("setup-tg-chatstep").classList.remove("hidden");
-    } else {
-      note("setup-tg-vnote", "✗ " + (r.error || "invalid token"), false);
-    }
-  });
-  $("setup-tg-detect").addEventListener("click", async () => {
-    if (!setupState.tgToken) return;
-    const btn = $("setup-tg-detect");
-    btn.disabled = true;
-    note("setup-tg-dnote", "Listening for your message (send your bot any message now)…", true);
-    try {
-      const r = await postJSON("/api/telegram/detect", { token: setupState.tgToken });
-      if (r.ok) {
-        setupState.tgChat = r.chatId;
-        $("setup-tg-chat").value = r.chatId;
-        note("setup-tg-dnote", '✓ Got chat ' + r.chatId, true);
-        $("setup-tg-savestep").classList.remove("hidden");
-      } else {
-        note("setup-tg-dnote", "✗ " + (r.error || "no message received"), false);
-      }
-    } finally { btn.disabled = false; }
-  });
-  $("setup-tg-chat").addEventListener("input", () => {
-    const v = $("setup-tg-chat").value.trim();
-    if (/^-?\d+$/.test(v)) { setupState.tgChat = v; $("setup-tg-savestep").classList.remove("hidden"); }
-  });
-  $("setup-tg-savebtn").addEventListener("click", async () => {
-    if (!setupState.tgToken || !setupState.tgChat) return note("setup-tg-snote", "Need both a token and a chat id.", false);
-    note("setup-tg-snote", "Saving + sending a test message…", true);
-    const r = await postJSON("/api/telegram/save", { token: setupState.tgToken, chatId: setupState.tgChat });
-    if (r.ok) {
-      note("setup-tg-snote", "✓ Test message sent — check your phone.", true);
-      setupState.tgSaved = true;
-      $("setup-next").disabled = !setupCanProceed(4);
-    } else {
-      note("setup-tg-snote", "✗ " + (r.error || "could not save"), false);
-    }
-  });
-
-  // ---- Step 5: finish ----
+  // ---- Step 3: finish ----
   $("setup-finish-btn").addEventListener("click", setupFinish);
 
   // ---- Nav ----
@@ -4114,7 +4204,7 @@ function setupWire() {
     if (setupState.step > 1) setupShowStep(setupState.step - 1);
   });
   $("setup-next").addEventListener("click", () => {
-    if (setupState.step < 5 && setupCanProceed(setupState.step)) {
+    if (setupState.step < 3 && setupCanProceed(setupState.step)) {
       setupShowStep(setupState.step + 1);
     }
   });
@@ -4151,18 +4241,20 @@ async function setupScanResume(modeOverride) {
       true);
     const sugg = r.suggestions || [];
     setupState.resumeUploaded = true;
-    setupState.suggestions = sugg;
-    setupState.selected = new Set(sugg);
+    const manual = [...setupState.manualTerms];
+    setupState.suggestions = [...new Set([...sugg, ...manual])];
+    setupState.selected = new Set(setupState.suggestions);
     $("setup-resume-suggest").classList.remove("hidden");
     const mode = r.mode === "keywords" ? "keywords" : "titles";
     setupState.modePref = mode;
     $("setup-mode").value = mode;      // keep step-2's dropdown in sync
     setupSyncModeToggle(mode);
     $("setup-resume-label").textContent = (mode === "keywords"
-      ? "Here's what we'll hunt for each morning (keywords) — tap to add or remove:"
-      : "Here's what we'll hunt for each morning (job titles) — tap to add or remove:");
+      ? "Suggested keyword searches — tap to add or remove:"
+      : "Suggested job-title searches — tap to add or remove:");
     setupRenderSuggestChips();
     $("setup-next").disabled = !setupCanProceed(1);
+    if (!sugg.length) note("setup-resume-note", "We read your resume but found no search suggestions. Add a job title or search term below to continue.", false);
   } catch (e) {
     note("setup-resume-note", "✗ Upload failed: " + e.message, false);
   } finally {
@@ -4216,11 +4308,64 @@ async function setupSkip() {
 // Bring the wizard back (from the finish-setup banner). setupWire is guarded,
 // so this is safe whether or not the wizard was already wired this session.
 function reopenSetup() {
+  // A completed install keeps its profile settings. Editing them belongs in
+  // Settings; replaying setup-init would replace the full configuration.
+  if (!window.__needsSetup && lsGet("ammSetupIncomplete") !== "1") {
+    lsSet("ammOnboarded", "1");
+    navTo("settings");
+    return;
+  }
   $("setup-banner").classList.add("hidden");
   $("hcafe-banner").classList.add("hidden");   // v4.3: never nudge under the wizard
   if (tourState) tourEnd();
   $("setup-overlay").classList.remove("hidden");
+  setupState.touched.clear();
   setupWire();
+  if (!window.__needsSetup) setupHydrateFromSettings();
+}
+
+async function setupHydrateFromSettings() {
+  try {
+    const [settingsReply, authReply, resumeReply] = await Promise.all([
+      fetch("/api/settings", { cache: "no-store" }).then(r => r.json()),
+      fetch("/api/hcafe/auth", { cache: "no-store" }).then(r => r.json()),
+      fetch("/api/resume", { cache: "no-store" }).then(r => r.json()),
+    ]);
+    if (!settingsReply.ok || $("setup-overlay").classList.contains("hidden")) return;
+    const s = settingsReply.settings;
+    const types = (s.workplaceTypes || ["Remote"]).join(",");
+    const workplace = $("setup-workplace");
+    if (![...workplace.options].some(o => o.value === types)) {
+      workplace.add(new Option((s.workplaceTypes || []).join(" + "), types));
+    }
+    workplace.value = types;
+    $("setup-location").value = s.searchLocation || "";
+    $("setup-time").value = s.scheduleTime || "07:00";
+    $("setup-yoe").value = s.maxYoeAcceptable ?? 100;
+    $("setup-salary").value = s.salaryFloorUsd ?? 0;
+    $("setup-clearance").value = String(!!s.filterClearance);
+    $("setup-forms").value = s.applicationFormEase || "all";
+    $("setup-recency").value = s.maxJobAge || "any";
+    $("setup-mode").value = s.searchMode || "titles";
+    if (s.scrapeSources === "hcafe" && !$("setup-overlay").querySelector('input[name="setup-source"][value="hcafe"]')) {
+      const label = document.createElement("label");
+      label.innerHTML = '<input type="radio" name="setup-source" value="hcafe" /> <span><b>hiring.cafe only</b><small>Your existing source choice</small></span>';
+      label.querySelector("input").addEventListener("change", setupUpdateFinish);
+      $("setup-overlay").querySelector(".setup-source-choice").append(label);
+    }
+    $("setup-overlay").querySelector(`input[name="setup-source"][value="${s.scrapeSources || "both"}"]`)?.click();
+    if (resumeReply.ok && resumeReply.available && Array.isArray(s.queries) && s.queries.length) {
+      setupState.resumeUploaded = true;
+      setupState.suggestions = s.queries;
+      setupState.selected = new Set(s.queries);
+      $("setup-resume-suggest").classList.remove("hidden");
+      $("setup-resume-label").textContent = "Your current searches — tap to add or remove:";
+      note("setup-resume-note", "✓ Your saved resume is ready. You can scan another file to refresh its suggestions.", true);
+      setupRenderSuggestChips();
+    }
+    if (authReply.ok && authReply.authed) setupState.hcafeAuthed = true;
+    setupUpdateFinish();
+  } catch { /* A local settings read failure leaves safe displayed defaults. */ }
 }
 
 function setupRenderSuggestChips() {
@@ -4270,7 +4415,6 @@ async function setupLaunchHcafe() {
       state.classList.remove("running"); state.classList.add("err");
       btn.disabled = false; return;
     }
-    setupState.hcafeChildStarted = true;
     setupPollHcafe();
   } catch (e) {
     state.textContent = "✗ " + e.message;
@@ -4296,9 +4440,9 @@ function setupPollHcafe() {
         setupState.hcafeAuthed = true;
         state.classList.remove("running", "err");
         state.classList.add("done");
-        state.textContent = "✓ hiring.cafe is ready. Click Next to continue.";
+        state.textContent = "✓ hiring.cafe is ready. You can finish setup with both sources.";
         btn.disabled = true; btn.textContent = "Done ✓";
-        $("setup-next").disabled = !setupCanProceed(3);
+        setupUpdateFinish();
       } else {
         state.classList.remove("running");
         state.classList.add("err");
@@ -4313,6 +4457,7 @@ function setupPollHcafe() {
 }
 
 async function setupFinish() {
+  if (!setupCanProceed(3)) return;
   if (setupState.finalizing) return;
   setupState.finalizing = true;
   const btn = $("setup-finish-btn");
@@ -4322,22 +4467,27 @@ async function setupFinish() {
   note("setup-finish-note", "Writing your settings…", true);
 
   const days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"];
-  const payload = {
-    user: {
-      name: $("setup-name").value.trim() || "there",
-      maxYoeAcceptable: parseInt($("setup-yoe").value || "5", 10),
-      salaryFloorUsd: parseInt($("setup-salary").value || "90000", 10),
-    },
-    filters: {
-      filterClearance: $("setup-clearance").value === "true",
-      applicationFormEase: $("setup-forms").value,
-      maxJobAge: $("setup-recency").value,
-    },
-    weather: setupState.cityGeo || {},
-    schedule: { time: $("setup-time").value.trim() || "07:00", days },
-    queries: [...setupState.selected],
-    search: { mode: $("setup-mode").value === "keywords" ? "keywords" : "titles" },
+  const preserveExisting = !window.__needsSetup;
+  const touched = id => setupState.touched.has(id);
+  const nonNegativeInt = (id, fallback) => {
+    const raw = $(id).value.trim();
+    const value = Number(raw);
+    return raw && Number.isSafeInteger(value) && value >= 0 ? value : fallback;
   };
+  const payload = { preserveExisting, user: {}, filters: {}, weather: {}, schedule: {}, queries: [...setupState.selected], search: {} };
+  if (!preserveExisting || touched("setup-name")) payload.user.name = $("setup-name").value.trim() || "there";
+  if (!preserveExisting || touched("setup-yoe")) payload.user.maxYoeAcceptable = nonNegativeInt("setup-yoe", 100);
+  if (!preserveExisting || touched("setup-salary")) payload.user.salaryFloorUsd = nonNegativeInt("setup-salary", 0);
+  if (!preserveExisting || touched("setup-clearance")) payload.filters.filterClearance = $("setup-clearance").value === "true";
+  if (!preserveExisting || touched("setup-forms")) payload.filters.applicationFormEase = $("setup-forms").value;
+  if (!preserveExisting || touched("setup-recency")) payload.filters.maxJobAge = $("setup-recency").value;
+  if (setupState.cityGeo) payload.weather = setupState.cityGeo;
+  if (!preserveExisting || touched("setup-time")) payload.schedule.time = $("setup-time").value.trim() || "07:00";
+  if (!preserveExisting) payload.schedule.days = days;
+  if (!preserveExisting || touched("setup-mode")) payload.search.mode = $("setup-mode").value === "keywords" ? "keywords" : "titles";
+  if (!preserveExisting || touched("setup-workplace")) payload.search.workplaceTypes = $("setup-workplace").value.split(",");
+  if (!preserveExisting || touched("setup-location")) payload.search.location = $("setup-location").value.trim();
+  payload.search.scrapeSources = $("setup-overlay").querySelector('input[name="setup-source"]:checked').value;
 
   try {
     const r1 = await postJSON("/api/setup/init", payload);
