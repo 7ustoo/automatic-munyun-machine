@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [12.1.2] — 2026-10-30
+
+- Fixed hiring.cafe collection stopping after the first result page: result navigation now follows the actual Next page or numbered page links instead of a company carousel arrow.
+- Keyword collection keeps paging until its requested number of unique listing URLs is collected or the end is verified. Separate postings with the same company and title remain separate. Interrupted searches retain collected links and show the stop reason instead of claiming the results ran out.
+
 ## [12.1.1] — 2026-10-30
 
 - Fixed Windows updates that failed if AMM reopened during installation. The installer now stops AMM immediately before replacing its executable, and Check for updates detects a partially installed version so the same release can be retried.

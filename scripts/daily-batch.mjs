@@ -42,7 +42,7 @@ import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './e
 import { exportRows, buildExportCsv, buildExportXlsx } from './export-batch.mjs';
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize, parseKeywordBatchSize } from './batch-size.mjs';
-import { buildKeywordCollection } from './keyword-collection.mjs';
+import { buildKeywordCollection, keywordListingKey } from './keyword-collection.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
@@ -510,13 +510,14 @@ async function _scrapeWith(ctx) {
     log(`Scraping "${query}" — All time…`);
     const { rows: allRows, coverage } = await crawlSearch({
       page, url, extract: EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
+      ...(KEYWORD_MODE ? { targetJobs: KEYWORD_LIMIT, jobKey: keywordListingKey } : {}),
       checkpoint: state => {
         searchCoverage[key] = { query, ...state };
         if (!KEYWORD_MODE) atomicWriteJson(path.join(PP.dir, 'search-coverage.json'), { at: new Date().toISOString(), queries: searchCoverage });
       },
     });
     searchCoverage[key] = { query, ...coverage, jobs: allRows.length };
-    log(`  "${query}" ${coverage.complete ? 'complete' : 'INCOMPLETE'}: ${allRows.length} jobs (${coverage.reason})`);
+    log(`  "${query}" ${coverage.targetReached ? 'target reached' : coverage.complete ? 'complete' : 'INCOMPLETE'}: ${allRows.length} jobs (${coverage.reason})`);
 
     results[key] = allRows;
 
@@ -536,7 +537,7 @@ async function _scrapeWith(ctx) {
       break;
     }
   }
-  log(`Searched ${Object.keys(results).length}/${HCAFE_QUERIES.length} hiring.cafe keywords; ${Object.values(searchCoverage).filter(q => !q.complete).length} incomplete searches.`);
+  log(`Searched ${Object.keys(results).length}/${HCAFE_QUERIES.length} hiring.cafe keywords; ${Object.values(searchCoverage).filter(q => !q.complete && !q.targetReached).length} incomplete searches.`);
 
   // Persist per-query 7-day rolling supply history. Surfaces in /diagnose
   // so a user can see "Detection Engineer has averaged 0 cards/day for a

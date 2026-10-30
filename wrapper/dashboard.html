@@ -2192,9 +2192,11 @@ function onFreshBatch(lb) {
   const what = lb?.mode === "keyword"
     ? `${lb.jobCount || 0} hiring.cafe listings collected for “${lb.keyword || "keyword"}”`
     : lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
-  $("bb-text").textContent = `Scrape complete — ${what}${lb?.date ? ` for ${lb.date}` : ""}.`;
+  const partial = lb?.mode === "keyword" && lb?.funnel?.searchIncomplete;
+  const outcome = partial ? "Collection stopped early" : "Scrape complete";
+  $("bb-text").textContent = `${outcome} — ${what}${lb?.date ? ` for ${lb.date}` : ""}.${partial ? " See the collection details for the stop reason." : ""}`;
   $("batch-banner").classList.remove("hidden");
-  toast(`Scrape complete — ${what}.`, "good");
+  toast(`${outcome} — ${what}.`, partial ? "bad" : "good");
   loadTrends(true); // v4.6: today's snapshot just landed — refresh Trends
   loadArchives();   // v7.2: the finished scrape was archived — refresh the list
 }
@@ -2382,7 +2384,14 @@ function renderStats() {
 // v4.1: mirror of daily-batch.mjs#funnelLine — every value comes from the
 // funnel object carried in last-batch.json (passed through /api/batch).
 function funnelLineJS(f) {
-  if (f.mode === "keyword") return `${f.raw || 0} hiring.cafe listings → ${f.uniqueBeforeFilter || 0} unique → ${f.sent || 0} collected for “${f.keyword || ""}”${f.searchIncomplete ? " · search incomplete" : ""}. Links open the hiring.cafe listings.`;
+  if (f.mode === "keyword") {
+    const coverage = f.searchCoverage || [];
+    const pages = coverage.reduce((sum, q) => sum + (q.pages || 0), 0);
+    const stop = f.searchIncomplete
+      ? `Stopped early: ${coverage.filter(q => !q.complete && !q.targetReached).map(q => q.reason || "search interrupted").join("; ") || "search interrupted"}.`
+      : f.sent >= f.targetJobsPerBatch ? "Requested count reached." : "Reached the end of search results.";
+    return `${f.sent || 0}/${f.targetJobsPerBatch || 0} unique listings collected for “${f.keyword || ""}” across ${pages} result pages. ${stop} Links open the hiring.cafe listings.`;
+  }
   const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
   const checked = f.descriptionEvaluated ?? f.scored ?? 0;
   const aboveFloor = f.qualifyingMatches ?? Math.max(0, checked - (f.droppedBelowFloor || 0));

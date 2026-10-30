@@ -69,7 +69,8 @@ await shot("http://127.0.0.1:8765/#settings", "09a-custom-batch.png", async () =
 // A keyword collection displays listing links without invented match scores.
 await shot("http://127.0.0.1:8765/#jobs", "09b-keyword-jobs.png", async () => {
   await page.evaluate(async () => {
-    await useBatch({ date: '2026-10-30', mode: 'keyword', keyword: 'cloud', funnel: { mode: 'keyword', keyword: 'cloud', raw: 1, uniqueBeforeFilter: 1, sent: 1 }, jobs: [
+    await useBatch({ date: '2026-10-30', mode: 'keyword', keyword: 'cloud', funnel: { mode: 'keyword', keyword: 'cloud', raw: 1, uniqueBeforeFilter: 1, sent: 1, targetJobsPerBatch: 1000,
+      searchIncomplete: true, searchCoverage: [{ pages: 1, complete: false, reason: 'page 2: timeout' }] }, jobs: [
       { idx: 1, title: 'Cloud Engineer', company: 'Example', q: 'cloud', src: 'hcafe', viewjobUrl: 'https://hiring.cafe/job/cloud-1' }
     ] });
   });
@@ -77,6 +78,8 @@ await shot("http://127.0.0.1:8765/#jobs", "09b-keyword-jobs.png", async () => {
   if (!await page.locator('#lb-body').getByText('View listing').count()) throw new Error('keyword listing link missing');
   if (await page.locator('#lb-body button[data-act="why"]').count()) throw new Error('keyword job showed a match explanation');
   if (!await page.locator('#band-seg.hidden').count()) throw new Error('match filters visible for keyword jobs');
+  const details = await page.locator('#st-funnel').textContent();
+  if (!details.includes('1/1000') || !details.includes('Stopped early: page 2: timeout')) throw new Error('partial keyword collection hid its target or stop reason');
 });
 // 10. First-run setup overlay
 await shot("http://127.0.0.1:8766/", "10-setup.png");
