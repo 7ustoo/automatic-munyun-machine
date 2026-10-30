@@ -21,7 +21,7 @@
 ; it pointing at the current release branch so local builds still produce
 ; a sensibly-named .exe.
 #ifndef MyAppVersion
-  #define MyAppVersion "12.1.0"
+  #define MyAppVersion "12.1.1"
 #endif
 #define MyAppPublisher "Justin Williams"
 #define MyAppURL "https://github.com/7ustoo/automatic-munyun-machine"
@@ -91,8 +91,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 ; while settings vanished. The leading backslash pins the pattern to the
 ; payload root so a dependency's own config.json (node_modules) still ships.
 Source: "..\*"; DestDir: "{app}"; \
-  Excludes: "\config.json,data\*,.env,.env.*,*.log,installer\dist\*,.git\*,.github\*,.claude\*,*.zip,*.tmp,node_modules\.cache\*"; \
+  Excludes: "\config.json,data\*,.env,.env.*,*.log,installer\dist\*,.git\*,.github\*,.claude\*,*.zip,*.tmp,node_modules\.cache\*,\wrapper\dist\AMM.exe"; \
   Flags: ignoreversion recursesubdirs createallsubdirs
+; Copy the executable last. A user can reopen AMM while the bulk payload is
+; copying, so stop it again immediately before replacing this locked file.
+Source: "..\wrapper\dist\AMM.exe"; DestDir: "{app}\wrapper\dist"; \
+  BeforeInstall: StopRunningAMM; Flags: ignoreversion
 
 [Icons]
 ; v1.2: Start menu + desktop shortcuts launch AMM.exe (the Go tray wrapper),
@@ -182,7 +186,7 @@ end;
 // the next reboot, which made every "fixed in this release" look broken on
 // upgraded machines. taskkill /T also takes down the supervised node bot
 // child so nothing keeps polling with stale code either.
-function PrepareToInstall(var NeedsRestart: Boolean): String;
+procedure StopRunningAMM;
 var
   ResultCode: Integer;
 begin
@@ -191,6 +195,11 @@ begin
   { taskkill exits non-zero when nothing matched — that's the normal
     fresh-install case, ignore it. Give the OS a beat to release file locks. }
   Sleep(800);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopRunningAMM;
   Result := '';
 end;
 
