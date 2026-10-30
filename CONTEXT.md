@@ -2,10 +2,14 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 12.1.0
-**Active release branch:** `v12.1.0`
+**Version:** 12.1.1
+**Active release branch:** `v12.1.1`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-10-30
+
+### v12.1.1 Windows update repair
+
+- The v12.1.0 installer could fail with exit code 5 if AMM reopened while files were copying, leaving the new `package.json` beside the old `AMM.exe`. The dashboard updater now compares both versions and offers the release again when the executable is older. The Windows installer copies `AMM.exe` last and stops running AMM processes immediately before replacing it.
 
 ### v12.1 custom batch and keyword collection
 

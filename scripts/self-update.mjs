@@ -26,6 +26,7 @@ import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { currentVersion, semverGt } from './update-checker.mjs';
+import { installedVersion } from './installed-version.mjs';
 import { snapshotConfig } from './config-rw.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -54,7 +55,7 @@ async function fetchLatestRelease() {
 }
 
 async function info() {
-  const current = currentVersion();
+  const current = installedVersion({ root: ROOT });
   let rel;
   try { rel = await fetchLatestRelease(); }
   catch (e) { return out({ ok: false, error: String(e.message || e), current }); }
@@ -85,7 +86,7 @@ async function downloadTo(url, destPath) {
 }
 
 async function apply() {
-  const current = currentVersion();
+  const current = installedVersion({ root: ROOT });
   let rel;
   try { rel = await fetchLatestRelease(); }
   catch (e) { return out({ ok: false, error: 'Could not reach GitHub: ' + String(e.message || e) }); }

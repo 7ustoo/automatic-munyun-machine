@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [12.1.1] — 2026-10-30
+
+- Fixed Windows updates that failed if AMM reopened during installation. The installer now stops AMM immediately before replacing its executable, and Check for updates detects a partially installed version so the same release can be retried.
+
 ## [12.1.0] — 2026-10-30
 
 - Settings now offers 50, 100, 150, and 200 strong-match presets with a custom amount box beneath them. Custom ranked targets have no preset ceiling; actual delivery still depends on available qualifying jobs.

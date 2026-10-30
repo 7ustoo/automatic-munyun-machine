@@ -13,6 +13,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { pickLatestSnapshot } from '../config-rw.mjs';
+import { installedVersion } from '../installed-version.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -50,6 +51,30 @@ test('silent Windows updates force-close only applications locking AMM files', (
   assert.match(installer, /^CloseApplications=force$/m, 'new installers must force-close AMM file holders');
   assert.match(installer, /^RestartApplications=no$/m, 'installer must leave relaunch ownership to the updater');
   assert.ok(updater.includes('if not "%AMM_INSTALL_EXIT%"=="0" goto update_failed'), 'failed installs must not use the success relaunch path');
+});
+
+test('Windows update check uses the older executable after a partial install', () => {
+  const root = path.join('test', 'amm');
+  let called = false;
+  const execFile = (exe, args) => {
+    called = true;
+    assert.equal(exe, path.join(root, 'wrapper', 'dist', 'AMM.exe'));
+    assert.deepEqual(args, ['--version']);
+    return 'AMM tray wrapper v12.0.0 (windows/amd64)\n';
+  };
+  assert.equal(installedVersion({ root, platform: 'win32', packageVersion: '12.1.0', execFile }), '12.0.0');
+  assert.ok(called);
+  assert.equal(installedVersion({ root, platform: 'linux', packageVersion: '12.1.0', execFile: () => { throw new Error('must not run'); } }), '12.1.0');
+  assert.equal(installedVersion({ root, platform: 'win32', packageVersion: '12.1.0', execFile: () => { throw new Error('no binary'); } }), '12.1.0');
+});
+
+test('installer stops AMM again just before copying its executable', () => {
+  const iss = fs.readFileSync(path.join(ROOT, 'installer', 'amm.iss'), 'utf8');
+  const bulk = iss.indexOf('Source: "..\\*";');
+  const exe = iss.indexOf('Source: "..\\wrapper\\dist\\AMM.exe";');
+  assert.ok(bulk >= 0 && exe > bulk, 'AMM.exe must be copied after the bulk payload');
+  assert.match(iss, /Excludes:.*\\wrapper\\dist\\AMM\.exe/, 'bulk entry must exclude AMM.exe');
+  assert.match(iss.slice(exe, iss.indexOf('[Icons]', exe)), /BeforeInstall: StopRunningAMM/, 'AMM.exe must stop running immediately before replacement');
 });
 
 test('pickLatestSnapshot picks the newest valid config snapshot', () => {

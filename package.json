@@ -1,6 +1,6 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "12.1.0",
+  "version": "12.1.1",
   "description": "Local-first desktop job search with configurable resume-matched batches and keyword collection.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",
