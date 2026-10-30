@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.join(here, '..', '..');
 const html = path.join(repo, 'wrapper', 'dashboard.html');
-const stub = spawn(process.execPath, [path.join(here, 'stub-server.mjs'), html], { stdio: ['ignore', 'pipe', 'inherit'] });
+const stub = spawn(process.execPath, [path.join(here, 'stub-server.mjs'), html], {
+  stdio: ['ignore', 'pipe', 'inherit'],
+  env: { ...process.env, AMM_STUB_STATIC_BATCH: '1' },
+});
 
 try {
   await new Promise((resolve, reject) => {

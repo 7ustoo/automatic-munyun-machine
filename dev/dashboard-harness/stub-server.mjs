@@ -36,7 +36,7 @@ const jobs = Array.from({ length: 42 }, (_, i) => ({
 // v3.0.1 test: simulate a scrape finishing while the dashboard idles — the
 // batch's generatedAt flips ~15s after server start and 15 jobs appear.
 const bootTime = Date.now();
-const scrapeDone = () => Date.now() - bootTime > 15000;
+const scrapeDone = () => process.env.AMM_STUB_STATIC_BATCH !== '1' && Date.now() - bootTime > 15000;
 const genAt = () => scrapeDone() ? "2026-07-06T22:45:00" : "2026-07-06T07:02:11";
 const liveJobs = () => scrapeDone() ? jobs : jobs.slice(0, 27);
 
