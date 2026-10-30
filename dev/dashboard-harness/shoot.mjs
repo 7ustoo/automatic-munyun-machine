@@ -81,6 +81,11 @@ await shot("http://127.0.0.1:8765/#jobs", "09b-keyword-jobs.png", async () => {
   const details = await page.locator('#st-funnel').textContent();
   if (!details.includes('1/1000') || !details.includes('Stopped early: page 2: timeout')) throw new Error('partial keyword collection hid its target or stop reason');
 });
+const announcement = await page.evaluate(() => {
+  onFreshBatch({ mode: 'keyword', keyword: 'cloud', jobCount: 1, funnel: { searchIncomplete: true } });
+  return document.querySelector('#bb-text').textContent;
+});
+if (!announcement.includes('Collection stopped early')) throw new Error('partial collection announced success');
 // 10. First-run setup overlay
 await shot("http://127.0.0.1:8766/", "10-setup.png");
 // 11. Export menu open
