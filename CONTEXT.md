@@ -2,10 +2,16 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 12.1.1
-**Active release branch:** `v12.1.1`
+**Version:** 12.1.2
+**Active release branch:** `v12.1.2`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-10-30
+
+### v12.1.2 continuous keyword collection
+
+- Search traversal follows the actual Next page URL or numbered result-page links, excluding company carousel arrows. A missing pager cannot verify exhaustion when the displayed count indicates more jobs. Retries retain already collected rows. Keyword runs stop on the requested count of valid distinct listing paths, distinguish `targetReached` from exhaustive `complete` coverage, and preserve separate postings with matching company/title. The dashboard shows the target, pages visited, and any early stop reason.
+- `node dev/live-hcafe-search.mjs "cloud engineer" 1000` validates the production crawler and keyword builder in an isolated browser, writing only `data/live-keyword-collection.json` and `data/live-keyword-links.txt`; it does not publish a batch or mark jobs seen.
+- Live validation on 2026-10-30 traversed 13 result pages for Remote “cloud engineer” and saved exactly 1,000 distinct listing URLs, stopping with `targetReached: true`.
 
 ### v12.1.1 Windows update repair
 

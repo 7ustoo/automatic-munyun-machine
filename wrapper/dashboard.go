@@ -656,6 +656,7 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 		Mode        string            `json:"mode"`
 		Keyword     string            `json:"keyword"`
 		Jobs        []json.RawMessage `json:"jobs"`
+		Funnel      json.RawMessage   `json:"funnel"`
 	}
 	if err := json.Unmarshal(data, &lb); err != nil {
 		return
@@ -667,6 +668,7 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 	out.LastBatch.Mode = lb.Mode
 	out.LastBatch.Keyword = lb.Keyword
 	out.LastBatch.JobCount = len(lb.Jobs)
+	out.LastBatch.Funnel = lb.Funnel
 
 	out.LastBatch.Jobs = parseBatchJobs(lb.Jobs, dashboardJobLimit)
 }

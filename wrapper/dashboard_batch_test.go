@@ -60,7 +60,7 @@ func TestKeywordBatch_ExposesModeAndAllListings(t *testing.T) {
 	for i := range jobs {
 		jobs[i] = fmt.Sprintf(`{"idx":%d,"title":"Cloud job","viewjobUrl":"https://hiring.cafe/job/%d"}`, i+1, i+1)
 	}
-	body := `{"date":"2026-10-30","mode":"keyword","keyword":"cloud","jobs":[` + strings.Join(jobs, ",") + `]}`
+	body := `{"date":"2026-10-30","mode":"keyword","keyword":"cloud","funnel":{"targetJobsPerBatch":1000,"searchIncomplete":false},"jobs":[` + strings.Join(jobs, ",") + `]}`
 	p := filepath.Join(dir, "data", "profiles", "default", "last-batch.json")
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -73,6 +73,9 @@ func TestKeywordBatch_ExposesModeAndAllListings(t *testing.T) {
 	readLastBatchInto(dir, "default", &out)
 	if out.LastBatch.Mode != "keyword" || out.LastBatch.JobCount != 1000 {
 		t.Fatalf("status missing keyword batch: %+v", out.LastBatch)
+	}
+	if !strings.Contains(string(out.LastBatch.Funnel), `"targetJobsPerBatch":1000`) {
+		t.Fatalf("status must include collection outcome for completion notifications: %s", out.LastBatch.Funnel)
 	}
 }
 
