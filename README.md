@@ -2,7 +2,7 @@
 
 > Your resume in. Your best job matches out.
 
-**Automatic Munyun Machine (AMM)** is a local-first desktop app that finds jobs, checks their requirements against your resume, and gives you up to **200 strong matches**. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
+**Automatic Munyun Machine (AMM)** is a local-first desktop app that finds jobs, checks their requirements against your resume, and gives you a configurable batch of strong matches. Review everything from one dashboard, apply through direct links, and optionally send the batch to Telegram or email.
 
 **Free · Private · Windows, macOS, and Linux · Built for any profession**
 
@@ -19,7 +19,7 @@
 3. It follows available pages and opens the extra jobs inside grouped company cards. Each failed page gets three attempts. An interrupted search or safety cap is shown as **incomplete**, not “you ran out of jobs.” Retrying starts a fresh search against the current listings.
 4. It removes duplicates, previously delivered/applied jobs, and jobs blocked by your settings. When signed in, hiring.cafe also excludes Saved and Applied jobs. **Viewed stays off** so merely inspecting a description does not discard a job.
 5. It reads actual job descriptions, compares requirements to your resume, and optionally sends resume evidence and job text to your chosen AI provider. Smart Match understands standard equivalent names such as SSO/single sign-on. Every returned score must validate. The dashboard distinguishes AI success, partial results, failure, missing key, and disabled scoring.
-6. It keeps evaluating until it finds your target of strong matches (70% or your higher minimum), reaches the available candidate limit, or hits the description safety ceiling. A 0% minimum allows weaker fallback jobs; it no longer makes AMM stop looking early. No tool can guarantee 200 strong, fresh jobs every day.
+6. It keeps evaluating until it finds your target of strong matches (70% or your higher minimum), reaches the available candidate supply, or hits the description safety ceiling. A 0% minimum allows weaker fallback jobs; it no longer makes AMM stop looking early. The actual batch may be smaller than your target when too few qualifying jobs are available.
 7. It publishes the highest-ranked selection locally and remembers only those delivered jobs. Selected hiring.cafe jobs are queued for **Saved**, verified after reload, and retried on later scrapes if needed. **Saved is not Applied**: applications remain your explicit action. Sign in through AMM for account synchronization; the Codex browser is a separate session.
 8. Optional Telegram/email delivery follows. Failures are shown without losing the local batch. If Gmail says `reconnect-required`, reconnect Gmail in System and use the existing email/export controls to resend the batch—no new scrape needed.
 
@@ -42,7 +42,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 - **Stop repeating the same searches.** AMM runs them on your schedule.
 - **See the strongest matches first.** Every job includes a match score and explanation.
 - **Apply faster.** AMM resolves direct employer application links.
-- **Keep control.** Choose a 50, 100, 150, or 200 strong-match target and tune every search or filter.
+- **Keep control.** Choose a 50, 100, 150, or 200-job preset, or enter any positive whole number as a custom strong-match target. Tune every search or filter.
 - **Keep your data local.** Your resume, history, settings, and browser session stay on your computer.
 
 ## Features
@@ -51,6 +51,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 
 - Native Windows app window with AMM's own taskbar icon and pinning identity
 - Ranked jobs with search, sorting, match filters, salary, and source details
+- In Settings, below **Strong matches per batch**, enter a term such as `cloud` and collect up to 1,000 unique hiring.cafe listings without a resume or match scoring. Results replace the current dashboard batch and remain in Previous scrapes; the available supply may be smaller than the requested amount. Exports contain hiring.cafe listing links rather than resolved employer application links.
 - **Apply**, **Save**, **Applied**, and **Why this matched** actions, plus an **Open jobs** menu with 50/100/150/200 presets and a custom amount
 - Resume rescan, one-click AI analysis, and profile-saved search-term suggestions
 - Remote, hybrid, and on-site searches with optional location

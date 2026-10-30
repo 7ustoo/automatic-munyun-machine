@@ -46,7 +46,7 @@ import { normalizeEngines, normalizeScrapeSources } from './query-engines.mjs';
 import { loadExport } from './export-batch.mjs';
 import { listArchives, readArchive } from './batch-archive.mjs';
 import { readExclusions, writeExclusion } from './batch-exclusions.mjs';
-import { clampBatchSize } from './batch-size.mjs';
+import { clampBatchSize, parseRankedBatchSize } from './batch-size.mjs';
 import { normalizeConsultantSlopMode } from './consultant-slop-filter.mjs';
 import { detectAiProvider } from './ai-rerank.mjs';
 import { analyzeResumeWithAI, currentAiAnalysis } from './ai-resume-analysis.mjs';
@@ -164,7 +164,10 @@ async function settingsSet(dotPath, jsonValue) {
     'email.format' // v7.0: attachment format for the batch email (txt | csv | xlsx)
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
-  if (dotPath === 'scoring.targetJobsPerBatch') value = clampBatchSize(value);
+  if (dotPath === 'scoring.targetJobsPerBatch') {
+    value = parseRankedBatchSize(value);
+    if (value === null) return out({ ok: false, error: 'batch size must be a positive whole number' });
+  }
   if (dotPath === 'display.showSalary') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'scoring.ai.enabled' || dotPath === 'scoring.ai.requireForDelivery' || dotPath === 'scoring.jdRescore') value = (value === true || value === 'true' || value === 'on');
   if (dotPath === 'search.scrapeSources') value = normalizeScrapeSources(value); // v7.3

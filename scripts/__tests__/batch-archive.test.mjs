@@ -40,6 +40,14 @@ test('entryFromBatch: empty/missing jobs are safe', () => {
   assert.equal(e.strongCount, 0);
 });
 
+test('keyword archive entry does not invent match scores', () => {
+  const e = entryFromBatch({ ...BATCH, mode: 'keyword', keyword: 'cloud' });
+  assert.equal(e.mode, 'keyword');
+  assert.equal(e.keyword, 'cloud');
+  assert.equal(e.avgPct, null);
+  assert.equal(e.strongCount, null);
+});
+
 test('mergeIndex: same id replaces, newest first, old entries pruned', () => {
   const now = Date.parse('2026-07-20T12:00:00Z');
   const fresh = { id: 'batch-2026-07-20T10-00-00', generatedAt: '2026-07-20T10:00:00Z' };

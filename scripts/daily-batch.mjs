@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Daily ranked job batch (50–200 jobs, user-configurable).
+ * Daily ranked job batch (user-configurable target).
  *   1. Launches a headless Chromium with the persistent profile (Cloudflare
  *      cookies live there); warmup probe verifies hiring.cafe is browsable.
  *   2. Runs EVERY configured hiring.cafe search, paginating
@@ -12,7 +12,7 @@
  *      targetJobsPerBatch) only applies with scoring.searchAllQueries:false.
  *   3. Filters (clearance, skip-companies, drop-titles, max YOE), dedups,
  *      subtracts applied + previously-seen, scores against the parsed CV.
- *   4. Evaluates full descriptions in chunks until up to 200 jobs clear the
+ *   4. Evaluates full descriptions in chunks until the requested jobs clear the
  *      user's final match floor or the candidate supply is exhausted.
  *   5. Resolves viewjob URLs to direct ATS URLs via a 5-page browser
  *      pool (Cloudflare blocks plain Node fetch; browser nav works).
@@ -41,7 +41,8 @@ import { isSignedIn, writeHcafeAuthCache, readHcafeAuthCache, dedupMode } from '
 import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './email.mjs';
 import { exportRows, buildExportCsv, buildExportXlsx } from './export-batch.mjs';
 import { loadExport } from './export-batch.mjs';
-import { clampBatchSize } from './batch-size.mjs';
+import { clampBatchSize, parseKeywordBatchSize } from './batch-size.mjs';
+import { buildKeywordCollection } from './keyword-collection.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
@@ -85,6 +86,12 @@ const DATE = new Date().toISOString().slice(0, 10);
 const _thisFile = fileURLToPath(import.meta.url);
 const _invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
 const IS_CLI = path.resolve(_thisFile) === _invokedFile;
+const KEYWORD_TERM = IS_CLI ? String(process.env.AMM_KEYWORD_SCRAPE_TERM || '').trim() : '';
+const KEYWORD_LIMIT = parseKeywordBatchSize(process.env.AMM_KEYWORD_SCRAPE_LIMIT);
+const KEYWORD_MODE = !!KEYWORD_TERM;
+if (KEYWORD_MODE && (KEYWORD_TERM.length > 120 || /[\r\n\0]/.test(KEYWORD_TERM) || !KEYWORD_LIMIT)) {
+  throw new Error('Keyword collection requires a term and a limit from 1 to 1000.');
+}
 
 // ---------- env ----------
 // v2.1: Telegram is OPTIONAL. A missing .env (or one with no token) is no
@@ -260,7 +267,9 @@ const QUERIES = (CFG.queries && CFG.queries.length)
 // v7.3: per-term engine routing (both/hcafe/dice) + the global scrape-source
 // switch. HCAFE_QUERIES drives the hiring.cafe loop; DICE_QUERY_TERMS drives
 // the Dice per-query fetch. QUERIES stays the full list for key→term lookups.
-const { hcafe: HCAFE_QUERIES, dice: DICE_QUERY_TERMS } = splitQueriesByEngine(CFG.queries || [], CFG.search?.scrapeSources);
+const routedQueries = splitQueriesByEngine(CFG.queries || [], CFG.search?.scrapeSources);
+const HCAFE_QUERIES = KEYWORD_MODE ? [['manual-keyword', KEYWORD_TERM]] : routedQueries.hcafe;
+const DICE_QUERY_TERMS = KEYWORD_MODE ? [] : routedQueries.dice;
 // v5.0: key→term lookup so a job's `q` (and the dashboard source pill /
 // leaderboard) shows the human search TERM, not the mashed internal key
 // (e.g. 'SeniorSecurityEngine').
@@ -446,7 +455,7 @@ async function _scrapeWith(ctx) {
   // hidden because the ranker may inspect more descriptions than it delivers.
   // probe (~5s, one /saved navigation on the already-open page) also
   // refreshes the dashboard's data/hcafe-auth.json pill on every run.
-  const ACCOUNT_DEDUP = SCORING.accountDedup !== false; // default on
+  const ACCOUNT_DEDUP = !KEYWORD_MODE && SCORING.accountDedup !== false; // default on
   let hcafeAuthed = false;
   if (ACCOUNT_DEDUP) {
     // Tri-state on purpose: a probe ERROR (flaky /saved navigation) is not a
@@ -478,7 +487,7 @@ async function _scrapeWith(ctx) {
   // stops offering a Next link long before it (observed 15–25 pages), so the
   // real end of the result set is what ends the loop. The old 50 was close
   // enough to real page counts to look like a legitimate stopping point.
-  const MAX_PAGES_PER_QUERY = SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
+  const MAX_PAGES_PER_QUERY = KEYWORD_MODE || SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
 
   // v1.0.x: target-driven cross-query early stop. After each query's
   // pagination, we compute the running fresh-after-dedup count. If it
@@ -489,21 +498,21 @@ async function _scrapeWith(ctx) {
   // skip later keywords just because the early ones filled the target. Set
   // scoring.searchAllQueries:false to restore the old "stop once we have
   // ~1.5x target candidates" speed optimization.
-  const SEARCH_ALL_QUERIES = SCORING.searchAllQueries !== false;
+  const SEARCH_ALL_QUERIES = KEYWORD_MODE || SCORING.searchAllQueries !== false;
   const _appliedSet  = loadAppliedState();
   const _blockedSet  = loadBlockedSeen();
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
   let runningFreshEstimate = 0;
 
   for (const [key, query] of HCAFE_QUERIES) {
-    const searchState = buildSearchState(query, { formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
+    const searchState = buildSearchState(query, { formEaseFilter: KEYWORD_MODE ? null : formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
     const url = 'https://hiringcafe.com/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}" — All time…`);
     const { rows: allRows, coverage } = await crawlSearch({
       page, url, extract: EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
       checkpoint: state => {
         searchCoverage[key] = { query, ...state };
-        atomicWriteJson(path.join(PP.dir, 'search-coverage.json'), { at: new Date().toISOString(), queries: searchCoverage });
+        if (!KEYWORD_MODE) atomicWriteJson(path.join(PP.dir, 'search-coverage.json'), { at: new Date().toISOString(), queries: searchCoverage });
       },
     });
     searchCoverage[key] = { query, ...coverage, jobs: allRows.length };
@@ -533,7 +542,7 @@ async function _scrapeWith(ctx) {
   // so a user can see "Detection Engineer has averaged 0 cards/day for a
   // week" and act on it — typo, niche term, or hiring.cafe simply doesn't
   // have that kind of role indexed.
-  recordQueryStats(results);
+  if (!KEYWORD_MODE) recordQueryStats(results);
 
   // Auth state is "OK" only if we both passed /saved AND extracted at least
   // one card across all queries. If every query returned zero, something
@@ -626,8 +635,7 @@ const SCORING = CFG.scoring || {};
 // companies (or a remote config URL) — so existing installs are unaffected.
 const SOURCES = CFG.sources || {};
 const SOURCES_CONFIGURED = ['greenhouse', 'lever', 'ashby'].some(k => Array.isArray(SOURCES[k]) && SOURCES[k].length) || !!(SOURCES.remoteConfigUrl && String(SOURCES.remoteConfigUrl).trim()); // ATS boards only — Dice is always-on (v7.4), gated purely by term routing
-// v4.5: user-selectable batch size (50/100/150/200). Clamped so a hand-edited
-// config can't make the resolve pass visit an unbounded number of job pages.
+// User-selectable target: presets or any custom positive whole number.
 const DELIVER_COUNT = clampBatchSize(SCORING.targetJobsPerBatch);
 const W_TITLE       = SCORING.titleWeight       ?? 10;
 const W_CERT        = SCORING.certWeight        ?? 5;
@@ -1464,6 +1472,8 @@ function writeBatchTsv(top, directUrls, funnel) {
     date: DATE,
     profile: PP.dir.split(/[/\\]/).pop(),
     generatedAt: new Date().toISOString(),
+    mode: funnel?.mode || 'ranked',
+    keyword: funnel?.keyword || '',
     funnel: funnel || null,
     jobs: top.map((r, i) => ({
       idx: i + 1,
@@ -1501,7 +1511,7 @@ function writeBatchTsv(top, directUrls, funnel) {
 
   // v4.6: append today's snapshot to batch-history.json (Trends view + search
   // leaderboard). Re-runs on the same date replace that day's entry. Non-fatal.
-  try {
+  if (funnel?.mode !== 'keyword') try {
     appendHistory(PP.batchHistory, summarizeBatch({
       date: DATE,
       generatedAt: lastBatch.generatedAt,
@@ -1551,7 +1561,7 @@ if (IS_CLI) (async () => {
     // F-H9: a freshly-added profile starts with an empty CV (no /resume
     // upload yet). Every job scores 0 → all dropped by match floor → user
     // gets a confusing empty batch. Fail loud with a Telegram nudge instead.
-    if (!CV.titles?.length && !CV.skills?.length && !CV.certs?.length && !CV.compliance?.length) {
+    if (!KEYWORD_MODE && !CV.titles?.length && !CV.skills?.length && !CV.certs?.length && !CV.compliance?.length) {
       const msg = '⚠️ <b>This profile has no parsed CV.</b>\n\nEvery job will score 0% until you upload one. Run <code>/resume</code> in the bot, then <code>/scrape</code>.';
       log('Empty CV detected — aborting batch with user nudge.');
       writeScrapeStatus(false, { error: 'This profile has no parsed resume — upload one on the Resume page, then scrape again.', kind: 'no-cv' });
@@ -1584,6 +1594,17 @@ if (IS_CLI) (async () => {
         return; // exit clean, don't propagate as crash
       }
       throw e;
+    }
+    if (KEYWORD_MODE) {
+      // A manual collection is a plain search result set. It intentionally
+      // ignores CV scores, match filters, local seen history, and AI services.
+      const { top, funnel } = buildKeywordCollection(byQuery['manual-keyword'], KEYWORD_TERM, KEYWORD_LIMIT, Object.values(searchCoverage));
+      const directUrls = top.map(() => '');
+      writeBatchTsv(top, directUrls, funnel);
+      try { writeApplyLinksTxt(); } catch (e) { log(`Keyword links text export skipped: ${SCRUB(e.message || e)}`); }
+      writeScrapeStatus(true, { jobCount: top.length, mode: 'keyword' });
+      log(`Keyword collection complete: ${top.length}/${KEYWORD_LIMIT} unique hiring.cafe listings for "${KEYWORD_TERM}".`);
+      return;
     }
     // v5.0: pull configured ATS boards (best-effort, never throws) and merge
     // them into the same filter+score pipeline as the hiring.cafe cards.
@@ -1679,7 +1700,7 @@ if (IS_CLI) (async () => {
     let consultantConsulting = 0;
     while (cursor < candidatePool.length && cursor < MAX_DESCRIPTION_EVALUATIONS) {
       const remainingBudget = MAX_DESCRIPTION_EVALUATIONS - cursor;
-      const firstSize = Math.min(DELIVER_COUNT + 50, MAX_DESCRIPTION_EVALUATIONS);
+      const firstSize = Math.min(250, DELIVER_COUNT + 50, MAX_DESCRIPTION_EVALUATIONS);
       const take = Math.min(cursor === 0 ? firstSize : DESCRIPTION_CHUNK, remainingBudget);
       const chunk = candidatePool.slice(cursor, cursor + take);
       if (!chunk.length) break;

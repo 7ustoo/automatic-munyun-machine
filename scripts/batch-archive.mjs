@@ -45,9 +45,11 @@ export function entryFromBatch(lastBatch) {
     id: archiveId(lastBatch?.generatedAt),
     date: lastBatch?.date || String(lastBatch?.generatedAt || '').slice(0, 10),
     generatedAt: lastBatch?.generatedAt || null,
+    mode: lastBatch?.mode || 'ranked',
+    keyword: lastBatch?.keyword || '',
     sent: jobs.length,
-    avgPct: pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : 0,
-    strongCount: pcts.filter(p => p >= 70).length
+    avgPct: lastBatch?.mode === 'keyword' ? null : pcts.length ? Math.round(pcts.reduce((a, b) => a + b, 0) / pcts.length) : 0,
+    strongCount: lastBatch?.mode === 'keyword' ? null : pcts.filter(p => p >= 70).length
   };
 }
 

@@ -2,10 +2,14 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 12.0.0
-**Active release branch:** `v12.0.0`
+**Version:** 12.1.0
+**Active release branch:** `v12.1.0`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-10-16
+**Last refreshed:** 2026-10-30
+
+### v12.1 custom batch and keyword collection
+
+- Settings offers 50/100/150/200 ranked-batch presets plus an uncapped custom positive whole number beneath them. A separate one-off keyword collection searches hiring.cafe for one typed term and publishes up to 1,000 unique listing links without resume scoring, AI, or seen-job filtering. `scripts/keyword-collection.mjs` validates and deduplicates those results. The guarded `/api/scrape` route accepts `mode: keyword`, `term`, and `limit` for this manual run. It is archived and exportable; scheduled batches retain the ranked path.
 
 ### v12 simplified first run and dashboard
 
@@ -50,7 +54,7 @@
 
 ## Product
 
-Automatic Munyun Machine (AMM) is a local-first desktop job-search assistant. It collects jobs from hiring.cafe and optional public Greenhouse, Lever, and Ashby feeds, ranks them against a user's resume, and delivers a configurable batch of 50, 100, 150, or 200 jobs.
+Automatic Munyun Machine (AMM) is a local-first desktop job-search assistant. It collects jobs from hiring.cafe and optional public Greenhouse, Lever, and Ashby feeds, ranks them against a user's resume, and delivers a configurable number of jobs. A separate manual hiring.cafe keyword collection can gather up to 1,000 unranked listings with links.
 
 The local desktop dashboard is the primary interface. Telegram and Gmail delivery are optional. AMM is profession-agnostic: resume parsing and search suggestions cover technology, healthcare, sales, finance, marketing, education, HR, administration, and skilled trades.
 

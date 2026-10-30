@@ -47,10 +47,10 @@ export function exportRows(lastBatch) {
   }));
 }
 
-export function buildExportTxt(rows, date = '') {
+export function buildExportTxt(rows, date = '', linkLabel = 'apply link') {
   const lines = [];
-  lines.push('Automatic Munyun Machine — apply links' + (date ? ` (${date})` : ''));
-  lines.push(`${rows.length} jobs · number · title · apply link`);
+  lines.push('Automatic Munyun Machine — ' + (linkLabel === 'listing link' ? 'listing links' : 'apply links') + (date ? ` (${date})` : ''));
+  lines.push(`${rows.length} jobs · number · title · ${linkLabel}`);
   lines.push('');
   for (const r of rows) {
     lines.push(`${r.n}. ${r.title}`);
@@ -68,23 +68,23 @@ export function csvCell(v) {
   return s;
 }
 
-export function buildExportCsv(rows) {
+export function buildExportCsv(rows, linkLabel = 'Apply Link') {
   // \uFEFF: UTF-8 BOM — without it Excel guesses ANSI and mangles any
   // non-ASCII characters in job titles. CRLF rows per RFC 4180.
-  const head = ['#', 'Job Title', 'Apply Link'].map(csvCell).join(',');
+  const head = ['#', 'Job Title', linkLabel].map(csvCell).join(',');
   const body = rows.map(r => [r.n, r.title, r.applyUrl].map(csvCell).join(','));
   return '\uFEFF' + [head, ...body].join('\r\n') + '\r\n';
 }
 
 // Excel workbook with the Apply Link column as native clickable hyperlinks —
 // the thing CSV structurally can't do. Returns a Buffer.
-export function buildExportXlsx(rows, date = '') {
+export function buildExportXlsx(rows, date = '', linkLabel = 'Apply Link') {
   return buildXlsx({
-    sheetName: ('Apply links ' + date).trim().slice(0, 31), // Excel caps tab names at 31 chars
+    sheetName: ((linkLabel === 'Listing Link' ? 'Listing links ' : 'Apply links ') + date).trim().slice(0, 31), // Excel caps tab names at 31 chars
     columns: [
       { header: '#', width: 6 },
       { header: 'Job Title', width: 60 },
-      { header: 'Apply Link', width: 80, hyperlink: true }
+      { header: linkLabel, width: 80, hyperlink: true }
     ],
     rows: rows.map(r => [r.n, r.title, r.applyUrl])
   });
@@ -117,13 +117,13 @@ export function loadExport(format, archiveId) {
   // Archived exports carry the full scrape timestamp so two same-day
   // downloads don't overwrite each other in the user's Downloads folder.
   const stamp = archiveId ? archiveId.replace(/^batch-/, '') : date;
-  const filename = `apply-links(${stamp}).${fmt}`;
+  const filename = `${lb.mode === 'keyword' ? 'listing-links' : 'apply-links'}(${stamp}).${fmt}`;
   if (fmt === 'xlsx') {
     // Binary format — base64 so it survives the one-line-JSON stdout contract.
-    const contentBase64 = buildExportXlsx(rows, date).toString('base64');
+    const contentBase64 = buildExportXlsx(rows, date, lb.mode === 'keyword' ? 'Listing Link' : 'Apply Link').toString('base64');
     return { ok: true, format: fmt, filename, contentBase64, count: rows.length, date };
   }
-  const content = fmt === 'csv' ? buildExportCsv(rows) : buildExportTxt(rows, date);
+  const content = fmt === 'csv' ? buildExportCsv(rows, lb.mode === 'keyword' ? 'Listing Link' : 'Apply Link') : buildExportTxt(rows, date, lb.mode === 'keyword' ? 'listing link' : 'apply link');
   return { ok: true, format: fmt, filename, content, count: rows.length, date };
 }
 

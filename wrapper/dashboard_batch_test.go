@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +50,29 @@ func TestReadFullBatch_AllJobsAndMatched(t *testing.T) {
 	}
 	if len(b.Jobs[0].Missing) != 1 || b.Jobs[0].Missing[0] != "CISSP" {
 		t.Errorf("missing requirements not parsed: %+v", b.Jobs[0].Missing)
+	}
+}
+
+func TestKeywordBatch_ExposesModeAndAllListings(t *testing.T) {
+	dir := t.TempDir()
+	writeBatch(t, dir, `[]`)
+	jobs := make([]string, 1000)
+	for i := range jobs {
+		jobs[i] = fmt.Sprintf(`{"idx":%d,"title":"Cloud job","viewjobUrl":"https://hiring.cafe/job/%d"}`, i+1, i+1)
+	}
+	body := `{"date":"2026-10-30","mode":"keyword","keyword":"cloud","jobs":[` + strings.Join(jobs, ",") + `]}`
+	p := filepath.Join(dir, "data", "profiles", "default", "last-batch.json")
+	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	full := readFullBatch(dir)
+	if full.Mode != "keyword" || full.Keyword != "cloud" || len(full.Jobs) != 1000 {
+		t.Fatalf("keyword batch missing data: mode=%q keyword=%q jobs=%d", full.Mode, full.Keyword, len(full.Jobs))
+	}
+	out := statusResponse{}
+	readLastBatchInto(dir, "default", &out)
+	if out.LastBatch.Mode != "keyword" || out.LastBatch.JobCount != 1000 {
+		t.Fatalf("status missing keyword batch: %+v", out.LastBatch)
 	}
 }
 

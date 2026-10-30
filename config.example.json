@@ -59,7 +59,7 @@
     "maxPagesPerQuery": 300,
     "_maxPagesPerQueryComment": "v7.9: a runaway guard, NOT a target. Hiring.cafe shows ~40 cards per page and stops offering a Next link well before this (observed 15-25 pages), so the real end of the result set is what ends the loop. Every stop condition is retried before it is believed, so a slow render can no longer be mistaken for the last page.",
     "targetJobsPerBatch": 200,
-    "_targetJobsPerBatchComment": "How many strong matches AMM tries to deliver. It may return fewer when the fully evaluated supply above matchFloorPercent runs out.",
+    "_targetJobsPerBatchComment": "How many strong matches AMM tries to deliver. Settings offers 50/100/150/200 presets and any positive whole number as a custom target. It may return fewer when qualifying jobs run out. One-off keyword collection has its own 1–1000 limit in dashboard Settings and does not change this field.",
     "maxDescriptionEvaluations": 3000,
     "_maxDescriptionEvaluationsComment": "Safety ceiling for full job-description evaluations in one run. AMM stops earlier as soon as it has enough qualifying matches.",
     "searchAllQueries": true,
