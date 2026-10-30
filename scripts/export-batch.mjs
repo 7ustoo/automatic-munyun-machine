@@ -43,7 +43,7 @@ export function exportRows(lastBatch) {
   return (lastBatch?.jobs || []).map(j => ({
     n: j.idx,
     title: (j.title || '(untitled)').trim(),
-    applyUrl: j.directUrl || j.viewjobUrl || ''
+    applyUrl: lastBatch?.funnel?.directApplyLinks ? (j.directUrl || '') : (j.directUrl || j.viewjobUrl || '')
   }));
 }
 
@@ -117,13 +117,14 @@ export function loadExport(format, archiveId) {
   // Archived exports carry the full scrape timestamp so two same-day
   // downloads don't overwrite each other in the user's Downloads folder.
   const stamp = archiveId ? archiveId.replace(/^batch-/, '') : date;
-  const filename = `${lb.mode === 'keyword' ? 'listing-links' : 'apply-links'}(${stamp}).${fmt}`;
+  const listingOnly = lb.mode === 'keyword' && !lb.funnel?.directApplyLinks;
+  const filename = `${listingOnly ? 'listing-links' : 'apply-links'}(${stamp}).${fmt}`;
   if (fmt === 'xlsx') {
     // Binary format — base64 so it survives the one-line-JSON stdout contract.
-    const contentBase64 = buildExportXlsx(rows, date, lb.mode === 'keyword' ? 'Listing Link' : 'Apply Link').toString('base64');
+    const contentBase64 = buildExportXlsx(rows, date, listingOnly ? 'Listing Link' : 'Apply Link').toString('base64');
     return { ok: true, format: fmt, filename, contentBase64, count: rows.length, date };
   }
-  const content = fmt === 'csv' ? buildExportCsv(rows, lb.mode === 'keyword' ? 'Listing Link' : 'Apply Link') : buildExportTxt(rows, date, lb.mode === 'keyword' ? 'listing link' : 'apply link');
+  const content = fmt === 'csv' ? buildExportCsv(rows, listingOnly ? 'Listing Link' : 'Apply Link') : buildExportTxt(rows, date, listingOnly ? 'listing link' : 'apply link');
   return { ok: true, format: fmt, filename, content, count: rows.length, date };
 }
 

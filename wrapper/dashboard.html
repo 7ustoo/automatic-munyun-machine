@@ -1692,7 +1692,7 @@
               <input type="number" id="keyword-limit" class="num" min="1" max="1000" step="1" value="1000" aria-label="Maximum jobs to collect, 1 to 1000" required />
               <button type="submit" class="sm">Collect jobs</button>
             </form></div>
-          <div class="hint">One-off collection uses the keyword and your workplace settings. It shows unique hiring.cafe listing links without resume matching; the site may have fewer jobs than requested.</div>
+          <div class="hint">Collect direct employer application links using the keyword and your workplace settings, without resume matching. Listings with missing apply links are replaced from later pages.</div>
           <div class="set-row"><label>Show salary on jobs</label>
             <select id="set-show-salary"><option value="true">Yes</option><option value="false">No</option></select></div>
           <div class="set-row"><label>Weekday morning scrape</label>
@@ -2190,7 +2190,7 @@ function onFreshBatch(lb) {
   // remote scrape finishes. The completion banner offers an explicit jump.
   if (!state.archiveId) loadBatch();
   const what = lb?.mode === "keyword"
-    ? `${lb.jobCount || 0} hiring.cafe listings collected for “${lb.keyword || "keyword"}”`
+    ? `${lb.jobCount || 0} ${lb?.funnel?.directApplyLinks ? "direct apply links" : "hiring.cafe listings"} collected for “${lb.keyword || "keyword"}”`
     : lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
   const partial = lb?.mode === "keyword" && lb?.funnel?.searchIncomplete;
   const outcome = partial ? "Collection stopped early" : "Scrape complete";
@@ -2214,7 +2214,9 @@ function renderBatchMode() {
   const keywordMode = state.batchMeta.mode === "keyword";
   $("jobs-eyebrow").textContent = keywordMode ? "KEYWORD COLLECTION" : "YOUR DAILY SHORTLIST";
   $("jobs-intro").textContent = keywordMode
-    ? `Hiring.cafe listings for “${state.batchMeta.keyword}”. These jobs have no resume match scores; open each listing to find its application link.`
+    ? state.batchMeta.funnel?.directApplyLinks
+      ? `Direct employer application links for “${state.batchMeta.keyword}”, collected without resume matching.`
+      : `Hiring.cafe listings for “${state.batchMeta.keyword}”. These jobs have no resume match scores; open each listing to find its application link.`
     : "Fresh opportunities ranked against your experience. Start a search any time.";
   $("job-sort").querySelector('option[value="rank"]').textContent = keywordMode ? "Sort: Listing order" : "Sort: Rank";
   $("job-sort").querySelector('option[value="match"]').disabled = keywordMode;
@@ -2239,7 +2241,7 @@ function renderBatchMode() {
     : "Choose how many jobs to open from this batch";
   const available = state.jobs.length;
   $("open-jobs-note").textContent = `${available} job${available === 1 ? "" : "s"} available. Larger choices open all ${available}.`;
-  $("open-jobs-note").textContent += state.batchMeta.mode === "keyword" ? " Opens hiring.cafe listings, up to 200 at a time." : "";
+  $("open-jobs-note").textContent += state.batchMeta.mode === "keyword" ? ` Opens ${state.batchMeta.funnel?.directApplyLinks ? "employer application pages" : "hiring.cafe listings"}, up to 200 at a time.` : "";
   $("email-menu").classList.remove("disabled");
   $("email-menu").setAttribute("aria-disabled", "false");
   $("email-btn").title = historical
@@ -2390,7 +2392,7 @@ function funnelLineJS(f) {
     const stop = f.searchIncomplete
       ? `Stopped early: ${coverage.filter(q => !q.complete && !q.targetReached).map(q => q.reason || "search interrupted").join("; ") || "search interrupted"}.`
       : f.sent >= f.targetJobsPerBatch ? "Requested count reached." : "Reached the end of search results.";
-    return `${f.sent || 0}/${f.targetJobsPerBatch || 0} unique listings collected for “${f.keyword || ""}” across ${pages} result pages. ${stop} Links open the hiring.cafe listings.`;
+    return `${f.sent || 0}/${f.targetJobsPerBatch || 0} unique ${f.directApplyLinks ? "direct apply links" : "listings"} collected for “${f.keyword || ""}” across ${pages} result pages. ${stop} ${f.directApplyLinks ? "Links open the employer or ATS application page." : "Links open the hiring.cafe listings."}`;
   }
   const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
   const checked = f.descriptionEvaluated ?? f.scored ?? 0;
@@ -2471,12 +2473,13 @@ function whyRowHTML(idx) {
 function renderJobs() {
   const all = state.jobs;
   const keywordMode = state.batchMeta.mode === "keyword";
+  const directKeyword = keywordMode && state.batchMeta.funnel?.directApplyLinks;
   $("band-seg").classList.toggle("hidden", keywordMode);
   if (!all.length) {
     $("lb-body").innerHTML = `<div class="empty">
       <div class="e-icon">💼</div>
-      <div class="e-title">${keywordMode ? "No listings found" : "No batch yet"}</div>
-      <div class="e-sub">${keywordMode ? `Hiring.cafe returned no listings for “${escapeHTML(state.batchMeta.keyword)}”. Try a broader term in Settings.` : "Pull strong matches — checked against your resume and the full job requirements. New here? Walk through setup or take a quick tour first."}</div>
+      <div class="e-title">${keywordMode ? directKeyword ? "No direct apply links collected" : "No listings found" : "No batch yet"}</div>
+      <div class="e-sub">${keywordMode ? `See the collection details for “${escapeHTML(state.batchMeta.keyword)}”, or try another search in Settings.` : "Pull strong matches — checked against your resume and the full job requirements. New here? Walk through setup or take a quick tour first."}</div>
       <div class="row" style="justify-content:center; margin-top:6px">
         ${keywordMode ? `<button class="primary" id="empty-keyword">Change keyword</button>` : `<button class="primary" id="empty-scrape">⟳ Scrape now</button><button class="sm" id="empty-setup">Set up AMM</button><button class="sm" id="empty-tour">Take a tour</button>`}
       </div>
@@ -2510,7 +2513,7 @@ function renderJobs() {
     return `<span class="src-badge ${escapeAttr(src)}" title="Job found on ${src === "hcafe" ? "hiring.cafe" : src === "dice" ? "dice.com" : escapeAttr(src)}">${escapeHTML(label)}</span>`;
   };
   const rows = jobs.map(j => {
-    const url = j.directUrl || j.viewjobUrl || "#";
+    const url = directKeyword ? j.directUrl || "#" : j.directUrl || j.viewjobUrl || "#";
     const pct = j.matchPct ?? 0;
     const band = matchClass(pct);
     const isApplied = state.applied.has(String(j.idx));
@@ -2527,9 +2530,9 @@ function renderJobs() {
       <td class="yoe">${j.yoe == null ? "—" : escapeHTML(String(j.yoe)) + " yr"}</td>
       <td class="src">${srcBadge(j.src)}${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
       <td class="actions">
-        <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">${keywordMode ? "View listing" : "Apply"}<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
+        <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">${keywordMode && !directKeyword ? "View listing" : "Apply"}<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
         ${keywordMode ? "" : `<button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>`}
-        ${liveActions && (j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
+        ${liveActions && (j.src || "hcafe") === "hcafe" && j.viewjobUrl ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
         ${liveActions ? `<button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>` : ""}
         ${liveActions ? `<button class="sm ghost exclude-btn${isExcluded ? " on" : ""}" data-act="exclude" data-idx="${j.idx}" title="${isExcluded ? "Excluded from Export, Email & Open All — click to restore" : "Exclude from Export, Email & Open All (e.g. a duplicate)"}" aria-label="${isExcluded ? "restore job " + j.idx : "exclude job " + j.idx}">${isExcluded ? "↩" : "✕"}</button>` : ""}
       </td>
@@ -2745,7 +2748,7 @@ $("keyword-scrape-form").addEventListener("submit", async e => {
     $("scrapebar").classList.add("active");
     clearTimeout(scrapeSafetyTimer);
     scrapeSafetyTimer = setTimeout(() => { localScrapePending = false; $("scrapebar").classList.remove("active"); }, 45 * 60 * 1000);
-    toast(`Collecting up to ${limit} hiring.cafe jobs for “${term}”. Results and links will appear in Jobs.`, "good");
+    toast(`Collecting up to ${limit} direct employer apply links for “${term}”. Results will appear in Jobs.`, "good");
   } catch (err) { toast("Could not start keyword collection: " + err.message, "bad"); }
   finally { button.disabled = false; }
 });

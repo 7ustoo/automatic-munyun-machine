@@ -51,7 +51,7 @@ AMM supports technical and non-technical careers, including healthcare, sales, f
 
 - Native Windows app window with AMM's own taskbar icon and pinning identity
 - Ranked jobs with search, sorting, match filters, salary, and source details
-- In Settings, below **Strong matches per batch**, enter a term such as `cloud` and request up to 1,000 unique hiring.cafe listings without a resume or match scoring. The collector follows successive result pages until it reaches that count or verifies the end of the search. If a load fails, it keeps the collected links and shows why it stopped. Results replace the current dashboard batch and remain in Previous scrapes. Exports contain hiring.cafe listing links rather than resolved employer application links.
+- In Settings, below **Strong matches per batch**, enter a term such as `cloud` and request up to 1,000 direct employer application links without a resume or match scoring. The collector resolves the apply URL for each job and keeps searching until it reaches that count or verifies the end of the search. Expired jobs, missing apply links, and duplicate destinations are replaced from later pages. If collection is interrupted, it keeps the resolved links and shows why it stopped. Results replace the current dashboard batch and remain in Previous scrapes. Apply buttons and TXT/CSV/XLSX downloads open the employer or ATS application page.
 - **Apply**, **Save**, **Applied**, and **Why this matched** actions, plus an **Open jobs** menu with 50/100/150/200 presets and a custom amount
 - Resume rescan, one-click AI analysis, and profile-saved search-term suggestions
 - Remote, hybrid, and on-site searches with optional location

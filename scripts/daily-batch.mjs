@@ -42,7 +42,8 @@ import { emailDeliveryConfigured, sendConfiguredEmail, renderSubject } from './e
 import { exportRows, buildExportCsv, buildExportXlsx } from './export-batch.mjs';
 import { loadExport } from './export-batch.mjs';
 import { clampBatchSize, parseKeywordBatchSize } from './batch-size.mjs';
-import { buildKeywordCollection, keywordListingKey } from './keyword-collection.mjs';
+import { buildKeywordCollection, keywordListingUrl } from './keyword-collection.mjs';
+import { createApplyLinkCollector, readJobApplyLink, pruneApplyLinkCache, keywordSearchExtractor, keywordCandidateKey } from './hcafe-apply-links.mjs';
 import { summarizeBatch, appendHistory } from './batch-history.mjs';
 import { archiveBatch } from './batch-archive.mjs';
 import { splitQueriesByEngine } from './query-engines.mjs';
@@ -508,14 +509,29 @@ async function _scrapeWith(ctx) {
     const searchState = buildSearchState(query, { formEaseFilter: KEYWORD_MODE ? null : formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
     const url = 'https://hiringcafe.com/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}" — All time…`);
-    const { rows: allRows, coverage } = await crawlSearch({
-      page, url, extract: EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
-      ...(KEYWORD_MODE ? { targetJobs: KEYWORD_LIMIT, jobKey: keywordListingKey } : {}),
-      checkpoint: state => {
-        searchCoverage[key] = { query, ...state };
-        if (!KEYWORD_MODE) atomicWriteJson(path.join(PP.dir, 'search-coverage.json'), { at: new Date().toISOString(), queries: searchCoverage });
-      },
-    });
+    const applyCachePath = path.join(PP.dir, 'apply-link-cache.json');
+    let applyCache = {};
+    if (KEYWORD_MODE) try { applyCache = pruneApplyLinkCache(JSON.parse(fs.readFileSync(applyCachePath, 'utf8'))); } catch {}
+    const applyCollector = KEYWORD_MODE ? createApplyLinkCollector({ context: ctx, limit: KEYWORD_LIMIT, log, cache: applyCache,
+      checkpoint: ({ cache }) => atomicWriteJson(applyCachePath, pruneApplyLinkCache(cache)) }) : null;
+    let allRows, coverage;
+    try {
+      ({ rows: allRows, coverage } = await crawlSearch({
+        page, url, extract: KEYWORD_MODE ? keywordSearchExtractor(EXTRACT_FN) : EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
+        ...(KEYWORD_MODE ? { targetJobs: KEYWORD_LIMIT, jobKey: keywordCandidateKey,
+          expandGroups: rows => !rows.some(row => row.embeddedApplyLink),
+          processPageRows: applyCollector.collect, targetCount: applyCollector.count,
+          beforeRequest: applyCollector.beforeRequest, onThrottle: applyCollector.backoff } : {}),
+        checkpoint: state => {
+          searchCoverage[key] = { query, ...state };
+          if (!KEYWORD_MODE) atomicWriteJson(path.join(PP.dir, 'search-coverage.json'), { at: new Date().toISOString(), queries: searchCoverage });
+        },
+      }));
+      if (applyCollector) {
+        allRows = applyCollector.rows();
+        coverage.applyResolution = { ...applyCollector.stats };
+      }
+    } finally { await applyCollector?.close(); }
     searchCoverage[key] = { query, ...coverage, jobs: allRows.length };
     log(`  "${query}" ${coverage.targetReached ? 'target reached' : coverage.complete ? 'complete' : 'INCOMPLETE'}: ${allRows.length} jobs (${coverage.reason})`);
 
@@ -1179,7 +1195,6 @@ async function resolveOnePage(page, viewjobUrl) {
       const el = document.querySelector('#job-description');
       return !!el && el.innerText.replace(/^Job description\s*/i, '').trim().length > 0;
     }, null, { timeout: 15000 });
-    const html = await page.content();
     // v4.0: we're already standing on the job page for the apply-URL — now we
     // finally READ it. The rendered body text (title + full description +
     // hiring.cafe's requirements summary) feeds the second-pass rescore.
@@ -1187,16 +1202,8 @@ async function resolveOnePage(page, viewjobUrl) {
     jdText = await page.locator('#job-description').innerText();
     jdText = String(jdText).replace(/\s+/g, ' ').trim().slice(0, 40000);
     if (!jdText) throw new Error('empty description');
-    const m = html.match(/"apply_url":"([^"]+)"/);
-    if (!m) return { directUrl: null, jdText };
-    const u = m[1];
-    // Sanity check — `apply_url` is attacker-controllable (whatever the job
-    // poster typed into hiring.cafe). Reject anything that isn't a plain
-    // http(s) URL with no embedded HTML/quote characters before we let it
-    // through to a Telegram <a href="…"> interpolation. Defense layered with
-    // escHtmlAttr() at the message-build site (see buildMessage / F-H1).
-    if (!/^https?:\/\/[^\s<>"']+$/i.test(u)) return { directUrl: null, jdText };
-    return { directUrl: u, jdText };
+    const link = await readJobApplyLink(page);
+    return { directUrl: link.directUrl || null, jdText };
   } catch { /* retry the actual description, never substitute navigation text */ }
   }
   return { directUrl: null, jdText: '' };
@@ -1455,7 +1462,7 @@ export function buildAutoEmailAttachment({ lastBatch, format, deliveryTxtPath, d
 function writeBatchTsv(top, directUrls, funnel) {
   fs.mkdirSync(PP.dir, { recursive: true });
   const tsv = top.map((r, i) => {
-    const id = r.href.split('/').pop();
+    const id = String(r.sourceId || r.href.split('/').pop()).replace(/[\t\r\n]/g, ' ');
     const url = directUrls[i] || '';
     const title = (r.title || '').replace(/\t/g, ' ');
     const co = (r.company || '').replace(/\t/g, ' ');
@@ -1478,7 +1485,7 @@ function writeBatchTsv(top, directUrls, funnel) {
     funnel: funnel || null,
     jobs: top.map((r, i) => ({
       idx: i + 1,
-      id: r.href.split('/').pop(),
+      id: r.sourceId || r.href.split('/').pop(),
       title: r.title,
       company: r.company,
       location: r.location || '',
@@ -1505,7 +1512,7 @@ function writeBatchTsv(top, directUrls, funnel) {
       salaryK: r.salaryK || 0,
       src: r.source || 'hcafe', // v7.3: where the job came from (hcafe/dice/greenhouse/lever/ashby)
       directUrl: directUrls[i] || '',
-      viewjobUrl: r.href
+      viewjobUrl: funnel?.directApplyLinks ? keywordListingUrl(r.href) : r.href
     }))
   };
   atomicWriteJson(PP.lastBatch, lastBatch);
@@ -1600,11 +1607,11 @@ if (IS_CLI) (async () => {
       // A manual collection is a plain search result set. It intentionally
       // ignores CV scores, match filters, local seen history, and AI services.
       const { top, funnel } = buildKeywordCollection(byQuery['manual-keyword'], KEYWORD_TERM, KEYWORD_LIMIT, Object.values(searchCoverage));
-      const directUrls = top.map(() => '');
+      const directUrls = top.map(row => row.directUrl);
       writeBatchTsv(top, directUrls, funnel);
       try { writeApplyLinksTxt(); } catch (e) { log(`Keyword links text export skipped: ${SCRUB(e.message || e)}`); }
       writeScrapeStatus(true, { jobCount: top.length, mode: 'keyword' });
-      log(`Keyword collection complete: ${top.length}/${KEYWORD_LIMIT} unique hiring.cafe listings for "${KEYWORD_TERM}".`);
+      log(`Keyword collection complete: ${top.length}/${KEYWORD_LIMIT} unique direct apply links for "${KEYWORD_TERM}".`);
       return;
     }
     // v5.0: pull configured ATS boards (best-effort, never throws) and merge

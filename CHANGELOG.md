@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [12.1.3] — 2026-10-30
+
+- Keyword collection now resolves direct employer application URLs and counts those toward the requested total. Expired postings, missing apply links, failed resolutions, and duplicate destinations are replaced from later search pages; hiring.cafe listing URLs are never substituted in new collections.
+- Dashboard Apply buttons and TXT/CSV/XLSX exports use the resolved employer or ATS URLs. Apply URLs come from the requested job's structured data, with escaped query characters decoded correctly.
+
 ## [12.1.2] — 2026-10-30
 
 - Fixed hiring.cafe collection stopping after the first result page: result navigation now follows the actual Next page or numbered page links instead of a company carousel arrow.

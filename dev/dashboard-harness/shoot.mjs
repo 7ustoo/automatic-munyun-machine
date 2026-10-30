@@ -86,6 +86,17 @@ const announcement = await page.evaluate(() => {
   return document.querySelector('#bb-text').textContent;
 });
 if (!announcement.includes('Collection stopped early')) throw new Error('partial collection announced success');
+await shot("http://127.0.0.1:8765/#jobs", "09c-keyword-direct-apply.png", async () => {
+  await page.evaluate(async () => {
+    await useBatch({ date: '2026-10-30', mode: 'keyword', keyword: 'cloud', funnel: { mode: 'keyword', keyword: 'cloud', sent: 1, targetJobsPerBatch: 1,
+      directApplyLinks: true, searchCoverage: [{ pages: 1, targetReached: true }] }, jobs: [
+      { idx: 1, title: 'Cloud Engineer', company: 'Example', directUrl: 'https://employer.example/apply/1', viewjobUrl: '' }
+    ] });
+  });
+  const apply = page.locator('#lb-body a').filter({ hasText: 'Apply' });
+  if (await apply.getAttribute('href') !== 'https://employer.example/apply/1') throw new Error('keyword Apply button used a listing fallback');
+  if (!(await page.locator('#st-funnel').textContent()).includes('direct apply links')) throw new Error('direct collection mislabeled');
+});
 // 10. First-run setup overlay
 await shot("http://127.0.0.1:8766/", "10-setup.png");
 // 11. Export menu open

@@ -23,6 +23,13 @@ test('exportRows: number + title + apply link only, direct URL preferred', () =>
   assert.equal(rows[2].title, '(untitled)');
 });
 
+test('direct keyword exports do not fall back to a hiring.cafe listing', () => {
+  const rows = exportRows({ mode: 'keyword', funnel: { directApplyLinks: true }, jobs: [
+    { idx: 1, title: 'Cloud Engineer', directUrl: '', viewjobUrl: 'https://hiring.cafe/job/a' },
+  ] });
+  assert.equal(rows[0].applyUrl, '');
+});
+
 test('txt export: numbered title lines with the apply link under each', () => {
   const txt = buildExportTxt(exportRows(LB), LB.date);
   assert.equal(txt, [

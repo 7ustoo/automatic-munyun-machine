@@ -60,6 +60,26 @@ test('missing navigation with remaining reported jobs is incomplete', async () =
   assert.equal(r.rows.length, 1);
   assert.match(r.coverage.reason, /end of results not verified/);
 });
+
+test('paging target can count resolved apply links instead of raw listings', async () => {
+  let resolved = 0;
+  const page = fakePage([[row('a'), row('b')], [row('c'), row('d')], [row('e')]]);
+  const result = await crawlSearch({ page, url: 'https://hiringcafe.com/', extract: '', targetJobs: 2,
+    processPageRows: async rows => { resolved += rows.filter(row => ['a', 'c'].includes(row.href)).length; },
+    targetCount: () => resolved });
+  assert.deepEqual(page.visits, [0, 1]);
+  assert.equal(result.rows.length, 4);
+  assert.equal(result.coverage.targetReached, true);
+});
+
+test('different source jobs sharing apply URLs do not masquerade as a repeated result page', async () => {
+  const links = new Set();
+  const page = fakePage([[{ href: 'same', sourceId: '1' }], [{ href: 'same', sourceId: '2' }], [{ href: 'new', sourceId: '3' }]]);
+  const result = await crawlSearch({ page, url: 'https://hiringcafe.com/', extract: '', targetJobs: 2,
+    jobKey: row => row.sourceId, processPageRows: async rows => { rows.forEach(row => links.add(row.href)); }, targetCount: () => links.size });
+  assert.deepEqual(page.visits, [0, 1, 2]);
+  assert.equal(result.coverage.targetReached, true);
+});
 test('persistent timeout is incomplete, not exhausted; checkpoint retains next page', async () => {
   const page = fakePage([[row('a')], [row('b')]], i => i === 1);
   let checkpoint;
