@@ -106,6 +106,17 @@ func TestGuardPost_AcceptsLocalhostName(t *testing.T) {
 	}
 }
 
+func TestKeywordScrapeRejectsInvalidCountBeforeSpawn(t *testing.T) {
+	d := &dashboardServer{}
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/scrape", strings.NewReader(`{"mode":"keyword","term":"cloud","limit":"1001"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	d.handleScrape(rec, req)
+	if !strings.Contains(rec.Body.String(), `"ok":false`) {
+		t.Fatalf("expected rejection, got %s", rec.Body.String())
+	}
+}
+
 func TestEmailOAuthCallbackRejectsNonLoopbackHost(t *testing.T) {
 	d := &dashboardServer{}
 	req := httptest.NewRequest(http.MethodGet, "http://evil.example/oauth/google/callback?error=access_denied", nil)

@@ -497,6 +497,8 @@ type lastBatchInfo struct {
 	Date        string          `json:"date"`
 	Profile     string          `json:"profile"`
 	GeneratedAt string          `json:"generatedAt"`
+	Mode        string          `json:"mode,omitempty"`
+	Keyword     string          `json:"keyword,omitempty"`
 	JobCount    int             `json:"jobCount"`
 	Jobs        []batchJob      `json:"jobs"`
 	Funnel      json.RawMessage `json:"funnel,omitempty"` // v4.1: raw funnel object for the dashboard breakdown
@@ -651,6 +653,8 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 		Date        string            `json:"date"`
 		Profile     string            `json:"profile"`
 		GeneratedAt string            `json:"generatedAt"`
+		Mode        string            `json:"mode"`
+		Keyword     string            `json:"keyword"`
 		Jobs        []json.RawMessage `json:"jobs"`
 	}
 	if err := json.Unmarshal(data, &lb); err != nil {
@@ -660,6 +664,8 @@ func readLastBatchInto(installDir, activeProfile string, out *statusResponse) {
 	out.LastBatch.Date = lb.Date
 	out.LastBatch.Profile = lb.Profile
 	out.LastBatch.GeneratedAt = lb.GeneratedAt
+	out.LastBatch.Mode = lb.Mode
+	out.LastBatch.Keyword = lb.Keyword
 	out.LastBatch.JobCount = len(lb.Jobs)
 
 	out.LastBatch.Jobs = parseBatchJobs(lb.Jobs, dashboardJobLimit)
@@ -755,6 +761,8 @@ func readFullBatch(installDir string) lastBatchInfo {
 		Date        string            `json:"date"`
 		Profile     string            `json:"profile"`
 		GeneratedAt string            `json:"generatedAt"`
+		Mode        string            `json:"mode"`
+		Keyword     string            `json:"keyword"`
 		Jobs        []json.RawMessage `json:"jobs"`
 		Funnel      json.RawMessage   `json:"funnel"`
 	}
@@ -765,6 +773,8 @@ func readFullBatch(installDir string) lastBatchInfo {
 	info.Date = lb.Date
 	info.Profile = lb.Profile
 	info.GeneratedAt = lb.GeneratedAt
+	info.Mode = lb.Mode
+	info.Keyword = lb.Keyword
 	info.JobCount = len(lb.Jobs)
 	info.Jobs = parseBatchJobs(lb.Jobs, 0)
 	info.Funnel = lb.Funnel
@@ -790,6 +800,8 @@ func readArchivedFullBatch(installDir, archiveID string) lastBatchInfo {
 		Date        string            `json:"date"`
 		Profile     string            `json:"profile"`
 		GeneratedAt string            `json:"generatedAt"`
+		Mode        string            `json:"mode"`
+		Keyword     string            `json:"keyword"`
 		Jobs        []json.RawMessage `json:"jobs"`
 		Funnel      json.RawMessage   `json:"funnel"`
 	}
@@ -800,6 +812,8 @@ func readArchivedFullBatch(installDir, archiveID string) lastBatchInfo {
 	info.Date = lb.Date
 	info.Profile = lb.Profile
 	info.GeneratedAt = lb.GeneratedAt
+	info.Mode = lb.Mode
+	info.Keyword = lb.Keyword
 	info.JobCount = len(lb.Jobs)
 	info.Jobs = parseBatchJobs(lb.Jobs, 0)
 	info.Funnel = lb.Funnel

@@ -58,6 +58,26 @@ await page.click("#modal-cancel");
 await shot("http://127.0.0.1:8765/#system", "08-system.png");
 // 9. Settings view
 await shot("http://127.0.0.1:8765/#settings", "09-settings.png");
+await shot("http://127.0.0.1:8765/#settings", "09a-custom-batch.png", async () => {
+  await page.click('button[data-batch-preset="150"]');
+  await page.waitForFunction(() => document.querySelector('#set-batch-size').value === '150');
+  await page.fill('#set-batch-size', '1250');
+  await page.locator('#set-batch-size').dispatchEvent('change');
+  await page.waitForFunction(() => document.querySelector('#set-batch-size').value === '1250');
+  if (await page.locator('#batch-size-presets button.on').count()) throw new Error('custom amount kept a preset selected');
+});
+// A keyword collection displays listing links without invented match scores.
+await shot("http://127.0.0.1:8765/#jobs", "09b-keyword-jobs.png", async () => {
+  await page.evaluate(async () => {
+    await useBatch({ date: '2026-10-30', mode: 'keyword', keyword: 'cloud', funnel: { mode: 'keyword', keyword: 'cloud', raw: 1, uniqueBeforeFilter: 1, sent: 1 }, jobs: [
+      { idx: 1, title: 'Cloud Engineer', company: 'Example', q: 'cloud', src: 'hcafe', viewjobUrl: 'https://hiring.cafe/job/cloud-1' }
+    ] });
+  });
+  if (!await page.locator('#lb-body').getByText('Unranked').count()) throw new Error('keyword job was shown as ranked');
+  if (!await page.locator('#lb-body').getByText('View listing').count()) throw new Error('keyword listing link missing');
+  if (await page.locator('#lb-body button[data-act="why"]').count()) throw new Error('keyword job showed a match explanation');
+  if (!await page.locator('#band-seg.hidden').count()) throw new Error('match filters visible for keyword jobs');
+});
 // 10. First-run setup overlay
 await shot("http://127.0.0.1:8766/", "10-setup.png");
 // 11. Export menu open

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { clampBatchSize, BATCH_SIZE_OPTIONS, DEFAULT_BATCH_SIZE } from '../batch-size.mjs';
+import { clampBatchSize, parseRankedBatchSize, parseKeywordBatchSize, BATCH_SIZE_OPTIONS, DEFAULT_BATCH_SIZE } from '../batch-size.mjs';
 
 test('the four offered options pass through unchanged', () => {
   for (const n of [50, 100, 150, 200]) assert.equal(clampBatchSize(n), n);
@@ -22,24 +22,27 @@ test('string digits are accepted (dashboard/Telegram send strings)', () => {
   assert.equal(clampBatchSize('50'), 50);
 });
 
-test('off-grid numbers snap to the nearest option', () => {
-  assert.equal(clampBatchSize(60), 50);    // closer to 50
-  assert.equal(clampBatchSize(80), 100);   // closer to 100
-  assert.equal(clampBatchSize(175), 200);  // closer to 200
+test('custom strong-match counts pass through', () => {
+  for (const n of [1, 60, 80, 125, 175, 199]) assert.equal(clampBatchSize(n), n);
 });
 
-test('out-of-range numbers clamp to the ends', () => {
-  assert.equal(clampBatchSize(1), 50);     // below the floor → 50
-  assert.equal(clampBatchSize(10000), 200); // above the ceiling → 200
+test('custom ranked targets have no preset ceiling', () => {
+  for (const n of [201, 1000, 10000, 1_000_000]) assert.equal(clampBatchSize(n), n);
+  assert.equal(clampBatchSize(-1), DEFAULT_BATCH_SIZE);
+  assert.equal(clampBatchSize(Number.MAX_SAFE_INTEGER + 1), DEFAULT_BATCH_SIZE);
 });
 
-test('exact midpoints round up to the larger option', () => {
-  assert.equal(clampBatchSize(75), 100);   // 50 vs 100 tie → 100
-  assert.equal(clampBatchSize(125), 150);  // 100 vs 150 tie → 150
-  assert.equal(clampBatchSize(175), 200);  // 150 vs 200 tie → 200
+test('ranked target writes require a positive whole number', () => {
+  for (const n of ['50', '201', '1000', '10000', '00100']) assert.equal(parseRankedBatchSize(n), Number(n));
+  for (const bad of ['', '0', '-1', '1.5', 'abc', String(Number.MAX_SAFE_INTEGER + 1)]) assert.equal(parseRankedBatchSize(bad), null);
 });
 
-test('fractional values round before snapping', () => {
+test('keyword collection accepts a safe 1–1000 limit', () => {
+  for (const n of [1, 500, 1000]) assert.equal(parseKeywordBatchSize(String(n)), n);
+  for (const bad of [0, 1001, '1.5', 'x', Infinity]) assert.equal(parseKeywordBatchSize(bad), null);
+});
+
+test('fractional stored values round to an integer', () => {
   assert.equal(clampBatchSize(149.6), 150);
-  assert.equal(clampBatchSize(99.4), 100);
+  assert.equal(clampBatchSize(99.4), 99);
 });

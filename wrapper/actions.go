@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"log"
 	"net/url"
 	"os"
@@ -58,6 +59,10 @@ func actionOpenDashboard(dash *dashboardServer, installDir string) {
 // of parking it off-screen. The scheduled 7am run and the tray trigger pass
 // false; only the dashboard's "Watch" checkbox passes true.
 func actionRunScrape(installDir string, showBrowser bool) {
+	actionRunScrapeWithKeyword(installDir, showBrowser, "", 0)
+}
+
+func actionRunScrapeWithKeyword(installDir string, showBrowser bool, keyword string, limit int) {
 	scriptPath := filepath.Join(installDir, "scripts", "daily-batch.mjs")
 	if _, err := os.Stat(scriptPath); err != nil {
 		log.Printf("action.scrape: daily-batch.mjs not found at %s", scriptPath)
@@ -65,8 +70,12 @@ func actionRunScrape(installDir string, showBrowser bool) {
 	}
 	cmd := exec.Command(findNode(), scriptPath)
 	cmd.Dir = installDir
+	cmd.Env = os.Environ()
 	if showBrowser {
-		cmd.Env = append(os.Environ(), "AMM_SHOW_BROWSER=1")
+		cmd.Env = append(cmd.Env, "AMM_SHOW_BROWSER=1")
+	}
+	if keyword != "" {
+		cmd.Env = append(cmd.Env, "AMM_KEYWORD_SCRAPE_TERM="+keyword, fmt.Sprintf("AMM_KEYWORD_SCRAPE_LIMIT=%d", limit))
 	}
 	applyChildHideWindow(cmd)
 	// Detach: don't wait, don't tie stdio to the wrapper.

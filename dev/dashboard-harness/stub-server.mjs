@@ -36,17 +36,17 @@ const jobs = Array.from({ length: 42 }, (_, i) => ({
 // v3.0.1 test: simulate a scrape finishing while the dashboard idles — the
 // batch's generatedAt flips ~15s after server start and 15 jobs appear.
 const bootTime = Date.now();
-const scrapeDone = () => Date.now() - bootTime > 15000;
+const scrapeDone = () => process.env.AMM_STUB_STATIC_BATCH !== '1' && Date.now() - bootTime > 15000;
 const genAt = () => scrapeDone() ? "2026-07-06T22:45:00" : "2026-07-06T07:02:11";
 const liveJobs = () => scrapeDone() ? jobs : jobs.slice(0, 27);
 
 const routes = (needsSetup, opts = {}) => ({
   "/api/update/check": opts.update
     ? { ok: true, hasUpdate: true, current: "3.0.1", latest: "3.0.2", canAutoUpdate: true, releaseUrl: "https://example.com/rel" }
-    : { ok: true, hasUpdate: false, current: "12.0.0" },
+    : { ok: true, hasUpdate: false, current: "12.1.0" },
   "/api/status": () => ({
-    wrapper: { version: "12.0.0", pid: 4242, installDir: "C:\\Users\\demo\\AppData\\Local\\AMM" },
-    bot: { state: "alive", pid: 3131, version: "12.0.0", uptimeSec: 19620, lastHeartbeatAgeSec: 21, lastHeartbeatTs: "2026-07-06T12:00:00Z" },
+    wrapper: { version: "12.1.0", pid: 4242, installDir: "C:\\Users\\demo\\AppData\\Local\\AMM" },
+    bot: { state: "alive", pid: 3131, version: "12.1.0", uptimeSec: 19620, lastHeartbeatAgeSec: 21, lastHeartbeatTs: "2026-07-06T12:00:00Z" },
     telegram: { enabled: false, connected: false, lastPollOk: false, consecutiveFailures: 0 },
     profile: { active: "default", all: ["default", "marketing"] },
     lastBatch: { available: true, date: "2026-07-06", jobCount: liveJobs().length, generatedAt: genAt() },
@@ -131,7 +131,7 @@ const postReplies = {
   },
   "/api/settings/set": body => {
     if (body?.path === "schedule.enabled") scheduleEnabled = body.value === "true";
-    return { ok: true };
+    return { ok: true, value: body.value };
   },
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
   "/api/jobs/remove": { ok: true, list: queries.slice(0, 3) },

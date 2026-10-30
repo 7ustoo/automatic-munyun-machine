@@ -120,6 +120,17 @@ func (d *dashboardServer) handleScrape(w http.ResponseWriter, r *http.Request) {
 	// v2.9: "watch": true → run with a visible on-screen browser window.
 	b := readBody(r)
 	watch := b["watch"] == "true" || b["watch"] == "1"
+	if b["mode"] == "keyword" {
+		term := strings.TrimSpace(b["term"])
+		limit, err := strconv.Atoi(b["limit"])
+		if len(term) < 1 || len(term) > 120 || strings.ContainsAny(term, "\r\n\x00") || err != nil || limit < 1 || limit > 1000 {
+			writeJSONError(w, http.StatusOK, "Enter a keyword and a job count from 1 to 1000")
+			return
+		}
+		actionRunScrapeWithKeyword(d.installDir, watch, term, limit)
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "watching": watch, "mode": "keyword"})
+		return
+	}
 	actionRunScrape(d.installDir, watch)
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "watching": watch})
 }

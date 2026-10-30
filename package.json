@@ -1,7 +1,7 @@
 {
   "name": "automatic-munyun-machine",
-  "version": "12.0.0",
-  "description": "Local-first desktop job search: 50–200 daily matches ranked against your resume.",
+  "version": "12.1.0",
+  "description": "Local-first desktop job search with configurable resume-matched batches and keyword collection.",
   "type": "module",
   "main": "scripts/daily-batch.mjs",
   "bin": {

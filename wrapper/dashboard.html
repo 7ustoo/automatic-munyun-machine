@@ -843,6 +843,9 @@
   .settings-lead { margin: -5px 0 18px; color: var(--text-2); }
   .set-row { padding: 12px 0; }
   .set-row label { color: var(--text); font-weight: 600; }
+  .batch-size-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+  .batch-size-controls .custom-batch { display: flex; align-items: center; gap: 8px; }
+  .batch-size-controls .custom-batch label { font-size: 12px; color: var(--text-2); }
   .settings-advanced, .extra-searches, .setup-advanced { border: 1px solid var(--border); border-radius: 14px; margin-top: 18px; background: var(--surface-2); }
   .settings-advanced summary, .extra-searches summary, .setup-advanced summary { cursor: pointer; padding: 16px 18px; font-weight: 700; list-style-position: inside; }
   .settings-advanced summary span, .extra-searches summary span, .setup-advanced summary span { float: right; color: var(--text-3); font-size: 12px; font-weight: 500; }
@@ -1279,7 +1282,7 @@
 
       <!-- =================== View: Jobs =================== -->
       <section class="view on" data-view="jobs">
-        <div class="view-intro"><div><span class="eyebrow">YOUR DAILY SHORTLIST</span><h2>Find your next move.</h2><p>Fresh opportunities ranked against your experience. Start a search any time.</p></div></div>
+        <div class="view-intro"><div><span class="eyebrow" id="jobs-eyebrow">YOUR DAILY SHORTLIST</span><h2>Find your next move.</h2><p id="jobs-intro">Fresh opportunities ranked against your experience. Start a search any time.</p></div></div>
         <div class="history-view-bar hidden" id="history-view-bar" role="status">
           <div><b id="history-view-title">Viewing a previous scrape</b><div class="muted-sm">This is the complete saved snapshot. Search, sort, inspect Why details, export, email, or open every application link. Save, Applied, and Exclude stay disabled for history.</div></div>
           <button class="sm primary" id="history-back">Back to latest jobs</button>
@@ -1677,7 +1680,19 @@
           <div class="set-row"><label>Salary floor ($)</label><input type="text" id="set-salary" class="num" /></div>
           <div class="set-row"><label>Strong-match floor (%)</label><input type="text" id="set-floor" class="num" /></div>
           <div class="set-row"><label>Strong matches per batch</label>
-            <select id="set-batch-size"><option value="50">50</option><option value="100">100</option><option value="150">150</option><option value="200">200</option></select></div>
+            <div class="batch-size-controls">
+              <div class="seg" id="batch-size-presets" role="group" aria-label="Strong-match batch presets">
+                <button type="button" data-batch-preset="50">50</button><button type="button" data-batch-preset="100">100</button><button type="button" data-batch-preset="150">150</button><button type="button" data-batch-preset="200">200</button>
+              </div>
+              <div class="custom-batch"><label for="set-batch-size">Custom amount</label><input type="number" id="set-batch-size" class="num" min="1" step="1" inputmode="numeric" placeholder="Enter any amount" /></div>
+            </div></div>
+          <div class="set-row"><label for="keyword-term">Collect hiring.cafe jobs by keyword</label>
+            <form id="keyword-scrape-form" class="row" style="gap:8px;flex-wrap:wrap">
+              <input type="text" id="keyword-term" maxlength="120" placeholder="cloud" autocomplete="off" required style="min-width:130px;flex:1" />
+              <input type="number" id="keyword-limit" class="num" min="1" max="1000" step="1" value="1000" aria-label="Maximum jobs to collect, 1 to 1000" required />
+              <button type="submit" class="sm">Collect jobs</button>
+            </form></div>
+          <div class="hint">One-off collection uses the keyword and your workplace settings. It shows unique hiring.cafe listing links without resume matching; the site may have fewer jobs than requested.</div>
           <div class="set-row"><label>Show salary on jobs</label>
             <select id="set-show-salary"><option value="true">Yes</option><option value="false">No</option></select></div>
           <div class="set-row"><label>Weekday morning scrape</label>
@@ -1813,7 +1828,9 @@ function setView(name) {
     el.classList.toggle("on", el.dataset.view === name));
   document.querySelectorAll("#nav .nav-item").forEach(el =>
     el.classList.toggle("on", el.dataset.view === name));
-  $("view-title").textContent = name === "jobs" && state.archiveId ? "Ranked jobs · Previous scrape" : VIEW_TITLES[name];
+  $("view-title").textContent = name !== "jobs" ? VIEW_TITLES[name]
+    : state.batchMeta.mode === "keyword" ? (state.archiveId ? "Keyword jobs · Previous scrape" : "Keyword jobs")
+    : state.archiveId ? "Ranked jobs · Previous scrape" : VIEW_TITLES.jobs;
   $("auto-scrape-toggle").classList.toggle("hidden", name !== "jobs");
 }
 // v3.0.2: internal navigation goes through replaceState, NOT location.hash /
@@ -2172,7 +2189,9 @@ function onFreshBatch(lb) {
   // Do not yank the user out of a historical snapshot when a scheduled or
   // remote scrape finishes. The completion banner offers an explicit jump.
   if (!state.archiveId) loadBatch();
-  const what = lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
+  const what = lb?.mode === "keyword"
+    ? `${lb.jobCount || 0} hiring.cafe listings collected for “${lb.keyword || "keyword"}”`
+    : lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
   $("bb-text").textContent = `Scrape complete — ${what}${lb?.date ? ` for ${lb.date}` : ""}.`;
   $("batch-banner").classList.remove("hidden");
   toast(`Scrape complete — ${what}.`, "good");
@@ -2190,12 +2209,22 @@ $("bb-view").addEventListener("click", async () => {
 // ---- Ranked jobs (from /api/batch, refreshed on demand) ----
 function renderBatchMode() {
   const historical = !!state.archiveId;
+  const keywordMode = state.batchMeta.mode === "keyword";
+  $("jobs-eyebrow").textContent = keywordMode ? "KEYWORD COLLECTION" : "YOUR DAILY SHORTLIST";
+  $("jobs-intro").textContent = keywordMode
+    ? `Hiring.cafe listings for “${state.batchMeta.keyword}”. These jobs have no resume match scores; open each listing to find its application link.`
+    : "Fresh opportunities ranked against your experience. Start a search any time.";
+  $("job-sort").querySelector('option[value="rank"]').textContent = keywordMode ? "Sort: Listing order" : "Sort: Rank";
+  $("job-sort").querySelector('option[value="match"]').disabled = keywordMode;
+  if (keywordMode && state.sort === "match") { state.sort = "rank"; $("job-sort").value = "rank"; }
   $("history-view-bar").classList.toggle("hidden", !historical);
   $("history-view-title").textContent = historical
     ? `Viewing saved scrape: ${state.archiveLabel || state.batchMeta.date || state.archiveId}`
     : "Viewing a previous scrape";
   if (currentView() === "jobs") {
-    $("view-title").textContent = historical ? "Ranked jobs · Previous scrape" : VIEW_TITLES.jobs;
+    $("view-title").textContent = state.batchMeta.mode === "keyword"
+      ? (historical ? "Keyword jobs · Previous scrape" : "Keyword jobs")
+      : historical ? "Ranked jobs · Previous scrape" : VIEW_TITLES.jobs;
   }
   const archiveQuery = historical ? `&archive=${encodeURIComponent(state.archiveId)}` : "";
   document.querySelectorAll("[data-batch-export]").forEach(link => {
@@ -2208,6 +2237,7 @@ function renderBatchMode() {
     : "Choose how many jobs to open from this batch";
   const available = state.jobs.length;
   $("open-jobs-note").textContent = `${available} job${available === 1 ? "" : "s"} available. Larger choices open all ${available}.`;
+  $("open-jobs-note").textContent += state.batchMeta.mode === "keyword" ? " Opens hiring.cafe listings, up to 200 at a time." : "";
   $("email-menu").classList.remove("disabled");
   $("email-menu").setAttribute("aria-disabled", "false");
   $("email-btn").title = historical
@@ -2225,6 +2255,8 @@ async function useBatch(batch, { archiveId = null, archiveLabel = "" } = {}) {
     jobCount: batch?.jobCount || state.jobs.length,
     generatedAt: batch?.generatedAt || "",
     funnel: batch?.funnel || null,
+    mode: batch?.mode || 'ranked',
+    keyword: batch?.keyword || '',
   };
   state.whyOpen.clear();
   try {
@@ -2299,10 +2331,19 @@ function renderSkeleton() {
 
 function renderStats() {
   const jobs = state.jobs;
-  $("st-count").textContent = jobs.length || "—";
+  const keywordMode = state.batchMeta.mode === "keyword";
+  $("st-avg").closest(".tile").querySelector(".t-label").textContent = keywordMode ? "Resume match" : "Average match";
+  $("st-strong").closest(".tile").querySelector(".t-sub").textContent = keywordMode ? "Not evaluated" : "70% match or better";
+  $("st-ai").closest(".tile").querySelector(".t-label").textContent = keywordMode ? "AI check" : "AI audited";
+  $("st-count").textContent = jobs.length || (keywordMode ? "0" : "—");
   $("st-count-sub").textContent = state.batchMeta.date
-    ? `${state.archiveId ? "saved scrape · " : ""}profile: ${$("profile-big").textContent || ""}` : "";
-  if (jobs.length) {
+    ? `${state.batchMeta.mode === "keyword" ? "keyword collection · " : ""}${state.archiveId ? "saved scrape · " : ""}profile: ${$("profile-big").textContent || ""}` : "";
+  if (state.batchMeta.mode === 'keyword') {
+    $("st-avg").textContent = "—";
+    $("st-avg-sub").textContent = "No resume matching";
+    $("st-strong").textContent = "—";
+    $("st-strong").classList.add("zero");
+  } else if (jobs.length) {
     const avg = Math.round(jobs.reduce((a, j) => a + (j.matchPct || 0), 0) / jobs.length);
     const strong = jobs.filter(j => (j.matchPct || 0) >= 70).length;
     const top = jobs.reduce((m, j) => Math.max(m, j.matchPct || 0), 0);
@@ -2318,10 +2359,10 @@ function renderStats() {
   const f = state.batchMeta.funnel;
   const aiChecked = Number(f?.smartMatchEvaluated || 0);
   const checked = Number(f?.smartMatchEligible ?? f?.descriptionEvaluated ?? f?.scored ?? 0);
-  $("st-ai").textContent = checked ? `${aiChecked}/${checked}` : "—";
-  $("st-ai-sub").textContent = f?.smartMatchStatus ? `status: ${String(f.smartMatchStatus).replace(/-/g, " ")}` : "Smart Match coverage";
+  $("st-ai").textContent = state.batchMeta.mode === 'keyword' ? "—" : checked ? `${aiChecked}/${checked}` : "—";
+  $("st-ai-sub").textContent = keywordMode ? "Skipped for keyword jobs" : f?.smartMatchStatus ? `status: ${String(f.smartMatchStatus).replace(/-/g, " ")}` : "Smart Match coverage";
   const audit = $("ai-audit");
-  if (!f) {
+  if (!f || state.batchMeta.mode === 'keyword') {
     audit.classList.add("hidden");
   } else {
     const complete = f.smartMatchStatus === "complete" && aiChecked === checked;
@@ -2341,6 +2382,7 @@ function renderStats() {
 // v4.1: mirror of daily-batch.mjs#funnelLine — every value comes from the
 // funnel object carried in last-batch.json (passed through /api/batch).
 function funnelLineJS(f) {
+  if (f.mode === "keyword") return `${f.raw || 0} hiring.cafe listings → ${f.uniqueBeforeFilter || 0} unique → ${f.sent || 0} collected for “${f.keyword || ""}”${f.searchIncomplete ? " · search incomplete" : ""}. Links open the hiring.cafe listings.`;
   const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
   const checked = f.descriptionEvaluated ?? f.scored ?? 0;
   const aboveFloor = f.qualifyingMatches ?? Math.max(0, checked - (f.droppedBelowFloor || 0));
@@ -2367,7 +2409,7 @@ function funnelLineJS(f) {
 
 function visibleJobs() {
   let out = state.jobs;
-  if (state.band !== "all") out = out.filter(j => matchClass(j.matchPct ?? 0) === state.band);
+  if (state.batchMeta.mode !== "keyword" && state.band !== "all") out = out.filter(j => matchClass(j.matchPct ?? 0) === state.band);
   if (state.q) {
     const q = state.q.toLowerCase();
     out = out.filter(j =>
@@ -2419,20 +2461,22 @@ function whyRowHTML(idx) {
 
 function renderJobs() {
   const all = state.jobs;
+  const keywordMode = state.batchMeta.mode === "keyword";
+  $("band-seg").classList.toggle("hidden", keywordMode);
   if (!all.length) {
     $("lb-body").innerHTML = `<div class="empty">
       <div class="e-icon">💼</div>
-      <div class="e-title">No batch yet</div>
-      <div class="e-sub">Pull up to 200 strong matches — checked against your resume and the full job requirements. New here? Walk through setup or take a quick tour first.</div>
+      <div class="e-title">${keywordMode ? "No listings found" : "No batch yet"}</div>
+      <div class="e-sub">${keywordMode ? `Hiring.cafe returned no listings for “${escapeHTML(state.batchMeta.keyword)}”. Try a broader term in Settings.` : "Pull strong matches — checked against your resume and the full job requirements. New here? Walk through setup or take a quick tour first."}</div>
       <div class="row" style="justify-content:center; margin-top:6px">
-        <button class="primary" id="empty-scrape">⟳ Scrape now</button>
-        <button class="sm" id="empty-setup">Set up AMM</button>
-        <button class="sm" id="empty-tour">Take a tour</button>
+        ${keywordMode ? `<button class="primary" id="empty-keyword">Change keyword</button>` : `<button class="primary" id="empty-scrape">⟳ Scrape now</button><button class="sm" id="empty-setup">Set up AMM</button><button class="sm" id="empty-tour">Take a tour</button>`}
       </div>
     </div>`;
     $("lb-foot").textContent = "";
     const es = $("empty-scrape");
     if (es) es.addEventListener("click", () => $("scrape-btn").click());
+    const ek = $("empty-keyword");
+    if (ek) ek.addEventListener("click", () => navTo("settings"));
     const eSet = $("empty-setup");
     if (eSet) eSet.addEventListener("click", reopenSetup);
     const eTour = $("empty-tour");
@@ -2470,12 +2514,12 @@ function renderJobs() {
         <div class="j-company" title="${escapeAttr(j.company || "")}">${escapeHTML(j.company || "—")}</div>
         ${state.showSalary && j.salaryK ? `<div class="j-salary" title="Salary parsed from the posting">~$${j.salaryK}k</div>` : ""}
       </td>
-      <td class="match"><span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span><br><span class="ai-job-badge ${j.aiPct != null ? "checked" : "local"}">${j.aiPct != null ? "AI verified" : "local only"}</span></td>
+      <td class="match">${keywordMode ? "Unranked" : `<span class="meter"><i class="${band}" style="width:${Math.max(0, Math.min(100, pct))}%"></i></span><span class="meter-num">${pct}%</span><br><span class="ai-job-badge ${j.aiPct != null ? "checked" : "local"}">${j.aiPct != null ? "AI verified" : "local only"}</span>`}</td>
       <td class="yoe">${j.yoe == null ? "—" : escapeHTML(String(j.yoe)) + " yr"}</td>
       <td class="src">${srcBadge(j.src)}${j.q ? `<span class="pill" title="Found by the search “${escapeAttr(j.q)}”">${escapeHTML(j.q)}</span>` : ""}</td>
       <td class="actions">
-        <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">Apply<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
-        <button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>
+        <a class="btn primary sm" href="${escapeAttr(url)}" target="_blank" rel="noopener">${keywordMode ? "View listing" : "Apply"}<svg class="ic" style="width:12px;height:12px"><use href="#i-external"/></svg></a>
+        ${keywordMode ? "" : `<button class="sm ghost" data-act="why" data-idx="${j.idx}" aria-expanded="${state.whyOpen.has(String(j.idx))}">Why</button>`}
         ${liveActions && (j.src || "hcafe") === "hcafe" ? `<button class="sm" data-act="save" data-idx="${j.idx}" title="Save on hiring.cafe"><svg class="ic" style="width:12px;height:12px"><use href="#i-bookmark"/></svg>Save</button>` : ""}
         ${liveActions ? `<button class="sm" data-act="applied" data-idx="${j.idx}" ${isApplied ? "disabled" : ""}>${isApplied ? "Applied ✓" : "Applied"}</button>` : ""}
         ${liveActions ? `<button class="sm ghost exclude-btn${isExcluded ? " on" : ""}" data-act="exclude" data-idx="${j.idx}" title="${isExcluded ? "Excluded from Export, Email & Open All — click to restore" : "Exclude from Export, Email & Open All (e.g. a duplicate)"}" aria-label="${isExcluded ? "restore job " + j.idx : "exclude job " + j.idx}">${isExcluded ? "↩" : "✕"}</button>` : ""}
@@ -2486,7 +2530,7 @@ function renderJobs() {
     return main + why;
   }).join("");
   $("lb-body").innerHTML = `<table>
-    <thead><tr><th></th><th>Job</th><th>Match</th><th class="yoe">YOE</th><th class="src">Source</th><th></th></tr></thead>
+    <thead><tr><th></th><th>Job</th><th>${keywordMode ? "Status" : "Match"}</th><th class="yoe">YOE</th><th class="src">Source</th><th></th></tr></thead>
     <tbody>${rows}</tbody>
   </table>`;
   const exNote = !state.archiveId && state.excluded.size
@@ -2525,7 +2569,7 @@ async function openSelectedJobs(requested) {
   $("open-jobs-menu").open = false;
   const ok = await confirmModal({
     title: `Open ${count} ${saved ? "saved " : ""}job${count === 1 ? "" : "s"}?`,
-    body: `${parsed > available ? `This batch has ${available} jobs, so AMM will open all ${available}. ` : ""}Each job will open in a browser tab using its direct application link. Your browser may take a moment to load them.`,
+    body: `${parsed > available ? `This batch has ${available} jobs, so AMM will open all ${available}. ` : ""}Each job will open in a browser tab using its ${state.batchMeta.mode === "keyword" ? "hiring.cafe listing link" : "direct application link"}. Your browser may take a moment to load them.`,
     confirmText: `Open ${count}`,
   });
   if (!ok) return;
@@ -2678,6 +2722,24 @@ $("scrape-btn").addEventListener("click", async () => {
     setTimeout(() => { btn.disabled = false; labelEl.textContent = label; }, 5000);
   }
 });
+$("keyword-scrape-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const term = $("keyword-term").value.trim();
+  const limit = Number($("keyword-limit").value);
+  if (!term || !Number.isInteger(limit) || limit < 1 || limit > 1000) return toast("Enter a keyword and a number from 1 to 1000.", "bad");
+  const button = $("keyword-scrape-form").querySelector('button[type="submit"]');
+  button.disabled = true;
+  try {
+    const r = await postJSON("/api/scrape", { mode: "keyword", term, limit: String(limit), watch: String($("watch-scrape").checked) });
+    if (!r.ok) return toast(r.error || "Could not start keyword collection.", "bad");
+    localScrapePending = true;
+    $("scrapebar").classList.add("active");
+    clearTimeout(scrapeSafetyTimer);
+    scrapeSafetyTimer = setTimeout(() => { localScrapePending = false; $("scrapebar").classList.remove("active"); }, 45 * 60 * 1000);
+    toast(`Collecting up to ${limit} hiring.cafe jobs for “${term}”. Results and links will appear in Jobs.`, "good");
+  } catch (err) { toast("Could not start keyword collection: " + err.message, "bad"); }
+  finally { button.disabled = false; }
+});
 $("refresh-btn").addEventListener("click", refreshActiveBatch);
 // ---- Settings ----
 async function loadSettings() {
@@ -2689,6 +2751,7 @@ async function loadSettings() {
     $("set-salary").value = s.salaryFloorUsd;
     $("set-floor").value = s.matchFloorPercent;
     $("set-batch-size").value = String(s.targetJobsPerBatch || 200);
+    updateBatchPresetSelection(Number(s.targetJobsPerBatch || 200));
     state.showSalary = s.showSalary !== false;
     $("set-show-salary").value = String(state.showSalary);
     $("set-time").value = s.scheduleTime;
@@ -2805,7 +2868,31 @@ $("auto-scrape").addEventListener("change", e => setProfileAutoScrape(e.target.c
 $("set-yoe").addEventListener("change", e => saveSetting("user.maxYoeAcceptable", e.target.value));
 $("set-salary").addEventListener("change", e => saveSetting("user.salaryFloorUsd", e.target.value));
 $("set-floor").addEventListener("change", e => saveSetting("scoring.matchFloorPercent", e.target.value));
-$("set-batch-size").addEventListener("change", e => saveSetting("scoring.targetJobsPerBatch", e.target.value));
+function updateBatchPresetSelection(n) {
+  $("batch-size-presets").querySelectorAll("button[data-batch-preset]").forEach(button => {
+    const selected = Number(button.dataset.batchPreset) === n;
+    button.classList.toggle("on", selected);
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+async function saveBatchSize(raw) {
+  const text = String(raw).trim();
+  const n = Number(text);
+  if (!/^\d+$/.test(text) || !Number.isSafeInteger(n) || n < 1) {
+    note("set-note", "Enter a positive whole number of jobs.", false);
+    return;
+  }
+  const r = await saveSetting("scoring.targetJobsPerBatch", text);
+  if (r.ok) {
+    $("set-batch-size").value = String(r.value);
+    updateBatchPresetSelection(Number(r.value));
+  }
+}
+$("batch-size-presets").addEventListener("click", e => {
+  const button = e.target.closest("button[data-batch-preset]");
+  if (button) saveBatchSize(button.dataset.batchPreset);
+});
+$("set-batch-size").addEventListener("change", e => saveBatchSize(e.target.value));
 $("set-show-salary").addEventListener("change", e => { state.showSalary = e.target.value === "true"; saveSetting("display.showSalary", e.target.value); renderJobs(); });
 $("set-time").addEventListener("change", async e => {
   const r = await saveSetting("schedule.time", e.target.value);
@@ -3002,7 +3089,7 @@ async function loadArchives() {
     $("arch-table").classList.toggle("hidden", list.length === 0);
     $("arch-body").innerHTML = list.map(e => `
       <tr data-arch="${escapeHTML(e.id)}">
-        <td>${escapeHTML(archLabel(e.id))}</td>
+        <td>${escapeHTML(archLabel(e.id))}${e.mode === "keyword" ? `<br><span class="muted-sm" title="Keyword collection: ${escapeAttr(e.keyword || "")}">Keyword: ${escapeHTML((e.keyword || "").slice(0, 32))}</span>` : ""}</td>
         <td>${e.sent ?? "—"}</td>
         <td>${e.avgPct != null ? e.avgPct + "%" : "—"}</td>
         <td>${e.strongCount ?? "—"}</td>

@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [12.1.0] — 2026-10-30
+
+- Settings now offers 50, 100, 150, and 200 strong-match presets with a custom amount box beneath them. Custom ranked targets have no preset ceiling; actual delivery still depends on available qualifying jobs.
+- Added a one-off hiring.cafe keyword collection in Settings. Enter a term and a 1–1,000 job limit to collect unique listing links without resume scoring, Smart Match, or seen-job filtering. The collection appears in Jobs, Previous scrapes, and exports; it does not send a large automatic Telegram or email batch.
+
 ## [12.0.0] — 2026-10-16
 
 - Rebuilt first-run setup as three steps: add a resume, pick work preferences, and start a job feed. Dice is ready without a sign-in; preparing hiring.cafe is an optional route to using both sources.
