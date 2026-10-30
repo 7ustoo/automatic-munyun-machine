@@ -2,10 +2,18 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 12.1.2
-**Active release branch:** `v12.1.2`
+**Version:** 12.1.3
+**Active release branch:** `v12.1.3`
 **Platforms:** Windows, macOS, Linux
 **Last refreshed:** 2026-10-30
+
+### v12.1.3 keyword direct application links
+
+- `scripts/hcafe-apply-links.mjs` reads employer `apply_url` values from the actual `__NEXT_DATA__.props.pageProps.ssrHits` search result records, retaining each record's ID, title, and company and excluding unrelated recommendations. This avoids opening every job page. If embedded results are unavailable, rendered cards fall back to resolving `props.pageProps.job.apply_url` with three browser pages, shared one-second pacing, and server-directed backoff. JSON parsing decodes escaped query separators. Expired jobs, listing fallbacks, malformed URLs, and duplicate apply destinations do not count toward the requested target.
+- New keyword batches set `funnel.directApplyLinks: true` and populate every job's `directUrl`. Their dashboard buttons and TXT/CSV/XLSX exports use direct employer/ATS URLs. Existing archived listing collections retain their original labeling. `crawlSearch` supports an asynchronous per-page processor and a resolved-target counter so reaching 1,000 raw listings cannot stop a direct-link collection early.
+- The live probe's optional target now resolves and saves direct apply URLs in `data/live-keyword-links.txt`; it still does not publish a batch or mark jobs seen.
+- Profile-scoped `apply-link-cache.json` retains resolved URLs for 24 hours (up to 5,000 entries). It checkpoints progress every 25 resolutions so an interrupted retry can reuse links for candidates still present in the current search. The live probe uses a separate cache and progress file under `data/`.
+- Live validation on 2026-10-30 collected exactly 1,000 distinct off-site employer/ATS apply URLs from 13 result pages. All 1,000 were associated with their own embedded search job records; TXT, CSV, and XLSX exports use these destinations without listing fallbacks.
 
 ### v12.1.2 continuous keyword collection
 
@@ -64,7 +72,7 @@
 
 ## Product
 
-Automatic Munyun Machine (AMM) is a local-first desktop job-search assistant. It collects jobs from hiring.cafe and optional public Greenhouse, Lever, and Ashby feeds, ranks them against a user's resume, and delivers a configurable number of jobs. A separate manual hiring.cafe keyword collection can gather up to 1,000 unranked listings with links.
+Automatic Munyun Machine (AMM) is a local-first desktop job-search assistant. It collects jobs from hiring.cafe and optional public Greenhouse, Lever, and Ashby feeds, ranks them against a user's resume, and delivers a configurable number of jobs. A separate manual hiring.cafe keyword collection can gather up to 1,000 jobs with direct employer application links, without resume matching.
 
 The local desktop dashboard is the primary interface. Telegram and Gmail delivery are optional. AMM is profession-agnostic: resume parsing and search suggestions cover technology, healthcare, sales, finance, marketing, education, HR, administration, and skilled trades.
 

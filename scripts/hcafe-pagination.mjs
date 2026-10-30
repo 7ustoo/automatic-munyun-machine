@@ -1,6 +1,8 @@
+import { retryDelayMs } from './hcafe-apply-links.mjs';
+
 // Read the rendered search grid, including company-card carousels. Never use
 // account actions here: inspecting a candidate must not consume it.
-export async function readGroupedPage(page, extract, onRows = () => {}, shouldStop = () => false) {
+export async function readGroupedPage(page, extract, onRows = () => {}, shouldStop = () => false, expandGroups = true) {
   const rows = new Map();
   const read = async () => {
     const extracted = await page.evaluate(extract);
@@ -8,7 +10,7 @@ export async function readGroupedPage(page, extract, onRows = () => {}, shouldSt
     onRows(extracted);
   };
   await read();
-  if (shouldStop()) return [...rows.values()];
+  if (shouldStop() || !expandGroups) return [...rows.values()];
   const arrows = page.locator('.bg-white.rounded-xl button:not([data-testid]):has(svg path[d="m8.25 4.5 7.5 7.5-7.5 7.5"])');
   for (let turn = 0; turn < 1000; turn++) {
     let advanced = false;
@@ -68,7 +70,10 @@ export async function readSearchNavigation(page, currentUrl, index) {
 }
 
 export async function crawlSearch({ page, url, extract, maxPages = 300, targetJobs = Infinity,
-  jobKey = row => row.href, checkpoint = () => {}, log = () => {} }) {
+  jobKey = row => row.href, processPageRows = async () => {}, targetCount = null,
+  expandGroups = true,
+  beforeRequest = async () => {}, onThrottle = ms => page.waitForTimeout(ms),
+  checkpoint = () => {}, log = () => {} }) {
   const rows = new Map();
   const coverage = { pages: 0, complete: false, targetReached: false, reason: '', nextPage: 0 };
   const signatures = new Set();
@@ -80,13 +85,18 @@ export async function crawlSearch({ page, url, extract, maxPages = 300, targetJo
       if (key) rows.set(key, row);
     }
   };
-  const reachedTarget = () => rows.size >= targetJobs;
+  const reachedTarget = () => (targetCount ? targetCount() : rows.size) >= targetJobs;
   for (let index = 0; index < maxPages; index++) {
     let result;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
         const target = new URL(nextUrl);
-        await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await beforeRequest();
+        const response = await page.goto(target.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        if ([429, 503].includes(response?.status())) {
+          await onThrottle(retryDelayMs(response.headers()['retry-after']));
+          throw new Error(`search page HTTP ${response.status()}; waiting before retry`);
+        }
         await page.waitForFunction(() => document.querySelector('a[href^="/job/"]')
           || /no jobs found|no results found/i.test(document.body.innerText), null, { timeout: 20000 });
         // Wait for the grid to stabilize, not just for its first card.
@@ -100,9 +110,11 @@ export async function crawlSearch({ page, url, extract, maxPages = 300, targetJo
           if (poll === 23) throw new Error('grid did not settle');
         }
         const base = await page.evaluate(extract);
-        const signature = base.map(r => r.href).sort().join('\n');
+        const signature = base.map(jobKey).filter(Boolean).sort().join('\n');
         if (index && (!base.length || signatures.has(signature))) throw new Error('page repeated or unexpectedly empty');
-        const grouped = await readGroupedPage(page, extract, addRows, reachedTarget);
+        const grouped = await readGroupedPage(page, extract, addRows, reachedTarget,
+          typeof expandGroups === 'function' ? expandGroups(base) : expandGroups);
+        await processPageRows(grouped);
         let navigation;
         for (let check = 0; check < 5; check++) {
           navigation = await readSearchNavigation(page, target.href, index);
