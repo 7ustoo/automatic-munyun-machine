@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [12.2.0] — 2026-11-09
+
+- Added **Pull all** to Settings → Keyword collection. It follows every available hiring.cafe result page and exports unique direct employer application links. Enter a specific count for smaller pulls or to request more than the old 1,000-link limit. The batch shows how many pages AMM checked and whether it reached the end.
+- Keyword collection shows the difference between HiringCafe's reported count and the listings it returned when the last available page has been reached.
+
 ## [12.1.3] — 2026-10-30
 
 - Keyword collection now resolves direct employer application URLs and counts those toward the requested total. Expired postings, missing apply links, failed resolutions, and duplicate destinations are replaced from later search pages; hiring.cafe listing URLs are never substituted in new collections.
@@ -1273,7 +1278,8 @@ Closes 9 HIGH + 7 MEDIUM findings from the GSD `gsd-code-reviewer` audit (`.plan
 - Auto-detect login state on each scrape; alert via Telegram if session expired.
 - Branded Windows Task Scheduler entries: `munyun-daily-batch` (07:00 Mon-Fri) + `munyun-bot` (at logon).
 
-[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.1.1...HEAD
+[Unreleased]: https://github.com/7ustoo/automatic-munyun-machine/compare/v12.2.0...HEAD
+[12.2.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v12.1.3...v12.2.0
 [10.1.1]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.1.0...v10.1.1
 [10.1.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v10.0.0...v10.1.0
 [10.0.0]: https://github.com/7ustoo/automatic-munyun-machine/compare/v9.0.3...v10.0.0

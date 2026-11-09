@@ -18,7 +18,10 @@ for (const s of ['shoot.mjs', 'shoot-banner.mjs', 'v12-preview.mjs']) {
   // 27-job state before the stub flips at 15s; sharing the stub with the
   // screenshot suite made that precondition depend on the first suite's
   // runtime and fail whenever it took longer than 15 seconds.
-  const stub = spawn(process.execPath, [path.join(here, 'stub-server.mjs'), html], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const stub = spawn(process.execPath, [path.join(here, 'stub-server.mjs'), html], {
+    stdio: ['ignore', 'pipe', 'inherit'],
+    env: { ...process.env, AMM_STUB_STATIC_BATCH: s === 'shoot-banner.mjs' ? '0' : '1' },
+  });
   try {
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('stub startup timed out')), 10000);

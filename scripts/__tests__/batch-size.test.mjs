@@ -37,9 +37,10 @@ test('ranked target writes require a positive whole number', () => {
   for (const bad of ['', '0', '-1', '1.5', 'abc', String(Number.MAX_SAFE_INTEGER + 1)]) assert.equal(parseRankedBatchSize(bad), null);
 });
 
-test('keyword collection accepts a safe 1–1000 limit', () => {
-  for (const n of [1, 500, 1000]) assert.equal(parseKeywordBatchSize(String(n)), n);
-  for (const bad of [0, 1001, '1.5', 'x', Infinity]) assert.equal(parseKeywordBatchSize(bad), null);
+test('keyword collection accepts a safe positive count or all', () => {
+  for (const n of [1, 500, 1000, 2423, Number.MAX_SAFE_INTEGER]) assert.equal(parseKeywordBatchSize(String(n)), n);
+  assert.equal(parseKeywordBatchSize('all'), 'all');
+  for (const bad of [0, Number.MAX_SAFE_INTEGER + 1, '1.5', 'x', Infinity]) assert.equal(parseKeywordBatchSize(bad), null);
 });
 
 test('fractional stored values round to an integer', () => {

@@ -8,8 +8,9 @@ import { buildKeywordCollection } from '../scripts/keyword-collection.mjs';
 import { parseKeywordBatchSize } from '../scripts/batch-size.mjs';
 import { createApplyLinkCollector, directApplyKey, pruneApplyLinkCache, keywordSearchExtractor, keywordCandidateKey } from '../scripts/hcafe-apply-links.mjs';
 import { atomicWriteJson, atomicWriteText } from '../scripts/io-helpers.mjs';
-const target = process.argv[3] ? parseKeywordBatchSize(process.argv[3]) : 0;
-if (target === null) throw new Error('Target must be a whole number from 1 to 1000.');
+const requested = process.argv[3] ? parseKeywordBatchSize(process.argv[3]) : 0;
+if (requested === null) throw new Error('Target must be a positive whole number or "all".');
+const target = requested === 'all' ? Infinity : requested;
 const browser = await resolveBrowser();
 const ctx = await chromium.launch({ ...browser.launchOptions, headless: false,
   args: ['--window-position=10000,10000', '--disable-blink-features=AutomationControlled'] });
@@ -31,20 +32,21 @@ try {
       atomicWriteText(fileURLToPath(new URL('../data/live-keyword-links.txt', import.meta.url)), progress.rows.map(j => j.directUrl).join('\n') + '\n');
     } }) : null;
   const result = await crawlSearch({ page, url: 'https://hiringcafe.com/?searchState=' + encodeURIComponent(JSON.stringify(state)),
-    extract: target ? keywordSearchExtractor(extract) : extract, maxPages: target ? 5000 : 2, ...(target ? { targetJobs: target, jobKey: keywordCandidateKey,
+    extract: target ? keywordSearchExtractor(extract) : extract, maxPages: target ? Infinity : 2, ...(target ? { targetJobs: target, jobKey: keywordCandidateKey,
+      useSourceLastPage: true,
       expandGroups: rows => !rows.some(row => row.embeddedApplyLink),
       processPageRows: applyCollector.collect, targetCount: applyCollector.count,
       beforeRequest: applyCollector.beforeRequest, onThrottle: applyCollector.backoff } : {}), log: console.log });
   console.log(JSON.stringify({ coverage: result.coverage, jobs: result.rows.length }));
   if (target) {
     result.coverage.applyResolution = { ...applyCollector.stats };
-    const collection = buildKeywordCollection(applyCollector.rows(), state.searchQuery, target, [result.coverage]);
+    const collection = buildKeywordCollection(applyCollector.rows(), state.searchQuery, requested, [result.coverage]);
     const output = fileURLToPath(new URL('../data/live-keyword-collection.json', import.meta.url));
     atomicWriteJson(output, collection);
     atomicWriteText(fileURLToPath(new URL('../data/live-keyword-links.txt', import.meta.url)), collection.top.map(j => j.directUrl).join('\n') + '\n');
     console.log(JSON.stringify({ saved: collection.top.length, uniqueDirectLinks: new Set(collection.top.map(j => directApplyKey(j.directUrl))).size, output }));
     await applyCollector.close();
-    if (collection.top.length !== target) process.exitCode = 1;
+    if (requested === 'all' ? !result.coverage.complete : collection.top.length !== target) process.exitCode = 1;
   } else if (result.coverage.pages !== 2 || !result.rows.length) process.exitCode = 1;
   if (!target && result.rows.length) {
     await page.goto(result.rows[0].href, { waitUntil: 'domcontentloaded' });

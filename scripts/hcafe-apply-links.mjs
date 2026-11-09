@@ -151,6 +151,7 @@ export async function resolveJobApplyLink(page, href, { beforeRequest = async ()
 
 export function createApplyLinkCollector({ context, limit, concurrency = 3, log = () => {}, resolve = resolveJobApplyLink,
   cache = {}, checkpoint = () => {}, pacer = createRequestPacer() }) {
+  const targetSuffix = Number.isFinite(limit) ? `/${limit}` : '';
   const accepted = new Map();
   const checked = new Set();
   const stats = { attempted: 0, resolved: 0, embedded: 0, cached: 0, expired: 0, missing: 0, failed: 0, duplicates: 0 };
@@ -193,13 +194,13 @@ export function createApplyLinkCollector({ context, limit, concurrency = 3, log 
         if (accepted.size < limit) accepted.set(key, { ...row, directUrl: directApplyUrl(result.directUrl) });
         stats.resolved = accepted.size;
         if (accepted.size % 25 === 0) {
-          log(`  Direct apply links resolved: ${accepted.size}/${limit}.`);
+          log(`  Direct apply links resolved: ${accepted.size}${targetSuffix}.`);
           await saveProgress();
         }
       }
     }));
     await saveProgress();
-    log(`  Direct apply links: ${accepted.size}/${limit} (${stats.attempted} listings checked; ${stats.expired} expired, ${stats.missing} missing, ${stats.failed} failed, ${stats.duplicates} duplicates).`);
+    log(`  Direct apply links: ${accepted.size}${targetSuffix} (${stats.attempted} listings checked; ${stats.expired} expired, ${stats.missing} missing, ${stats.failed} failed, ${stats.duplicates} duplicates).`);
     if (paused) throw new Error(`site rate limit interrupted apply-link resolution; ${accepted.size} resolved links retained`);
   }
   return {

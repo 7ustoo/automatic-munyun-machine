@@ -51,13 +51,19 @@ export function selectNextSearchUrl(links, currentUrl, index) {
   return candidates.find(c => c.explicit)?.href || candidates[0]?.href || '';
 }
 
-export async function readSearchNavigation(page, currentUrl, index) {
-  const info = await page.evaluate(() => {
+export async function readSearchNavigation(page, currentUrl, index, useSourceLastPage = false) {
+  const info = await page.evaluate(({ index, useSourceLastPage }) => {
     const text = document.body.innerText;
     const count = /([\d,]+)\s+jobs\b/i.exec(text);
+    let searchData;
+    if (useSourceLastPage) try {
+      const props = JSON.parse(document.querySelector('#__NEXT_DATA__')?.textContent || 'null')?.props?.pageProps;
+      if (props?.ssrPage === index && Array.isArray(props.ssrHits) && !props.ssrError) searchData = props;
+    } catch { /* Keep the rendered count when the search payload is unavailable. */ }
     const controls = [...document.querySelectorAll('a[href], button[aria-label="Next page" i]')];
     return {
-      total: count ? Number(count[1].replace(/,/g, '')) : null,
+      total: Number.isSafeInteger(searchData?.ssrTotalCount) ? searchData.ssrTotalCount : count ? Number(count[1].replace(/,/g, '')) : null,
+      lastPage: searchData?.ssrIsLastPage === true,
       empty: /no jobs found|no results found/i.test(text),
       nextDisabled: controls.some(e => /^next page$/i.test(e.getAttribute('aria-label') || '')
         && (e.disabled || e.getAttribute('aria-disabled') === 'true')),
@@ -65,13 +71,13 @@ export async function readSearchNavigation(page, currentUrl, index) {
         label: e.getAttribute('aria-label'), rel: e.getAttribute('rel'),
         disabled: !!e.disabled || e.getAttribute('aria-disabled') === 'true' })),
     };
-  });
+  }, { index, useSourceLastPage });
   return { ...info, nextUrl: selectNextSearchUrl(info.links, currentUrl, index) };
 }
 
 export async function crawlSearch({ page, url, extract, maxPages = 300, targetJobs = Infinity,
   jobKey = row => row.href, processPageRows = async () => {}, targetCount = null,
-  expandGroups = true,
+  expandGroups = true, useSourceLastPage = false,
   beforeRequest = async () => {}, onThrottle = ms => page.waitForTimeout(ms),
   checkpoint = () => {}, log = () => {} }) {
   const rows = new Map();
@@ -117,12 +123,13 @@ export async function crawlSearch({ page, url, extract, maxPages = 300, targetJo
         await processPageRows(grouped);
         let navigation;
         for (let check = 0; check < 5; check++) {
-          navigation = await readSearchNavigation(page, target.href, index);
+          navigation = await readSearchNavigation(page, target.href, index, useSourceLastPage);
           if (navigation.total !== null) coverage.reportedTotal = navigation.total;
+          const sourceLastPage = useSourceLastPage && navigation.lastPage && !navigation.nextUrl;
           const exhausted = navigation.empty || (navigation.total !== null && rows.size >= navigation.total)
-            || (navigation.nextDisabled && navigation.total === null);
-          if (reachedTarget() || navigation.nextUrl || exhausted) {
-            result = { grouped, signature, nextUrl: navigation.nextUrl, exhausted, targetReached: reachedTarget() };
+            || ((navigation.nextDisabled || sourceLastPage) && navigation.total === null);
+          if (reachedTarget() || navigation.nextUrl || exhausted || sourceLastPage) {
+            result = { grouped, signature, nextUrl: navigation.nextUrl, exhausted, sourceLastPage, targetReached: reachedTarget() };
             break;
           }
           if (check < 4) {
@@ -143,13 +150,15 @@ export async function crawlSearch({ page, url, extract, maxPages = 300, targetJo
     coverage.nextPage = result.targetReached ? index : index + 1;
     coverage.targetReached = result.targetReached;
     coverage.reason = result.targetReached ? 'requested job count reached'
-      : result.nextUrl ? 'page safety limit reached' : 'end of results';
+      : result.nextUrl ? 'page safety limit reached'
+      : result.sourceLastPage && !result.exhausted ? 'HiringCafe reached its last page before returning its reported listing count' : 'end of results';
     coverage.complete = result.exhausted && !result.nextUrl;
+    if (result.sourceLastPage) coverage.lastAvailablePageReached = true;
     await checkpoint({ ...coverage, jobs: rows.size });
     log(`  page ${index + 1}: ${result.grouped.length} jobs including grouped cards (${rows.size} unique)`);
-    if (coverage.complete || coverage.targetReached) break;
+    if (coverage.complete || coverage.targetReached || result.sourceLastPage) break;
     nextUrl = new URL(result.nextUrl);
   }
   await checkpoint({ ...coverage, jobs: rows.size });
-  return { rows: [...rows.values()], coverage };
+  return { rows: [...rows.values()], coverage: { ...coverage, listingsScanned: rows.size } };
 }
