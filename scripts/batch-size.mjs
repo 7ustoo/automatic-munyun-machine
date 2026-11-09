@@ -9,7 +9,6 @@
 
 export const BATCH_SIZE_OPTIONS = [50, 100, 150, 200];
 export const DEFAULT_BATCH_SIZE = 200;
-export const MAX_KEYWORD_BATCH_SIZE = 1000;
 
 /**
  * Coerce any stored/typed value to a positive safe integer.
@@ -34,6 +33,5 @@ export function parseRankedBatchSize(value) {
 }
 
 export function parseKeywordBatchSize(value) {
-  const n = Number(value);
-  return Number.isSafeInteger(n) && n >= 1 && n <= MAX_KEYWORD_BATCH_SIZE ? n : null;
+  return value === 'all' ? 'all' : parseRankedBatchSize(value);
 }

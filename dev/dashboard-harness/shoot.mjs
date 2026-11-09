@@ -79,7 +79,7 @@ await shot("http://127.0.0.1:8765/#jobs", "09b-keyword-jobs.png", async () => {
   if (await page.locator('#lb-body button[data-act="why"]').count()) throw new Error('keyword job showed a match explanation');
   if (!await page.locator('#band-seg.hidden').count()) throw new Error('match filters visible for keyword jobs');
   const details = await page.locator('#st-funnel').textContent();
-  if (!details.includes('1/1000') || !details.includes('Stopped early: page 2: timeout')) throw new Error('partial keyword collection hid its target or stop reason');
+  if (!details.includes(`1 of ${(1000).toLocaleString()}`) || !details.includes('Stopped early: page 2: timeout')) throw new Error('partial keyword collection hid its target or stop reason');
 });
 const announcement = await page.evaluate(() => {
   onFreshBatch({ mode: 'keyword', keyword: 'cloud', jobCount: 1, funnel: { searchIncomplete: true } });
@@ -88,14 +88,15 @@ const announcement = await page.evaluate(() => {
 if (!announcement.includes('Collection stopped early')) throw new Error('partial collection announced success');
 await shot("http://127.0.0.1:8765/#jobs", "09c-keyword-direct-apply.png", async () => {
   await page.evaluate(async () => {
-    await useBatch({ date: '2026-10-30', mode: 'keyword', keyword: 'cloud', funnel: { mode: 'keyword', keyword: 'cloud', sent: 1, targetJobsPerBatch: 1,
-      directApplyLinks: true, searchCoverage: [{ pages: 1, targetReached: true }] }, jobs: [
+    await useBatch({ date: '2026-10-30', mode: 'keyword', keyword: 'cloud', funnel: { mode: 'keyword', keyword: 'cloud', sent: 1, pullAll: true, targetJobsPerBatch: null,
+      directApplyLinks: true, searchCoverage: [{ pages: 1, complete: true }] }, jobs: [
       { idx: 1, title: 'Cloud Engineer', company: 'Example', directUrl: 'https://employer.example/apply/1', viewjobUrl: '' }
     ] });
   });
   const apply = page.locator('#lb-body a').filter({ hasText: 'Apply' });
   if (await apply.getAttribute('href') !== 'https://employer.example/apply/1') throw new Error('keyword Apply button used a listing fallback');
-  if (!(await page.locator('#st-funnel').textContent()).includes('direct apply links')) throw new Error('direct collection mislabeled');
+  const details = await page.locator('#st-funnel').textContent();
+  if (!details.includes('1 unique direct apply link collected') || !details.includes('Reached the end of search results.')) throw new Error('Pull all results mislabeled');
 });
 // 10. First-run setup overlay
 await shot("http://127.0.0.1:8766/", "10-setup.png");

@@ -108,7 +108,7 @@ func TestGuardPost_AcceptsLocalhostName(t *testing.T) {
 
 func TestKeywordScrapeRejectsInvalidCountBeforeSpawn(t *testing.T) {
 	d := &dashboardServer{}
-	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/scrape", strings.NewReader(`{"mode":"keyword","term":"cloud","limit":"1001"}`))
+	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/scrape", strings.NewReader(`{"mode":"keyword","term":"cloud","limit":"9007199254740992"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	d.handleScrape(rec, req)

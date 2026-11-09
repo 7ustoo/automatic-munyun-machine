@@ -21,7 +21,7 @@ test('keyword collection keeps unique listings without scores or seen state', ()
 test('keyword collection caps results and validates its count', () => {
   const rows = [{ href: 'https://hiringcafe.com/job/a', directUrl: 'https://jobs.example/a' }, { href: 'https://hiringcafe.com/job/b', directUrl: 'https://jobs.example/b' }];
   assert.equal(buildKeywordCollection(rows, 'cloud', 1).top.length, 1);
-  assert.throws(() => buildKeywordCollection(rows, 'cloud', 1001));
+  assert.throws(() => buildKeywordCollection(rows, 'cloud', 0));
 });
 
 test('separate listings with matching company and title count separately', () => {
@@ -35,14 +35,18 @@ test('separate listings with matching company and title count separately', () =>
   assert.ok(top.every(j => !/[?#]/.test(j.href)));
 });
 
-test('a 1000-job collection exports all 1000 distinct employer apply links', () => {
-  const rows = Array.from({ length: 1020 }, (_, id) => ({ href: `https://hiringcafe.com/job/cloud-${id}`, directUrl: `https://jobs.example/cloud-${id}`, title: 'Cloud Engineer', company: 'Example' }));
-  const { top } = buildKeywordCollection(rows, 'cloud', 1000, [{ targetReached: true }]);
-  const exported = exportRows({ mode: 'keyword', funnel: { directApplyLinks: true }, jobs: top.map((j, i) => ({ idx: i + 1, title: j.title, viewjobUrl: j.href, directUrl: j.directUrl })) });
-  assert.equal(exported.length, 1000);
-  assert.equal(new Set(exported.map(j => j.applyUrl)).size, 1000);
-  assert.equal((buildExportCsv(exported).match(/https:\/\/jobs\.example\//g) || []).length, 1000);
-  assert.equal((buildExportTxt(exported).match(/https:\/\/jobs\.example\//g) || []).length, 1000);
+test('Pull all exports more than 1,000 distinct employer apply links', () => {
+  const rows = Array.from({ length: 2423 }, (_, id) => ({ href: `https://hiringcafe.com/job/cloud-${id}`, directUrl: `https://jobs.example/cloud-${id}`, title: 'Cloud Engineer', company: 'Example' }));
+  assert.equal(buildKeywordCollection(rows, 'cloud', 2000).top.length, 2000);
+  const { top, funnel } = buildKeywordCollection(rows, 'cloud', 'all', [{ complete: true }]);
+  assert.equal(funnel.pullAll, true);
+  assert.equal(funnel.targetJobsPerBatch, null);
+  assert.equal(funnel.searchIncomplete, false);
+  const exported = exportRows({ mode: 'keyword', funnel, jobs: top.map((j, i) => ({ idx: i + 1, title: j.title, viewjobUrl: j.href, directUrl: j.directUrl })) });
+  assert.equal(exported.length, 2423);
+  assert.equal(new Set(exported.map(j => j.applyUrl)).size, 2423);
+  assert.equal((buildExportCsv(exported).match(/https:\/\/jobs\.example\//g) || []).length, 2423);
+  assert.equal((buildExportTxt(exported).match(/https:\/\/jobs\.example\//g) || []).length, 2423);
 });
 
 test('keyword collection never substitutes a listing when the apply URL is missing', () => {

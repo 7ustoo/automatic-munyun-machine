@@ -88,10 +88,11 @@ const _thisFile = fileURLToPath(import.meta.url);
 const _invokedFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
 const IS_CLI = path.resolve(_thisFile) === _invokedFile;
 const KEYWORD_TERM = IS_CLI ? String(process.env.AMM_KEYWORD_SCRAPE_TERM || '').trim() : '';
-const KEYWORD_LIMIT = parseKeywordBatchSize(process.env.AMM_KEYWORD_SCRAPE_LIMIT);
+const KEYWORD_REQUEST = parseKeywordBatchSize(process.env.AMM_KEYWORD_SCRAPE_LIMIT);
+const KEYWORD_LIMIT = KEYWORD_REQUEST === 'all' ? Infinity : KEYWORD_REQUEST;
 const KEYWORD_MODE = !!KEYWORD_TERM;
 if (KEYWORD_MODE && (KEYWORD_TERM.length > 120 || /[\r\n\0]/.test(KEYWORD_TERM) || !KEYWORD_LIMIT)) {
-  throw new Error('Keyword collection requires a term and a limit from 1 to 1000.');
+  throw new Error('Keyword collection requires a term and a positive whole number or "all".');
 }
 
 // ---------- env ----------
@@ -488,7 +489,7 @@ async function _scrapeWith(ctx) {
   // stops offering a Next link long before it (observed 15–25 pages), so the
   // real end of the result set is what ends the loop. The old 50 was close
   // enough to real page counts to look like a legitimate stopping point.
-  const MAX_PAGES_PER_QUERY = KEYWORD_MODE || SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
+  const MAX_PAGES_PER_QUERY = KEYWORD_MODE ? Infinity : SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
 
   // v1.0.x: target-driven cross-query early stop. After each query's
   // pagination, we compute the running fresh-after-dedup count. If it
@@ -519,6 +520,7 @@ async function _scrapeWith(ctx) {
       ({ rows: allRows, coverage } = await crawlSearch({
         page, url, extract: KEYWORD_MODE ? keywordSearchExtractor(EXTRACT_FN) : EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
         ...(KEYWORD_MODE ? { targetJobs: KEYWORD_LIMIT, jobKey: keywordCandidateKey,
+          useSourceLastPage: true,
           expandGroups: rows => !rows.some(row => row.embeddedApplyLink),
           processPageRows: applyCollector.collect, targetCount: applyCollector.count,
           beforeRequest: applyCollector.beforeRequest, onThrottle: applyCollector.backoff } : {}),
@@ -1606,12 +1608,12 @@ if (IS_CLI) (async () => {
     if (KEYWORD_MODE) {
       // A manual collection is a plain search result set. It intentionally
       // ignores CV scores, match filters, local seen history, and AI services.
-      const { top, funnel } = buildKeywordCollection(byQuery['manual-keyword'], KEYWORD_TERM, KEYWORD_LIMIT, Object.values(searchCoverage));
+      const { top, funnel } = buildKeywordCollection(byQuery['manual-keyword'], KEYWORD_TERM, KEYWORD_REQUEST, Object.values(searchCoverage));
       const directUrls = top.map(row => row.directUrl);
       writeBatchTsv(top, directUrls, funnel);
       try { writeApplyLinksTxt(); } catch (e) { log(`Keyword links text export skipped: ${SCRUB(e.message || e)}`); }
       writeScrapeStatus(true, { jobCount: top.length, mode: 'keyword' });
-      log(`Keyword collection complete: ${top.length}/${KEYWORD_LIMIT} unique direct apply links for "${KEYWORD_TERM}".`);
+      log(`Keyword collection ${funnel.searchIncomplete ? 'stopped early' : 'finished'}: ${top.length} unique direct apply links for "${KEYWORD_TERM}".`);
       return;
     }
     // v5.0: pull configured ATS boards (best-effort, never throws) and merge

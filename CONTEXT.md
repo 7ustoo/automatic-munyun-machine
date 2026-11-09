@@ -2,10 +2,16 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 12.1.3
-**Active release branch:** `v12.1.3`
+**Version:** 12.2.0
+**Active release branch:** `v12.2.0`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-10-30
+**Last refreshed:** 2026-11-09
+
+### v12.2.0 keyword collection
+
+- Settings offers **Pull all** or a custom positive whole-number count. The guarded keyword scrape endpoint accepts `limit: "all"` or a numeric string. Pull all follows available result pages until the end is verified or pagination is interrupted. It keeps unique direct apply destinations and publishes `funnel.pullAll: true` with a null target for an exhaustive request. Existing counted batches keep their numeric targets.
+- Keyword collection reads HiringCafe's explicit last-page indicator. If the site's reported count exceeds the number of returned listings, the dashboard shows both counts and keeps the direct links from all available pages.
+- `node dev/live-hcafe-search.mjs linux all` exercises the full traversal in an isolated browser without publishing a dashboard batch or marking jobs seen. On 2026-11-09 it reached page 36, the last available page, and collected 2,059 unique direct apply links from 2,062 distinct listings. The site reported 3,492 matches.
 
 ### v12.1.3 keyword direct application links
 
@@ -72,7 +78,7 @@
 
 ## Product
 
-Automatic Munyun Machine (AMM) is a local-first desktop job-search assistant. It collects jobs from hiring.cafe and optional public Greenhouse, Lever, and Ashby feeds, ranks them against a user's resume, and delivers a configurable number of jobs. A separate manual hiring.cafe keyword collection can gather up to 1,000 jobs with direct employer application links, without resume matching.
+Automatic Munyun Machine (AMM) is a local-first desktop job-search assistant. It collects jobs from hiring.cafe and optional public Greenhouse, Lever, and Ashby feeds, ranks them against a user's resume, and delivers a configurable number of jobs. A separate manual hiring.cafe keyword collection can gather direct employer application links from all available results or stop at a user-entered count, without resume matching.
 
 The local desktop dashboard is the primary interface. Telegram and Gmail delivery are optional. AMM is profession-agnostic: resume parsing and search suggestions cover technology, healthcare, sales, finance, marketing, education, HR, administration, and skilled trades.
 

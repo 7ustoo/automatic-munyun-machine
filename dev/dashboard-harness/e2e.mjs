@@ -117,6 +117,21 @@ await page.click('#history-back');
 await page.waitForFunction(() => document.querySelector('#history-view-bar')?.classList.contains('hidden'));
 if (await page.locator('#open-jobs-menu').getAttribute('aria-disabled') !== 'false') throw new Error('Back to latest did not restore current-batch actions');
 
+await page.goto('http://127.0.0.1:8765/#settings', { waitUntil: 'networkidle' });
+const keyword = page.getByRole('textbox', { name: 'Search keyword' });
+await keyword.fill('linux');
+const count = page.getByRole('spinbutton', { name: 'Number of links' });
+const allRequest = page.waitForRequest(r => r.url().endsWith('/api/scrape') && r.method() === 'POST');
+await page.getByRole('button', { name: 'Pull all' }).click();
+const allBody = (await allRequest).postDataJSON();
+if (allBody.mode !== 'keyword' || allBody.term !== 'linux' || allBody.limit !== 'all') throw new Error('Pull all did not send the full keyword request');
+await page.waitForFunction(() => document.querySelector('#toast')?.textContent.includes('Checking every available page'));
+await page.getByText('Collect a specific number instead', { exact: true }).click();
+await count.fill('2423');
+const countedRequest = page.waitForRequest(r => r.url().endsWith('/api/scrape') && r.method() === 'POST');
+await count.press('Enter');
+if ((await countedRequest).postDataJSON().limit !== '2423') throw new Error('custom keyword count above 1,000 did not reach the server');
+
 if (errors.length) throw new Error('dashboard console errors:\n' + errors.join('\n'));
 await browser.close();
-console.log('E2E: dashboard jobs, profiles, Gmail OAuth, and previous scrapes passed');
+console.log('E2E: dashboard jobs, profiles, Gmail OAuth, previous scrapes, and keyword collection passed');

@@ -266,14 +266,14 @@
   button.ghost:hover:not(:disabled) { background: var(--surface-2); border-color: var(--border-2); color: var(--text); }
 
   /* ---- Inputs ------------------------------------------------------------- */
-  input[type=text], input[type=file], select {
+  input[type=text], input[type=number], input[type=file], select {
     font: inherit; color: var(--text); background: var(--bg);
     border: 1px solid var(--border-2); border-radius: var(--r-md); padding: 7px 10px;
     transition: border-color .12s var(--ease);
   }
   input[type=text] { width: 100%; }
-  input[type=text]:focus, select:focus { outline: none; border-color: var(--accent); }
-  input[type=text]::placeholder { color: var(--text-3); }
+  input[type=text]:focus, input[type=number]:focus, select:focus { outline: none; border-color: var(--accent); }
+  input[type=text]::placeholder, input[type=number]::placeholder { color: var(--text-3); }
   input.num, select { width: 150px; }
   input[type=file] { padding: 6px 8px; font-size: 12.5px; color: var(--text-2); max-width: 100%; }
   input[type=file]::file-selector-button {
@@ -846,6 +846,19 @@
   .batch-size-controls { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
   .batch-size-controls .custom-batch { display: flex; align-items: center; gap: 8px; }
   .batch-size-controls .custom-batch label { font-size: 12px; color: var(--text-2); }
+  .keyword-card { margin: 14px 0; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-2); }
+  .keyword-header { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  .keyword-icon { flex: none; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 10px; background: var(--accent-dim); color: var(--accent-2); }
+  .keyword-header h3 { margin: 0; font-size: 15px; }
+  .keyword-header p, .keyword-note { margin: 4px 0 0; color: var(--text-2); font-size: 12px; }
+  .keyword-field { display: block; margin-bottom: 6px; font-size: 12px; font-weight: 700; }
+  .keyword-controls { display: flex; flex-wrap: wrap; gap: 8px; }
+  .keyword-controls input { flex: 1 1 130px; min-width: 0; }
+  :root[data-theme="dark"] .keyword-controls button.primary { color: #142920; }
+  .keyword-count { margin-top: 12px; font-size: 12px; }
+  .keyword-count summary { width: fit-content; color: var(--text-2); cursor: pointer; }
+  .keyword-count[open] summary { margin-bottom: 10px; }
+  .keyword-count .keyword-controls { max-width: 320px; }
   .settings-advanced, .extra-searches, .setup-advanced { border: 1px solid var(--border); border-radius: 14px; margin-top: 18px; background: var(--surface-2); }
   .settings-advanced summary, .extra-searches summary, .setup-advanced summary { cursor: pointer; padding: 16px 18px; font-weight: 700; list-style-position: inside; }
   .settings-advanced summary span, .extra-searches summary span, .setup-advanced summary span { float: right; color: var(--text-3); font-size: 12px; font-weight: 500; }
@@ -1686,13 +1699,26 @@
               </div>
               <div class="custom-batch"><label for="set-batch-size">Custom amount</label><input type="number" id="set-batch-size" class="num" min="1" step="1" inputmode="numeric" placeholder="Enter any amount" /></div>
             </div></div>
-          <div class="set-row"><label for="keyword-term">Collect hiring.cafe jobs by keyword</label>
-            <form id="keyword-scrape-form" class="row" style="gap:8px;flex-wrap:wrap">
-              <input type="text" id="keyword-term" maxlength="120" placeholder="cloud" autocomplete="off" required style="min-width:130px;flex:1" />
-              <input type="number" id="keyword-limit" class="num" min="1" max="1000" step="1" value="1000" aria-label="Maximum jobs to collect, 1 to 1000" required />
-              <button type="submit" class="sm">Collect jobs</button>
-            </form></div>
-          <div class="hint">Collect direct employer application links using the keyword and your workplace settings, without resume matching. Listings with missing apply links are replaced from later pages.</div>
+          <form id="keyword-scrape-form" class="keyword-card" aria-labelledby="keyword-heading">
+            <div class="keyword-header">
+              <span class="keyword-icon" aria-hidden="true"><svg class="ic"><use href="#i-download"/></svg></span>
+              <div><h3 id="keyword-heading">Keyword collection</h3><p>Get direct employer apply links from hiring.cafe without resume matching.</p></div>
+            </div>
+            <label class="keyword-field" for="keyword-term">Search keyword</label>
+            <div class="keyword-controls">
+              <input type="text" id="keyword-term" maxlength="120" placeholder="e.g. linux" autocomplete="off" aria-describedby="keyword-note" required />
+              <button type="submit" value="all" class="primary" formnovalidate>Pull all</button>
+            </div>
+            <p class="keyword-note" id="keyword-note">Checks every available page using this profile’s workplace and location settings.</p>
+            <details class="keyword-count">
+              <summary>Collect a specific number instead</summary>
+              <label class="keyword-field" for="keyword-limit">Number of links</label>
+              <div class="keyword-controls">
+                <input type="number" id="keyword-limit" min="1" step="1" inputmode="numeric" placeholder="e.g. 2500" required />
+                <button type="submit" value="count" id="keyword-count-submit">Collect links</button>
+              </div>
+            </details>
+          </form>
           <div class="set-row"><label>Show salary on jobs</label>
             <select id="set-show-salary"><option value="true">Yes</option><option value="false">No</option></select></div>
           <div class="set-row"><label>Weekday morning scrape</label>
@@ -2193,8 +2219,9 @@ function onFreshBatch(lb) {
     ? `${lb.jobCount || 0} ${lb?.funnel?.directApplyLinks ? "direct apply links" : "hiring.cafe listings"} collected for “${lb.keyword || "keyword"}”`
     : lb?.jobCount ? `${lb.jobCount} jobs ranked` : "new jobs are in";
   const partial = lb?.mode === "keyword" && lb?.funnel?.searchIncomplete;
-  const outcome = partial ? "Collection stopped early" : "Scrape complete";
-  $("bb-text").textContent = `${outcome} — ${what}${lb?.date ? ` for ${lb.date}` : ""}.${partial ? " See the collection details for the stop reason." : ""}`;
+  const atLastPage = partial && lb.funnel.searchCoverage?.some(q => q.lastAvailablePageReached);
+  const outcome = atLastPage ? "Last available page reached" : partial ? "Collection stopped early" : "Scrape complete";
+  $("bb-text").textContent = `${outcome} — ${what}${lb?.date ? ` for ${lb.date}` : ""}.${partial ? " See collection details in Jobs." : ""}`;
   $("batch-banner").classList.remove("hidden");
   toast(`${outcome} — ${what}.`, partial ? "bad" : "good");
   loadTrends(true); // v4.6: today's snapshot just landed — refresh Trends
@@ -2389,10 +2416,16 @@ function funnelLineJS(f) {
   if (f.mode === "keyword") {
     const coverage = f.searchCoverage || [];
     const pages = coverage.reduce((sum, q) => sum + (q.pages || 0), 0);
-    const stop = f.searchIncomplete
+    const last = coverage.find(q => q.lastAvailablePageReached && !q.complete && !q.targetReached);
+    const stop = last
+      ? `Last available page reached. HiringCafe showed ${last.reportedTotal.toLocaleString()} jobs and returned ${last.listingsScanned.toLocaleString()} distinct listings.`
+      : f.searchIncomplete
       ? `Stopped early: ${coverage.filter(q => !q.complete && !q.targetReached).map(q => q.reason || "search interrupted").join("; ") || "search interrupted"}.`
-      : f.sent >= f.targetJobsPerBatch ? "Requested count reached." : "Reached the end of search results.";
-    return `${f.sent || 0}/${f.targetJobsPerBatch || 0} unique ${f.directApplyLinks ? "direct apply links" : "listings"} collected for “${f.keyword || ""}” across ${pages} result pages. ${stop} ${f.directApplyLinks ? "Links open the employer or ATS application page." : "Links open the hiring.cafe listings."}`;
+      : !f.pullAll && f.sent >= f.targetJobsPerBatch ? "Requested count reached." : "Reached the end of search results.";
+    const collected = (f.sent || 0).toLocaleString();
+    const count = f.pullAll ? collected : `${collected} of ${(f.targetJobsPerBatch || 0).toLocaleString()}`;
+    const label = f.directApplyLinks ? "direct apply link" : "listing";
+    return `${count} unique ${label}${f.sent === 1 && f.pullAll ? "" : "s"} collected for “${f.keyword || ""}” across ${pages.toLocaleString()} result page${pages === 1 ? "" : "s"}. ${stop} ${f.directApplyLinks ? "Links open the employer or ATS application page." : "Links open the hiring.cafe listings."}`;
   }
   const seen = Math.max(0, (f.keptAfterFilter || 0) - (f.afterDedup || 0));
   const checked = f.descriptionEvaluated ?? f.scored ?? 0;
@@ -2734,23 +2767,34 @@ $("scrape-btn").addEventListener("click", async () => {
     setTimeout(() => { btn.disabled = false; labelEl.textContent = label; }, 5000);
   }
 });
+$("keyword-limit").addEventListener("keydown", e => {
+  if (e.key !== "Enter" || e.isComposing) return;
+  e.preventDefault();
+  $("keyword-count-submit").click();
+});
 $("keyword-scrape-form").addEventListener("submit", async e => {
   e.preventDefault();
-  const term = $("keyword-term").value.trim();
+  const field = $("keyword-term");
+  field.value = field.value.trim();
+  if (!field.reportValidity()) return;
+  const term = field.value;
+  const all = e.submitter?.value !== "count";
   const limit = Number($("keyword-limit").value);
-  if (!term || !Number.isInteger(limit) || limit < 1 || limit > 1000) return toast("Enter a keyword and a number from 1 to 1000.", "bad");
-  const button = $("keyword-scrape-form").querySelector('button[type="submit"]');
-  button.disabled = true;
+  if (!all && (!Number.isSafeInteger(limit) || limit < 1)) return toast("Enter a positive whole number.", "bad");
+  const buttons = e.currentTarget.querySelectorAll('button[type="submit"]');
+  buttons.forEach(button => { button.disabled = true; });
   try {
-    const r = await postJSON("/api/scrape", { mode: "keyword", term, limit: String(limit), watch: String($("watch-scrape").checked) });
+    const r = await postJSON("/api/scrape", { mode: "keyword", term, limit: all ? "all" : String(limit), watch: String($("watch-scrape").checked) });
     if (!r.ok) return toast(r.error || "Could not start keyword collection.", "bad");
     localScrapePending = true;
     $("scrapebar").classList.add("active");
     clearTimeout(scrapeSafetyTimer);
     scrapeSafetyTimer = setTimeout(() => { localScrapePending = false; $("scrapebar").classList.remove("active"); }, 45 * 60 * 1000);
-    toast(`Collecting up to ${limit} direct employer apply links for “${term}”. Results will appear in Jobs.`, "good");
+    toast(all
+      ? `Checking every available page for “${term}”. Direct apply links will appear in Jobs.`
+      : `Collecting up to ${limit.toLocaleString()} direct apply links for “${term}”. Results will appear in Jobs.`, "good");
   } catch (err) { toast("Could not start keyword collection: " + err.message, "bad"); }
-  finally { button.disabled = false; }
+  finally { buttons.forEach(button => { button.disabled = false; }); }
 });
 $("refresh-btn").addEventListener("click", refreshActiveBatch);
 // ---- Settings ----

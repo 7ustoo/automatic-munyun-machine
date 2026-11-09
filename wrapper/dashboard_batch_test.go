@@ -56,25 +56,25 @@ func TestReadFullBatch_AllJobsAndMatched(t *testing.T) {
 func TestKeywordBatch_ExposesModeAndAllListings(t *testing.T) {
 	dir := t.TempDir()
 	writeBatch(t, dir, `[]`)
-	jobs := make([]string, 1000)
+	jobs := make([]string, 2423)
 	for i := range jobs {
 		jobs[i] = fmt.Sprintf(`{"idx":%d,"title":"Cloud job","viewjobUrl":"https://hiring.cafe/job/%d"}`, i+1, i+1)
 	}
-	body := `{"date":"2026-10-30","mode":"keyword","keyword":"cloud","funnel":{"targetJobsPerBatch":1000,"searchIncomplete":false},"jobs":[` + strings.Join(jobs, ",") + `]}`
+	body := `{"date":"2026-10-30","mode":"keyword","keyword":"cloud","funnel":{"pullAll":true,"targetJobsPerBatch":null,"searchIncomplete":false},"jobs":[` + strings.Join(jobs, ",") + `]}`
 	p := filepath.Join(dir, "data", "profiles", "default", "last-batch.json")
 	if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	full := readFullBatch(dir)
-	if full.Mode != "keyword" || full.Keyword != "cloud" || len(full.Jobs) != 1000 {
+	if full.Mode != "keyword" || full.Keyword != "cloud" || len(full.Jobs) != len(jobs) {
 		t.Fatalf("keyword batch missing data: mode=%q keyword=%q jobs=%d", full.Mode, full.Keyword, len(full.Jobs))
 	}
 	out := statusResponse{}
 	readLastBatchInto(dir, "default", &out)
-	if out.LastBatch.Mode != "keyword" || out.LastBatch.JobCount != 1000 {
+	if out.LastBatch.Mode != "keyword" || out.LastBatch.JobCount != len(jobs) {
 		t.Fatalf("status missing keyword batch: %+v", out.LastBatch)
 	}
-	if !strings.Contains(string(out.LastBatch.Funnel), `"targetJobsPerBatch":1000`) {
+	if !strings.Contains(string(out.LastBatch.Funnel), `"pullAll":true`) {
 		t.Fatalf("status must include collection outcome for completion notifications: %s", out.LastBatch.Funnel)
 	}
 }

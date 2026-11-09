@@ -61,6 +61,21 @@ test('missing navigation with remaining reported jobs is incomplete', async () =
   assert.match(r.coverage.reason, /end of results not verified/);
 });
 
+test('an explicit last page retains all exposed listings and reports a count discrepancy', async () => {
+  const page = fakePage([[row('a')], [row('b')]]);
+  const evaluate = page.evaluate;
+  page.evaluate = async expression => {
+    const result = await evaluate(expression);
+    return typeof expression === 'string' ? result : { ...result, total: 3, lastPage: result.nextDisabled };
+  };
+  const r = await crawlSearch({ page, url: 'https://hiringcafe.com/', extract: '', useSourceLastPage: true });
+  assert.deepEqual(page.visits, [0, 1]);
+  assert.equal(r.coverage.pages, 2);
+  assert.equal(r.coverage.listingsScanned, 2);
+  assert.equal(r.coverage.lastAvailablePageReached, true);
+  assert.equal(r.coverage.complete, false);
+});
+
 test('paging target can count resolved apply links instead of raw listings', async () => {
   let resolved = 0;
   const page = fakePage([[row('a'), row('b')], [row('c'), row('d')], [row('e')]]);

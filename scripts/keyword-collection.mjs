@@ -6,13 +6,14 @@ export function buildKeywordCollection(rows, term, requested, coverage = []) {
   const keyword = String(term || '').trim();
   const limit = parseKeywordBatchSize(requested);
   if (!keyword || keyword.length > 120 || /[\r\n\0]/.test(keyword) || !limit) {
-    throw new Error('Keyword collection requires a term and a limit from 1 to 1000.');
+    throw new Error('Keyword collection requires a term and a positive whole number or "all".');
   }
   const valid = (Array.isArray(rows) ? rows : []).filter(r => keywordCandidateKey(r) && directApplyKey(r.directUrl));
   const unique = new Map();
   for (const row of valid) unique.set(directApplyKey(row.directUrl), { ...row,
     href: keywordListingUrl(row.href) || directApplyUrl(row.href), directUrl: directApplyUrl(row.directUrl) });
-  const top = [...unique.values()].slice(0, limit).map(r => ({ ...r, q: keyword }));
+  const pullAll = limit === 'all';
+  const top = [...unique.values()].slice(0, pullAll ? unique.size : limit).map(r => ({ ...r, q: keyword }));
   return {
     top,
     funnel: {
@@ -20,7 +21,7 @@ export function buildKeywordCollection(rows, term, requested, coverage = []) {
       directApplyLinks: true,
       uniqueBeforeFilter: unique.size, droppedDuplicates: valid.length - unique.size,
       keptAfterFilter: unique.size, afterDedup: unique.size,
-      targetJobsPerBatch: limit, sent: top.length,
+      pullAll, targetJobsPerBatch: pullAll ? null : limit, sent: top.length,
       searchCoverage: coverage, searchIncomplete: coverage.some(q => !q.complete && !q.targetReached),
       smartMatchStatus: 'skipped',
     },
