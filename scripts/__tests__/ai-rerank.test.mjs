@@ -11,9 +11,10 @@ const options = {
 test('full review adds explicit eligibility reasons without changing percentage ratings and rejects missing exclusions',async()=>{
   const key=`sk-proj-${'o'.repeat(32)}`;
   const reviewed=[{...ratings[0],exclusions:['Remote work is restricted to a country outside the stated preference.']}];
-  const result=await aiRerank({...options,apiKey:key,preferences:{location:'United States'},fetchImpl:okJson({choices:[{finish_reason:'stop',message:{content:JSON.stringify({ratings:reviewed})}}]},(_url,_init,body)=>{
+  const result=await aiRerank({...options,apiKey:key,preferences:{location:'United States',roleFilters:{excludeSalesRoles:true}},fetchImpl:okJson({choices:[{finish_reason:'stop',message:{content:JSON.stringify({ratings:reviewed})}}]},(_url,_init,body)=>{
     const item=body.response_format.json_schema.schema.properties.ratings.items;
     assert.ok(item.required.includes('exclusions'));assert.match(body.messages[0].content,/United States/);
+    assert.match(body.messages[0].content,/"excludeSalesRoles":true/);assert.match(body.messages[0].content,/actual responsibilities/);
   })});
   assert.equal(result[0].fit,91);assert.deepEqual(result[0].exclusions,reviewed[0].exclusions);
   await assert.rejects(()=>aiRerank({...options,apiKey:key,preferences:{},fetchImpl:okJson({choices:[{finish_reason:'stop',message:{content:JSON.stringify({ratings})}}]},()=>{})}),/exclusions/);

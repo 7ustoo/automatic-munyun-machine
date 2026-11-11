@@ -742,7 +742,8 @@ async function applySmartMatch(rows) {
     let ratings;
     try {
       ratings = await aiRerank({ apiKey: AI_CFG.apiKey, cvSummary, candidates,
-        ...(SMART_CATALOG ? { preferences: { user: CFG.user, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location, filters: CFG.filters } } : {}) });
+        ...(SMART_CATALOG ? { preferences: { user: CFG.user, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location, filters: CFG.filters,
+          roleFilters: { excludeConsultantRoles: SCORING.ai?.excludeConsultantRoles !== false, excludeLeadRoles: SCORING.ai?.excludeLeadRoles !== false, excludeSalesRoles: SCORING.ai?.excludeSalesRoles !== false } } } : {}) });
       const unique = new Set((ratings || []).map(r => r.n).filter(n => Number.isInteger(n) && n >= 0 && n < batch.length));
       if (unique.size !== batch.length) throw new Error(`incomplete response (${unique.size}/${batch.length} jobs)`);
     } catch (e) {
