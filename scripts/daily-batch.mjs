@@ -742,7 +742,8 @@ async function applySmartMatch(rows) {
     let ratings;
     try {
       ratings = await aiRerank({ apiKey: AI_CFG.apiKey, cvSummary, candidates,
-        ...(SMART_CATALOG ? { preferences: { user: CFG.user, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location, filters: CFG.filters,
+        ...(SMART_CATALOG ? { preferences: { user: CFG.user, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location,
+          filters: { ...CFG.filters, filterManagementTitles: SCORING.ai?.excludeLeadRoles !== false, filterSalesTitles: SCORING.ai?.excludeSalesRoles !== false },
           roleFilters: { excludeConsultantRoles: SCORING.ai?.excludeConsultantRoles !== false, excludeLeadRoles: SCORING.ai?.excludeLeadRoles !== false, excludeSalesRoles: SCORING.ai?.excludeSalesRoles !== false } } } : {}) });
       const unique = new Set((ratings || []).map(r => r.n).filter(n => Number.isInteger(n) && n >= 0 && n < batch.length));
       if (unique.size !== batch.length) throw new Error(`incomplete response (${unique.size}/${batch.length} jobs)`);
@@ -1612,8 +1613,8 @@ async function runSmartCatalog(atsCards, byQuery) {
     const reasons = [...(row.aiExclusions || [])];
     const settings = SCORING.ai || {};
     if (settings.excludeConsultantRoles !== false && (/\bconsult(?:ant|ing)\b/i.test(row.title) || analyzeConsultantSlop({ title: row.title, text: row.__jd }, 'balanced').excluded)) reasons.push('Consultant or customer consulting duties are excluded in Smart Match.');
-    if ((settings.excludeLeadRoles !== false || CFG.filters?.filterManagementTitles) && isManagementTitle(row.title)) reasons.push('Lead or management role is excluded in Smart Match.');
-    if ((settings.excludeSalesRoles !== false || CFG.filters?.filterSalesTitles) && (isSalesTitle(row.title) || /pre[- ]?sales/i.test(row.title))) reasons.push('Sales or pre-sales role is excluded in Smart Match.');
+    if (settings.excludeLeadRoles !== false && isManagementTitle(row.title)) reasons.push('Lead or management role is excluded in Smart Match.');
+    if (settings.excludeSalesRoles !== false && (isSalesTitle(row.title) || /pre[- ]?sales/i.test(row.title))) reasons.push('Sales or pre-sales role is excluded in Smart Match.');
     if (CFG.filters?.filterClearance && CLEARANCE_RX.test(row.title + ' ' + row.__jd)) reasons.push('Posting requires clearance or citizenship excluded by this profile.');
     if (SKIP_COMPANIES.some(company => String(company).toLowerCase() === row.company.toLowerCase())) reasons.push('Company is on your blocked list.');
     if (row.title && DROP_TITLE.test(row.title)) reasons.push('Title matches this profile’s excluded-title rule.');

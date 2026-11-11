@@ -105,6 +105,8 @@ The **Smart Match** page has Overview, Results, Excluded and Job history tabs. S
 
 Consultant, lead/management and sales/pre-sales switches keep unwanted roles in **Excluded**, with their percentages and reasons. **Restore** overrides an exclusion. **Mark applied** records an application separately; collecting and reviewing never mark a job applied. Different openings at one company stay separate. CSV and Excel exports include direct application links, percentages and reasons for the selected view.
 
+Smart Match’s role switches control full reviews, including duties hidden behind technical titles. Standard matching keeps its separate advanced title filters.
+
 **Trends** offers an overview, keyword comparison and scrape history. Choose a date range and keyword to see collection hits, deduplicated jobs, strong (70%+), stretch (50–69%), below 50% and awaiting review. Keyword totals can overlap; the overall unique count deduplicates them. Awaiting review is separate from match quality. Earlier history only describes delivered batches and is labeled accordingly. Your saved percentage floor and scoring blend stay unchanged.
 
 The same provider can analyze the scanned resume itself. On upload—or when you press **Analyze with AI**—AMM sends up to 24,000 characters of extracted resume text and saves the resulting summary, seniority, target roles, and search keywords only to that profile. AI-reported skills affect matching only when the response includes a phrase found in the resume. If no key is configured or the call fails, the built-in local parser and recommendations remain active.
