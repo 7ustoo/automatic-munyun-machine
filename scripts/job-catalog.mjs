@@ -171,7 +171,7 @@ export async function catalogAction(file, action, id) {
       for (const job of Object.values(catalog.jobs)) if (!job.appliedAt) { job.forceReview = true; job.forceReviewAt = new Date().toISOString(); }
       return;
     }
-    const job = catalog.jobs[id];
+    const job = /^[a-f0-9]{24}$/.test(id || '') && Object.hasOwn(catalog.jobs, id) ? catalog.jobs[id] : null;
     if (!job) throw new Error('That job is no longer in this profile');
     const at = new Date().toISOString();
     if (action === 'recheck') { job.forceReview = true; job.forceReviewAt = at; }

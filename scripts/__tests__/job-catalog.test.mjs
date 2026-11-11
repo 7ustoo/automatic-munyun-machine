@@ -70,3 +70,9 @@ test('a newly resolved application link merges earlier source-only sightings and
  await collectCatalogRows(file,runId,'linux',[row(1)],1);
  const c=readCatalog(file);assert.equal(Object.keys(c.jobs).length,1);assert.equal(c.runs[0].ids.length,1);assert.deepEqual(Object.keys(Object.values(c.jobs)[0].queries).sort(),['cloud','linux']);
 });
+
+test('job actions reject object-prototype names and unknown IDs',async t=>{
+ const {file}=fixture(t);await beginCatalogRun(file,'smart','ctx');
+ for(const id of ['__proto__','constructor','a'.repeat(24)]) await assert.rejects(()=>catalogAction(file,'exclude',id),/no longer/);
+ assert.equal(Object.keys(readCatalog(file).jobs).length,0);
+});

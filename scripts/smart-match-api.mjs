@@ -73,7 +73,7 @@ export function smartTrendsGet(options = {}) {
 export async function smartMatchAction(action, id) {
   const { pp, catalog } = activeCatalog();
   if (action === 'applied') {
-    const job = catalog.jobs[id];
+    const job = /^[a-f0-9]{24}$/.test(id || '') && Object.hasOwn(catalog.jobs, id) ? catalog.jobs[id] : null;
     if (!job) throw new Error('Job is missing from this profile.');
     await recordAppliedJob(pp.appliedJobs, job, job.directUrl || job.href);
   }
