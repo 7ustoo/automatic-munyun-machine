@@ -62,6 +62,10 @@ func actionRunScrape(installDir string, showBrowser bool) {
 }
 
 func actionRunScrapeWithKeyword(installDir string, showBrowser bool, keyword, limit string) {
+	actionRunScrapeMode(installDir, showBrowser, keyword, limit, "")
+}
+
+func actionRunScrapeMode(installDir string, showBrowser bool, keyword, limit, mode string) {
 	scriptPath := filepath.Join(installDir, "scripts", "daily-batch.mjs")
 	if _, err := os.Stat(scriptPath); err != nil {
 		log.Printf("action.scrape: daily-batch.mjs not found at %s", scriptPath)
@@ -70,6 +74,12 @@ func actionRunScrapeWithKeyword(installDir string, showBrowser bool, keyword, li
 	cmd := exec.Command(findNode(), scriptPath)
 	cmd.Dir = installDir
 	cmd.Env = os.Environ()
+	if mode == "smart" || mode == "resume" {
+		cmd.Env = append(cmd.Env, "AMM_SMART_MATCH=1")
+		if mode == "resume" {
+			cmd.Env = append(cmd.Env, "AMM_SMART_MATCH_RESUME=1")
+		}
+	}
 	if showBrowser {
 		cmd.Env = append(cmd.Env, "AMM_SHOW_BROWSER=1")
 	}

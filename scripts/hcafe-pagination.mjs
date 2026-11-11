@@ -120,7 +120,7 @@ export async function crawlSearch({ page, url, extract, maxPages = 300, targetJo
         if (index && (!base.length || signatures.has(signature))) throw new Error('page repeated or unexpectedly empty');
         const grouped = await readGroupedPage(page, extract, addRows, reachedTarget,
           typeof expandGroups === 'function' ? expandGroups(base) : expandGroups);
-        await processPageRows(grouped);
+        await processPageRows(grouped, { page: index, url: target.href });
         let navigation;
         for (let check = 0; check < 5; check++) {
           navigation = await readSearchNavigation(page, target.href, index, useSourceLastPage);

@@ -12,7 +12,14 @@
 
 ## What AMM does
 
-### What happens when you click Scrape (v10.2)
+### What happens when you use Smart Match (v12.3)
+
+1. AMM collects every available page across your profile’s keywords and saves each unique posting locally with its direct application link.
+2. It reads full descriptions and reviews new or changed jobs against your resume. Unchanged decisions can be reused. Progress is saved between small review batches.
+3. Results and Excluded retain percentages and reasons; Job history remembers all collected jobs. You can pause, continue, restore exclusions, or explicitly mark applications.
+4. AMM publishes your configured shortlist locally, with optional Telegram/email delivery. The shortlist target does not limit full collection or review. Trends records collection and review totals.
+
+### Standard matching without full collection
 
 1. AMM loads your active profile's locally saved resume and settings and takes a scrape lock so two runs cannot collide.
 2. It searches your hiring.cafe keywords with **Remote** by default (or your chosen workplace types), **All time**, and newest first. All time includes recent jobs; it does not need to repeat overlapping date presets. Your configured recency filter still applies afterward.
@@ -90,7 +97,15 @@ AMM uses the job card for a broad first pass, then loads the full description fo
 
 The optional **Consultant Slop Filter** reads those full descriptions before delivery. Balanced mode removes obvious consulting, professional-services, implementation, and customer-engagement roles. Strict mode also removes any role with explicit customer-facing duties or required travel. Rejected jobs do not consume the batch target; AMM keeps evaluating later candidates for replacement engineering roles.
 
-Optional **Smart Match** accepts a Google Gemini, Anthropic, or OpenAI API key. Paste the key once; AMM detects the provider, selects the model automatically, turns Smart Match on, and scores jobs inside the target-fill loop. Requests contain at most 40 jobs, but every evaluated candidate is covered across consecutive requests; 40 is not a total-job limit. The key stays in the private local secret file outside config backups.
+Optional **Smart Match** accepts a Google Gemini, Anthropic, or OpenAI API key. Paste the key once; AMM detects the provider and selects the model automatically. **Pull all & match** collects every available page across your profile’s searches before reviewing the full descriptions against your resume in small, resumable batches. The shortlist size controls your batch handoff, not how many jobs are collected or reviewed. The key stays in the private local secret file outside config backups.
+
+OpenAI keys use **GPT-6.1 Sol** for Smart Match and AI resume analysis. The model is selected by AMM, so changing models uses your existing OpenAI key.
+
+The **Smart Match** page has Overview, Results, Excluded and Job history tabs. Save time with **Reuse saved reviews** and **Review only new or changed jobs**. Your local history keeps first/last collection dates, keywords, scores and reasons. Resume, preference, model or description changes require a fresh review. **Pause** saves progress; **Continue review** retries pending jobs without collecting again. If collection was interrupted, use **Pull all & match** again to finish finding jobs. Job history stays available when review reuse is off.
+
+Consultant, lead/management and sales/pre-sales switches keep unwanted roles in **Excluded**, with their percentages and reasons. **Restore** overrides an exclusion. **Mark applied** records an application separately; collecting and reviewing never mark a job applied. Different openings at one company stay separate. CSV and Excel exports include direct application links, percentages and reasons for the selected view.
+
+**Trends** offers an overview, keyword comparison and scrape history. Choose a date range and keyword to see collection hits, deduplicated jobs, strong (70%+), stretch (50–69%), below 50% and awaiting review. Keyword totals can overlap; the overall unique count deduplicates them. Awaiting review is separate from match quality. Earlier history only describes delivered batches and is labeled accordingly. Your saved percentage floor and scoring blend stay unchanged.
 
 The same provider can analyze the scanned resume itself. On upload—or when you press **Analyze with AI**—AMM sends up to 24,000 characters of extracted resume text and saves the resulting summary, seniority, target roles, and search keywords only to that profile. AI-reported skills affect matching only when the response includes a phrase found in the resume. If no key is configured or the call fails, the built-in local parser and recommendations remain active.
 
@@ -168,7 +183,7 @@ The dashboard walks you through:
 
 Fresh installs start with no profession-specific searches, salary floor, experience cap, or company filters. Your searches are built from your resume, so AMM does not assume your career field. The app keeps your resume and settings on this computer.
 
-After setup, **My matches** shows the ranked shortlist and **Scrape now** runs a search on demand. **Settings** shows everyday choices first; open **Fine-tune matching** for detailed filters or **Smart Match** for optional AI. **Searches** holds your terms, with company boards and blocked companies under optional sections. Telegram, Gmail, and hiring.cafe sign-in are under **Connections** and can be added later.
+After setup, **My matches** shows the ranked shortlist and **Scrape now** runs a search on demand. **Quick setup** can reopen with your current resume and settings and now includes Smart Match preferences. **Smart Match** holds full collection, review history, role filters and AI controls. **Settings** shows everyday choices; open **Fine-tune matching** for detailed filters. **Searches** holds your terms, with company boards and blocked companies under optional sections. Telegram, Gmail, and hiring.cafe sign-in are under **Connections** and can be added later.
 
 ## How it works
 

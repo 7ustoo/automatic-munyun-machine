@@ -321,7 +321,7 @@ jobs:
           body: |
             ## Download the installer for your OS
 
-            One-click setup. Download, double-click, follow the 10-step wizard.
+            Download the installer, open AMM, and follow the three-step quick setup. Telegram and email are optional.
 
             | Platform | Asset | How to install |
             |---|---|---|

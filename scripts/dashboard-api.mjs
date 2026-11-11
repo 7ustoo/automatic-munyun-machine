@@ -57,6 +57,7 @@ import {
 } from './email.mjs';
 import { beginOAuth, completeOAuth } from './gmail-oauth.mjs';
 import { geocode } from './geocode.mjs';
+import { smartMatchGet, smartTrendsGet, smartMatchAction, smartMatchExport } from './smart-match-api.mjs';
 import { registerSchedulerForPlatform } from './scheduler-register.mjs';
 import { readLocalSecrets, scrubLegacyAiKeysFromSnapshots, setLocalSecret } from './secret-store.mjs';
 import { recordAppliedJob } from './application-ledger.mjs';
@@ -115,6 +116,13 @@ function settingsGet() {
       // v4.0: Smart match (AI) — the key itself is NEVER returned, only
       // whether one is stored. Plus muted terms + a thin-CV signal.
       aiEnabled: !!cfg.scoring?.ai?.enabled,
+      smartCollectAll: cfg.scoring?.ai?.collectAll !== false,
+      smartRemember: cfg.scoring?.ai?.rememberJobs !== false,
+      smartOnlyNew: cfg.scoring?.ai?.onlyNew !== false,
+      smartConsultants: cfg.scoring?.ai?.excludeConsultantRoles !== false,
+      smartLeads: cfg.scoring?.ai?.excludeLeadRoles !== false,
+      smartSales: cfg.scoring?.ai?.excludeSalesRoles !== false,
+      aiModel: detectAiProvider(secrets.AMM_AI_KEY)?.model || '',
       aiRequireForDelivery: cfg.scoring?.ai?.requireForDelivery !== false,
       aiHasKey: !!secrets.AMM_AI_KEY,
       aiProvider: detectAiProvider(secrets.AMM_AI_KEY)?.label || '',
@@ -148,6 +156,7 @@ async function settingsSet(dotPath, jsonValue) {
   let value;
   try { value = JSON.parse(jsonValue); } catch { value = jsonValue; }
   const allowed = new Set([
+    'scoring.ai.collectAll', 'scoring.ai.rememberJobs', 'scoring.ai.onlyNew', 'scoring.ai.excludeConsultantRoles', 'scoring.ai.excludeLeadRoles', 'scoring.ai.excludeSalesRoles',
     'user.maxYoeAcceptable', 'user.salaryFloorUsd',
     'filters.filterClearance', 'filters.filterManagementTitles', 'filters.filterSalesTitles',
     'filters.consultantSlopMode',
@@ -164,6 +173,7 @@ async function settingsSet(dotPath, jsonValue) {
     'email.format' // v7.0: attachment format for the batch email (txt | csv | xlsx)
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
+  if (/^scoring\.ai\.(collectAll|rememberJobs|onlyNew|excludeConsultantRoles|excludeLeadRoles|excludeSalesRoles)$/.test(dotPath)) value = value === true || value === 'true' || value === 'on';
   if (dotPath === 'scoring.targetJobsPerBatch') {
     value = parseRankedBatchSize(value);
     if (value === null) return out({ ok: false, error: 'batch size must be a positive whole number' });
@@ -732,7 +742,7 @@ export function buildInitConfig(input, defaults = {}) {
     search: { ...(def.search || {}), ...(src.search || {}) },
     sources: def.sources || {},
     filters: { ...(def.filters || {}), ...(src.filters || {}) },
-    scoring: def.scoring || {},
+    scoring: mergeSetupScoring(def.scoring, src.scoring),
     display: def.display || {},
     weather: { ...(def.weather || {}), ...(src.weather || {}) },
     schedule: { ...(def.schedule || {}), ...(src.schedule || {}) },
@@ -775,11 +785,21 @@ export function mergeSetupConfig(existing, input, defaults = {}) {
         queries: incomingQueries,
         search: { ...(current.search || {}), ...(input.search || {}) },
         filters: { ...(current.filters || {}), ...(input.filters || {}) },
+        scoring: mergeSetupScoring(current.scoring, input.scoring),
         weather: { ...(current.weather || {}), ...(input.weather || {}) },
         schedule: { ...(current.schedule || {}), ...(input.schedule || {}) },
       },
     },
   };
+}
+
+function mergeSetupScoring(current = {}, incoming = {}) {
+  if (!incoming.ai) return { ...current };
+  const ai = { ...(current.ai || {}) };
+  for (const key of ['enabled', 'collectAll', 'rememberJobs', 'onlyNew', 'excludeConsultantRoles', 'excludeLeadRoles', 'excludeSalesRoles']) {
+    if (typeof incoming.ai?.[key] === 'boolean') ai[key] = incoming.ai[key];
+  }
+  return { ...current, ai };
 }
 
 // setup-init: one-shot write of config.json in the v1.0 profile shape. Called
@@ -1028,6 +1048,10 @@ const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.ar
 const [, , cmd, a, b, a3, a4, a5] = process.argv;
 if (isMain) (async () => {
   switch (cmd) {
+    case 'smart-get': return out(smartMatchGet(JSON.parse(a || '{}')));
+    case 'smart-trends': return out(smartTrendsGet(JSON.parse(a || '{}')));
+    case 'smart-action': return out(await smartMatchAction(a, b));
+    case 'smart-export': return out(smartMatchExport(a, JSON.parse(b || '{}')));
     case 'settings-get': return settingsGet();
     case 'settings-set': return settingsSet(a, b);
     // v4.0: mute a term from the Why panel; list/restore config backups.

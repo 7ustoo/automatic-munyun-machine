@@ -69,7 +69,7 @@ test('ai prompt embeds cv summary + jobs and providers choose models automatical
   assert.ok(p.includes('"iam"') && p.includes('IAM Engineer') && p.includes('fit 0-100'));
   assert.equal(AI_PROVIDERS.google.model, 'gemini-flash-latest');
   assert.equal(AI_PROVIDERS.anthropic.model, 'claude-sonnet-4-6');
-  assert.equal(AI_PROVIDERS.openai.model, 'gpt-5-mini');
+  assert.equal(AI_PROVIDERS.openai.model, 'gpt-6.1-sol');
 });
 
 test('Smart Match detects Gemini, Anthropic, and OpenAI keys without a model field', () => {

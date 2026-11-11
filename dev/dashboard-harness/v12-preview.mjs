@@ -80,9 +80,8 @@ try {
   await dashboard.screenshot({ path: path.join(outDir, 'v12-11-advanced-settings.png'), fullPage: false });
   await dashboard.goto('http://127.0.0.1:8765/#jobs', { waitUntil: 'networkidle' });
   await dashboard.click('#top-setup-btn');
-  if (!(await dashboard.locator('section[data-view="settings"]').evaluate(el => el.classList.contains('on')))
-      || !(await dashboard.locator('#setup-overlay').evaluate(el => el.classList.contains('hidden'))))
-    throw new Error('completed setup should open Settings without replaying first-run setup');
+  if (await dashboard.locator('#setup-overlay').evaluate(el => el.classList.contains('hidden')))
+    throw new Error('Quick setup should reopen the hydrated wizard for an existing profile');
   await dashboard.close();
 
   const resumed = await browser.newPage({ viewport: { width: 1440, height: 900 } });

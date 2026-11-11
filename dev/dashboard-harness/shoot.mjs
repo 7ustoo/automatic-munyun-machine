@@ -111,6 +111,10 @@ await shot("http://127.0.0.1:8765/#jobs", "11b-open-jobs-menu.png", async () => 
   await page.waitForTimeout(200);
 });
 // 12. Narrow viewport (responsive rail)
+await shot("http://127.0.0.1:8765/#smart", "13-smart-match.png");
+await shot("http://127.0.0.1:8765/#trends", "14-trends-overview.png");
+await shot("http://127.0.0.1:8765/#trends", "15-trends-keywords.png",async()=>page.click('[data-trtab="keywords"]'));
+await shot("http://127.0.0.1:8765/#trends", "16-trends-history.png",async()=>page.click('[data-trtab="history"]'));
 await page.setViewportSize({ width: 820, height: 900 });
 await shot("http://127.0.0.1:8765/#jobs", "12-narrow.png");
 

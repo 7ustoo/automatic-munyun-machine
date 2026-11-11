@@ -2,10 +2,22 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 12.2.0
-**Active release branch:** `v12.2.0`
+**Version:** 12.3.0
+**Active release branch:** `v12.3.0`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-11-09
+**Last refreshed:** 2026-11-11
+
+### v12.3.0 Smart Match catalog and Trends
+
+- `scripts/job-catalog.mjs` owns profile-local `job-catalog.json` (version 1: jobs, exact source/direct-link aliases, per-run/page receipts, pause state) and separate `job-descriptions/{id}.json` files. Atomic writes and a catalog lock serialize dashboard actions with scraping. Retry receipts replace a page rather than counting it twice. Distinct openings at the same company are not merged by company/title.
+- `scripts/catalog-review.mjs` persists descriptions and each completed 20-job AI review batch. It retains pending jobs after description/API errors, supports pause/continue, and reuses unchanged decisions. Context fingerprints cover the enriched resume, provider model, filters and profile preferences, excluding API keys. Description hashes determine content changes; source changes or a 24-hour refresh require checking the description again. Manual overrides and applied state survive review updates.
+- Smart Match defaults to exhaustive collection when AI is enabled (`scoring.ai.collectAll !== false`). The source’s public `requisition_id` builds a working HiringCafe detail link; search SSR data supplies direct employer URLs. Collection uses no page/shortlist ceiling and reports incomplete traversal. `AMM_SMART_MATCH=1` selects this mode; `AMM_SMART_MATCH_RESUME=1` skips collection and retries saved pending reviews. Plain keyword pulls also populate collection history without AI.
+- New profile settings in `scoring.ai`: `collectAll`, `rememberJobs`, `onlyNew`, `excludeConsultantRoles`, `excludeLeadRoles`, `excludeSalesRoles`. All default true; `enabled` remains opt-in. `rememberJobs` and `onlyNew` control decision reuse, not deletion of the audit catalog. Match floor and the existing 35/65 blend are unchanged. Full review never uses local fallback as an AI-verified decision.
+- `scripts/smart-match-api.mjs` provides paginated catalog views, actions, detailed CSV/XLSX exports and Trends analytics. Guarded Go routes `/api/smart-match`, `/api/smart-trends`, `/api/smart-match/action` delegate business logic to Node. `/api/export?catalog=results|excluded|history` exports the current filtered catalog view. Applied writes also update the existing application ledger; collection does not mark or save jobs on the source account.
+- Opt-in `node dev/live-smart-catalog.mjs [install-folder]` validates three actual HiringCafe descriptions, Sol decisions, review reuse and CSV/XLSX exports in a separate temporary runtime. It does not replace the installed batch or catalog. `dev/live-smart-match.mjs` retains its synthetic provider-only contract probe.
+- Trends counts collection hits from page receipts and unique jobs by first collection date, graded with their current review. Keyword attribution can overlap; global totals deduplicate. Exclusions and applied are statuses that overlap score bands. Old batch-history snapshots remain delivered-only and are not backfilled as raw collection counts. Quick setup merges only allowed AI toggles while preserving existing scoring weights/floors and other profiles.
+
+- OpenAI keys select `gpt-6.1-sol` for Smart Match and resume analysis through the shared structured-output transport. Existing saved keys authenticate the requests. The Chat Completions endpoint and strict JSON schema remain compatible with this workload.
 
 ### v12.2.0 keyword collection
 

@@ -7,7 +7,7 @@
     "_comment": "salaryFloorUsd 0 = no floor; maxYoeAcceptable 100 = effectively no cap. Quick setup keeps these defaults unless you change them under More preferences."
   },
   "queries": [],
-  "_queriesComment": "Left EMPTY on a fresh install — setup fills these from YOUR resume (role-suggester), so the app is never pre-tailored to someone else's field. Add/remove terms anytime from the dashboard Searches page or the bot's /jobs add. With zero queries the batch is empty until you add some (that is intentional — no jobs beats wrong-field jobs).",
+  "_queriesComment": "Left EMPTY on a fresh install \u2014 setup fills these from YOUR resume (role-suggester), so the app is never pre-tailored to someone else's field. Add/remove terms anytime from the dashboard Searches page or the bot's /jobs add. With zero queries the batch is empty until you add some (that is intentional \u2014 no jobs beats wrong-field jobs).",
   "search": {
     "mode": "titles",
     "scrapeSources": "both",
@@ -31,7 +31,7 @@
   },
   "filters": {
     "filterClearance": false,
-    "_filterClearanceComment": "Default off (v5.0) — when on, drops jobs requiring a security clearance OR US citizenship. That is the right filter only for some users, so a fresh install includes everything and you opt in from Settings.",
+    "_filterClearanceComment": "Default off (v5.0) \u2014 when on, drops jobs requiring a security clearance OR US citizenship. That is the right filter only for some users, so a fresh install includes everything and you opt in from Settings.",
     "filterManagementTitles": false,
     "_filterManagementTitlesComment": "When on, drops manager, supervisor, director, head, executive, team-lead, and technical-lead job titles before scoring. Profile-scoped and off by default; toggle from Settings.",
     "filterSalesTitles": false,
@@ -43,7 +43,7 @@
     "maxJobAge": "any",
     "_maxJobAgeValues": "v2.5: how recent a job must be, filtered on the posted-age shown on each hiring.cafe card. today | 3days | week | month | any (default, no age filter). Also accepts a raw number of days. Set from the dashboard's Recency dropdown.",
     "skipCompanies": [],
-    "_skipCompaniesComment": "Companies to never show — add your own from the dashboard Searches page or the bot's /skip. Empty by default (v5.0).",
+    "_skipCompaniesComment": "Companies to never show \u2014 add your own from the dashboard Searches page or the bot's /skip. Empty by default (v5.0).",
     "dropTitlePatterns": [],
     "_dropTitlePatternsComment": "Case-insensitive title substrings to drop before scoring (e.g. add 'Manager' if you only want individual-contributor roles, or 'Intern'). Empty by default (v5.0) so no job class is silently hidden; tune from the dashboard Searches page."
   },
@@ -59,7 +59,7 @@
     "maxPagesPerQuery": 300,
     "_maxPagesPerQueryComment": "v7.9: a runaway guard, NOT a target. Hiring.cafe shows ~40 cards per page and stops offering a Next link well before this (observed 15-25 pages), so the real end of the result set is what ends the loop. Every stop condition is retried before it is believed, so a slow render can no longer be mistaken for the last page.",
     "targetJobsPerBatch": 200,
-    "_targetJobsPerBatchComment": "How many strong matches AMM tries to deliver. Settings offers 50/100/150/200 presets and any positive whole number as a custom target. It may return fewer when qualifying jobs run out. One-off keyword collection has its own 1–1000 limit in dashboard Settings and does not change this field.",
+    "_targetJobsPerBatchComment": "How many strong matches AMM tries to deliver. Settings offers 50/100/150/200 presets and any positive whole number as a custom target. It may return fewer when qualifying jobs run out. One-off keyword collection has its own 1\u20131000 limit in dashboard Settings and does not change this field.",
     "maxDescriptionEvaluations": 3000,
     "_maxDescriptionEvaluationsComment": "Safety ceiling for full job-description evaluations in one run. AMM stops earlier as soon as it has enough qualifying matches.",
     "searchAllQueries": true,
@@ -73,17 +73,23 @@
     "_syncSavedJobsComment": "Queue only the published selection for verified Saved status on hiring.cafe. Requires sign-in and accountDedup. Does not mark applications as submitted.",
     "_accountDedupComment": "When signed in, hiring.cafe hides Saved/Applied jobs. Viewed is never hidden because AMM may inspect a description without delivering it. Delivered-only memory remains local and profile-scoped.",
     "_percentBands": "score 30+ \u2192 90-100%; 20-29 \u2192 75-89%; 10-19 \u2192 50-74%; 5-9 \u2192 30-49%; 0-4 \u2192 0-29%",
-    "_aiComment": "Smart Match accepts a Google Gemini, Anthropic, or OpenAI API key, detects the provider, and selects the model automatically. It runs in 40-job requests across every evaluated candidate until the target is filled. requireForDelivery prevents a partial provider failure from padding the delivered batch with unaudited jobs. The API key is stored in the local .env secret file, outside config backups.",
+    "_aiComment": "Smart Match collects all available pages before reviewing full descriptions in resumable API batches. Strong >=70%, stretch 50-69%; the saved floor and 35% local / 65% AI blend remain. Catalog and descriptions are profile-local. rememberJobs and onlyNew control reuse; history is retained for audit and Trends. OpenAI uses gpt-6.1-sol. API keys live in .env, never config backups.",
     "jdRescore": true,
     "mutedTerms": [],
     "ai": {
       "enabled": false,
-      "requireForDelivery": true
+      "requireForDelivery": true,
+      "collectAll": true,
+      "rememberJobs": true,
+      "onlyNew": true,
+      "excludeConsultantRoles": true,
+      "excludeLeadRoles": true,
+      "excludeSalesRoles": true
     }
   },
   "display": {
     "showSalary": true,
-    "_showSalaryComment": "v4.6: show the salary parsed from each posting (e.g. ~$140k) on the dashboard job list. Toggle from Settings. Salary is best-effort — many postings don't list one, and those rows simply show no badge. Your VA's link-only file is unaffected."
+    "_showSalaryComment": "v4.6: show the salary parsed from each posting (e.g. ~$140k) on the dashboard job list. Toggle from Settings. Salary is best-effort \u2014 many postings don't list one, and those rows simply show no badge. Your VA's link-only file is unaffected."
   },
   "browser": {
     "channel": "auto",

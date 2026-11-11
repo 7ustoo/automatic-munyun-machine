@@ -15,6 +15,14 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..', '..');
 const EXAMPLE = JSON.parse(fs.readFileSync(path.join(ROOT, 'config.example.json'), 'utf8'));
 
+test('Quick setup updates Smart Match toggles while preserving percentage logic and other profiles',()=>{
+  const existing={active_profile:'personal',profiles:{personal:{scoring:{matchFloorPercent:45,titleWeight:10,ai:{enabled:true,requireForDelivery:true}}},other:{scoring:{matchFloorPercent:80}}}};
+  const next=mergeSetupConfig(existing,{scoring:{matchFloorPercent:1,ai:{onlyNew:false,apiKey:'must-not-copy',model:'must-not-copy'}}});
+  assert.equal(next.profiles.personal.scoring.matchFloorPercent,45);assert.equal(next.profiles.personal.scoring.titleWeight,10);
+  assert.equal(next.profiles.personal.scoring.ai.onlyNew,false);assert.equal(next.profiles.personal.scoring.ai.requireForDelivery,true);
+  assert.equal(next.profiles.personal.scoring.ai.apiKey,undefined);assert.deepEqual(next.profiles.other,existing.profiles.other);
+});
+
 test('produces v1.0 profile shape: { active_profile, profiles.default }', () => {
   const cfg = buildInitConfig({
     user: { name: 'Justin', maxYoeAcceptable: 5, salaryFloorUsd: 90000 },
