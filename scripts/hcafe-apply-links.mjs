@@ -36,6 +36,9 @@ export function embeddedSearchJobs(data) {
       const directUrl = typeof value.apply_url === 'string' ? value.apply_url : '';
       jobs.set(String(value.id), { sourceId: String(value.id), source: 'hcafe', embeddedApplyLink: true,
         expired: value.is_expired === true, directUrl, href: directUrl || `hcafe-source:${value.id}`,
+        viewjobUrl: /^[a-zA-Z0-9_-]+$/.test(value.requisition_id || '') ? `https://hiringcafe.com/job/${value.requisition_id}` : '',
+        sourceVersion: String(value.hc_indexed_at || value.updated_at || ''),
+        cardText: [processed.requirements_summary, processed.technical_tools, processed.role_activities].map(v => typeof v === 'string' ? v : JSON.stringify(v || '')).join(' '),
         title: String(info.title || processed.core_job_title || ''),
         company: String(processed.company_name || value.enriched_company_data?.name || ''),
         location: String(processed.formatted_workplace_location || ''), yoe: processed.min_industry_and_role_yoe ?? null });

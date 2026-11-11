@@ -46,7 +46,7 @@ test('OpenAI analysis uses strict schema and stores profile-safe metadata', asyn
     fetchImpl: async (url, init) => {
       const body = JSON.parse(init.body);
       assert.equal(url, 'https://api.openai.com/v1/chat/completions');
-      assert.equal(body.model, 'gpt-5-mini');
+      assert.equal(body.model, 'gpt-6.1-sol');
       assert.equal(body.response_format.json_schema.name, 'resume_search_analysis');
       assert.equal(body.response_format.json_schema.strict, true);
       return { ok: true, json: async () => ({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(modelValue) } }] }) };

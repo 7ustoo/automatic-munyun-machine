@@ -8,6 +8,18 @@ const options = {
   candidates: [{ n: 0, title: 'Backend Engineer', company: 'A', text: 'Build APIs.' }],
 };
 
+test('full review adds explicit eligibility reasons without changing percentage ratings and rejects missing exclusions',async()=>{
+  const key=`sk-proj-${'o'.repeat(32)}`;
+  const reviewed=[{...ratings[0],exclusions:['Remote work is restricted to a country outside the stated preference.']}];
+  const result=await aiRerank({...options,apiKey:key,preferences:{location:'United States',roleFilters:{excludeSalesRoles:true}},fetchImpl:okJson({choices:[{finish_reason:'stop',message:{content:JSON.stringify({ratings:reviewed})}}]},(_url,_init,body)=>{
+    const item=body.response_format.json_schema.schema.properties.ratings.items;
+    assert.ok(item.required.includes('exclusions'));assert.match(body.messages[0].content,/United States/);
+    assert.match(body.messages[0].content,/"excludeSalesRoles":true/);assert.match(body.messages[0].content,/actual responsibilities/);
+  })});
+  assert.equal(result[0].fit,91);assert.deepEqual(result[0].exclusions,reviewed[0].exclusions);
+  await assert.rejects(()=>aiRerank({...options,apiKey:key,preferences:{},fetchImpl:okJson({choices:[{finish_reason:'stop',message:{content:JSON.stringify({ratings})}}]},()=>{})}),/exclusions/);
+});
+
 test('reject missing, duplicate, out-of-range, and unrelated model ratings', () => {
   assert.throws(() => validateRatings([], options.candidates), /incomplete/);
   for (const patch of [{ n: 999 }, { fit: 101 }, { skills: -1 }, { fit: '91' }, { reason: '' }]) {
@@ -62,7 +74,7 @@ test('OpenAI key selects Chat Completions and its automatic model', async () => 
     fetchImpl: okJson({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({ ratings }) } }] }, (url, init, body) => {
       assert.equal(url, 'https://api.openai.com/v1/chat/completions');
       assert.equal(init.headers.authorization, `Bearer ${key}`);
-      assert.equal(body.model, 'gpt-5-mini');
+      assert.equal(body.model, 'gpt-6.1-sol');
       assert.equal(body.response_format.type, 'json_schema');
     }),
   });

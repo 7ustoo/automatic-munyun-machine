@@ -120,6 +120,11 @@ func (d *dashboardServer) handleScrape(w http.ResponseWriter, r *http.Request) {
 	// v2.9: "watch": true → run with a visible on-screen browser window.
 	b := readBody(r)
 	watch := b["watch"] == "true" || b["watch"] == "1"
+	if b["mode"] == "smart" || b["mode"] == "resume" {
+		actionRunScrapeMode(d.installDir, watch, "", "", b["mode"])
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "mode": b["mode"]})
+		return
+	}
 	if b["mode"] == "keyword" {
 		term := strings.TrimSpace(b["term"])
 		limit := b["limit"]

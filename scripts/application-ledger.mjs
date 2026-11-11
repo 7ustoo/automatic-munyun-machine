@@ -1,6 +1,9 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { lockedUpdateJson } from './io-helpers.mjs';
 import { jobIdentity } from './job-deduper.mjs';
+import { updateCatalog } from './job-catalog.mjs';
+import { directApplyKey } from './hcafe-apply-links.mjs';
 
 export function readAppliedLedger(filePath) {
   try {
@@ -25,5 +28,14 @@ export async function recordAppliedJob(filePath, job, url) {
     next.lastUpdated = new Date().toISOString();
     return next;
   });
+  const catalogFile = path.join(path.dirname(filePath), 'job-catalog.json');
+  if (fs.existsSync(catalogFile)) {
+    const target = directApplyKey(job.directUrl || url);
+    await updateCatalog(catalogFile, catalog => {
+      for (const saved of Object.values(catalog.jobs)) {
+        if ((target && directApplyKey(saved.directUrl) === target) || (url && saved.href === url)) saved.appliedAt ||= new Date().toISOString();
+      }
+    });
+  }
   return identity;
 }

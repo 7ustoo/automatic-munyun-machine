@@ -85,8 +85,11 @@ func startDashboard(installDir string, sup *supervisor) (*dashboardServer, error
 	// DNS-rebinding page can't read the user's job data / resume keywords / VA
 	// email. No CSRF token needed to read; the Host check is the gate.
 	mux.HandleFunc("/api/status", d.guardGet(d.handleStatus))
-	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))              // GET: full ranked batch (all jobs + matched)
-	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory))          // GET: daily snapshots → Trends + leaderboard (v4.6)
+	mux.HandleFunc("/api/batch", d.guardGet(d.handleBatch))     // GET: full ranked batch (all jobs + matched)
+	mux.HandleFunc("/api/history", d.guardGet(d.handleHistory)) // GET: daily snapshots → Trends + leaderboard (v4.6)
+	mux.HandleFunc("/api/smart-match", d.guardGet(d.handleSmartMatch))
+	mux.HandleFunc("/api/smart-trends", d.guardGet(d.handleSmartTrends))
+	mux.HandleFunc("/api/smart-match/action", d.guardPost(d.handleSmartAction))
 	mux.HandleFunc("/api/settings", d.guardGet(d.handleSettings))        // GET: editable knobs + search terms
 	mux.HandleFunc("/api/export", d.guardGet(d.handleExport))            // GET ?format=txt|csv[&archive=id]: number·title·apply-link export (v2.4, archives v7.2)
 	mux.HandleFunc("/api/archive", d.guardGet(d.handleArchiveList))      // GET: previous scrapes index (v7.2)
@@ -368,6 +371,13 @@ func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	// v7.2: &archive=batch-… exports a previous scrape instead of the live
 	// batch. Validate here too so garbage never reaches the exec layer.
 	args := []string{"export", format}
+	if scope := r.URL.Query().Get("catalog"); scope != "" {
+		if format != "xlsx" {
+			format = "csv"
+		}
+		options, _ := json.Marshal(map[string]string{"scope": scope, "keyword": r.URL.Query().Get("keyword"), "search": r.URL.Query().Get("search"), "band": r.URL.Query().Get("band"), "run": r.URL.Query().Get("run"), "day": r.URL.Query().Get("day")})
+		args = []string{"smart-export", format, string(options)}
+	}
 	if id := r.URL.Query().Get("archive"); id != "" {
 		if !archiveIDRx.MatchString(id) {
 			http.Error(w, "bad archive id", http.StatusBadRequest)

@@ -1843,7 +1843,7 @@ const state = {
 // ---- v3.0 view router — hash-based so refresh keeps your place ----
 const VIEW_TITLES = {
   jobs: "My matches", searches: "Searches", resume: "My resume",
-  profiles: "Profiles", trends: "Trends", system: "Connections", settings: "Settings",
+  profiles: "Profiles", trends: "Trends", smart: "Smart Match", system: "Connections", settings: "Settings",
 };
 function currentView() {
   const h = (location.hash || "#jobs").slice(1);
@@ -1876,7 +1876,7 @@ document.getElementById("nav").addEventListener("click", (e) => {
   navTo(a.dataset.view);
   if (a.dataset.view === "trends") loadTrends(); // v4.6: lazy-load history
 });
-window.addEventListener("hashchange", () => { const v = currentView(); setView(v); if (v === "trends") loadTrends(); });
+window.addEventListener("hashchange", () => { const v = currentView(); setView(v); if (v === "trends") loadTrends(); if (v === "smart") { loadSmart(); loadSmartSettings(); } });
 setView(currentView());
 
 // Keep everyday choices visible and tuck rarely changed controls behind clear
@@ -3112,7 +3112,7 @@ try {
 // aggregation mirrors scripts/batch-history.mjs#termLeaderboard (same rule as
 // funnelLineJS mirroring the Node funnel line).
 let trendsLoadedAt = 0;
-async function loadTrends(force) {
+async function loadLegacyTrends(force) {
   if (!force && Date.now() - trendsLoadedAt < 30000) return; // don't refetch on every nav
   try {
     const r = await (await fetch("/api/history", { cache: "no-store" })).json();
@@ -4261,13 +4261,13 @@ function setupCanProceed(step) {
     const timeOk = /^\d{1,2}:\d{2}$/.test($("setup-time").value.trim() || "07:00");
     return timeOk;
   }
-  if (step === 3) return $("setup-overlay").querySelector('input[name="setup-source"]:checked')?.value === "dice" || setupState.hcafeAuthed;
+  if (step === 3) return smartSetupReady() && ($("setup-overlay").querySelector('input[name="setup-source"]:checked')?.value === "dice" || setupState.hcafeAuthed);
   return true;
 }
 
 function setupUpdateFinish() {
   const needsBrowser = $("setup-overlay").querySelector('input[name="setup-source"]:checked')?.value !== "dice";
-  $("setup-finish-btn").disabled = needsBrowser && !setupState.hcafeAuthed;
+  $("setup-finish-btn").disabled = (needsBrowser && !setupState.hcafeAuthed) || !smartSetupReady();
   $("setup-hcafe-btn").classList.toggle("primary", needsBrowser && !setupState.hcafeAuthed);
 }
 
@@ -4453,11 +4453,6 @@ async function setupSkip() {
 function reopenSetup() {
   // A completed install keeps its profile settings. Editing them belongs in
   // Settings; replaying setup-init would replace the full configuration.
-  if (!window.__needsSetup && lsGet("ammSetupIncomplete") !== "1") {
-    lsSet("ammOnboarded", "1");
-    navTo("settings");
-    return;
-  }
   $("setup-banner").classList.add("hidden");
   $("hcafe-banner").classList.add("hidden");   // v4.3: never nudge under the wizard
   if (tourState) tourEnd();
@@ -4476,6 +4471,7 @@ async function setupHydrateFromSettings() {
     ]);
     if (!settingsReply.ok || $("setup-overlay").classList.contains("hidden")) return;
     const s = settingsReply.settings;
+    hydrateSmartSetup(s);
     const types = (s.workplaceTypes || ["Remote"]).join(",");
     const workplace = $("setup-workplace");
     if (![...workplace.options].some(o => o.value === types)) {
@@ -4633,6 +4629,13 @@ async function setupFinish() {
   payload.search.scrapeSources = $("setup-overlay").querySelector('input[name="setup-source"]:checked').value;
 
   try {
+    payload.scoring = { ai: smartSetupValues() };
+    const newKey = $("setup-smart-key").value.trim();
+    if (newKey) {
+      const saved = await postJSON('/api/settings/set', { path: 'scoring.ai.apiKey', value: JSON.stringify(newKey) });
+      if (!saved.ok) throw new Error(saved.error || 'Could not save the AI key.');
+      $("setup-smart-key").value = '';
+    }
     const r1 = await postJSON("/api/setup/init", payload);
     if (!r1.ok) { note("setup-finish-note", "✗ " + (r1.error || "could not save"), false); btn.disabled = false; btn.textContent = label; setupState.finalizing = false; return; }
     note("setup-finish-note", "Registering the daily scrape schedule…", true);
@@ -4659,6 +4662,927 @@ async function setupFinish() {
     setupState.finalizing = false;
   }
 }
+</script>
+<style>
+.sm-tabs {
+  display: flex;
+  gap: 5px;
+  padding: 5px;
+  background: #e9eeea;
+  border-radius: 14px;
+  width: max-content;
+  max-width: 100%;
+  margin: 20px 0;
+  flex-wrap: wrap;
+}
+.sm-tabs button {
+  border: 0;
+  background: transparent;
+  color: #69776e;
+  border-radius: 10px;
+  padding: 11px 20px;
+}
+.sm-tabs button.on {
+  background: white;
+  color: #235e47;
+  box-shadow: 0 2px 8px #1836250b;
+}
+.sm-hero {
+  border: 1px solid #c9dcd1;
+  background: linear-gradient(115deg, #eaf5ed, #f9fbf6);
+  border-radius: 23px;
+  padding: 30px;
+  display: flex;
+  gap: 25px;
+  align-items: center;
+  justify-content: space-between;
+}
+.sm-hero h2 {
+  font-size: 29px;
+  margin: 8px 0;
+}
+.sm-hero p {
+  max-width: 640px;
+  color: #637268;
+  line-height: 1.6;
+}
+.sm-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.sm-stats {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
+  margin: 20px 0;
+}
+.sm-stat {
+  border: 1px solid #dfe6df;
+  border-radius: 17px;
+  background: white;
+  padding: 20px;
+}
+.sm-stat small {
+  color: #66766a;
+  display: block;
+  line-height: 1.5;
+}
+.sm-stat strong {
+  display: block;
+  font-size: 30px;
+  letter-spacing: -1px;
+  margin: 10px 0 0;
+}
+.sm-stat.green strong {
+  color: #317b58;
+}
+.sm-stat.gold strong {
+  color: #a77f25;
+}
+.sm-stat.gray strong {
+  color: #697c74;
+}
+.sm-workflow {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 15px;
+}
+.sm-workflow .card {
+  margin: 0;
+}
+.sm-step {
+  color: #387d5a;
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 1.5px;
+}
+.sm-switch {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid #edf0ed;
+}
+.sm-switch input {
+  accent-color: #387d5a;
+  width: 19px;
+  height: 19px;
+  flex-shrink: 0;
+}
+.sm-switch small {
+  display: block;
+  font-weight: 400;
+  color: #718076;
+  line-height: 1.5;
+  margin-top: 4px;
+}
+.sm-toolbar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  margin: 20px 0;
+}
+.sm-toolbar input {
+  min-width: 180px;
+  flex: 1;
+}
+.sm-toolbar select {
+  width: auto;
+  max-width: 220px;
+}
+.sm-job {
+  padding: 20px 0;
+  border-bottom: 1px solid #e7ece8;
+  display: grid;
+  grid-template-columns: 68px minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+}
+.sm-score {
+  padding: 12px 5px;
+  background: #ecf5ed;
+  border-radius: 13px;
+  text-align: center;
+  color: #2d7752;
+  font-size: 20px;
+  font-weight: 700;
+}
+.sm-score.stretch {
+  background: #faf4e3;
+  color: #987319;
+}
+.sm-score.awaiting {
+  background: #edf0ee;
+  color: #77867b;
+}
+.sm-job h3 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+.sm-job p {
+  margin: 8px 0;
+  color: #68766d;
+  line-height: 1.5;
+  font-size: 13px;
+}
+.sm-reason {
+  background: #f7f8f5;
+  padding: 10px 14px;
+  border-radius: 9px;
+  margin: 10px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.sm-chip {
+  display: inline-block;
+  font-size: 11px;
+  background: #eef2ed;
+  border-radius: 7px;
+  padding: 4px 7px;
+  margin: 4px 4px 0 0;
+  color: #617466;
+}
+.sm-note {
+  color: #718076;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sm-empty {
+  text-align: center;
+  padding: 65px 20px;
+  color: #6c7d71;
+}
+.sm-empty b {
+  display: block;
+  font-size: 20px;
+  color: #324c3c;
+  margin-bottom: 10px;
+}
+.sm-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.sm-table th,
+.sm-table td {
+  text-align: left;
+  padding: 16px 12px;
+  border-bottom: 1px solid #edf0ec;
+}
+.sm-table th {
+  font-size: 11px;
+  color: #718076;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+}
+.sm-stack {
+  height: 9px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 8px;
+  min-width: 150px;
+  background: #f0f2ef;
+}
+.sm-stack span {
+  height: 100%;
+  display: block;
+}
+.sm-legend {
+  display: flex;
+  gap: 19px;
+  flex-wrap: wrap;
+  color: #728075;
+  font-size: 12px;
+  margin: 15px 0;
+}
+.sm-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 5px;
+}
+.sm-chart {
+  width: 100%;
+  height: 270px;
+}
+.sm-chart text {
+  font: 11px system-ui;
+  fill: #79867b;
+}
+.sm-two {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(240px, 1fr);
+  gap: 18px;
+}
+.sm-meter {
+  height: 8px;
+  border-radius: 9px;
+  background: #e4ebe5;
+  overflow: hidden;
+  margin: 18px 0;
+}
+.sm-meter span {
+  display: block;
+  background: #498360;
+  height: 100%;
+  transition: width 0.4s;
+}
+.sm-checklist {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0 25px;
+}
+.sm-error {
+  color: #a33f39;
+  min-height: 20px;
+  font-size: 13px;
+  margin-top: 10px;
+}
+.sm-run {
+  cursor: pointer;
+}
+.sm-run:hover {
+  background: #f5f8f3;
+}
+.sm-setup {
+  background: #f2f7f1;
+  padding: 18px;
+  border: 1px solid #dce7db;
+  border-radius: 15px;
+  margin-bottom: 20px;
+}
+.sm-setup h3 {
+  margin: 0 0 8px;
+}
+.sm-setup input[type="password"] {
+  width: 100%;
+  margin: 12px 0;
+}
+#sm-key, #setup-smart-key { border:1px solid #cddbd1;border-radius:10px;background:white;color:inherit;padding:12px;font:inherit; }
+:root[data-theme="dark"] .sm-tabs,:root[data-theme="dark"] .sm-meter,:root[data-theme="dark"] .sm-stack { background:var(--surface-3); }
+:root[data-theme="dark"] .sm-tabs button.on,:root[data-theme="dark"] .sm-stat,:root[data-theme="dark"] #sm-key,:root[data-theme="dark"] #setup-smart-key { background:var(--surface);color:var(--text);border-color:var(--border); }
+:root[data-theme="dark"] .sm-hero { background:linear-gradient(115deg,#244335,var(--surface));border-color:var(--border-2); }
+:root[data-theme="dark"] .sm-reason,:root[data-theme="dark"] .sm-chip,:root[data-theme="dark"] .sm-setup { background:var(--surface-2);border-color:var(--border);color:var(--text-2); }
+:root[data-theme="dark"] .sm-note,:root[data-theme="dark"] .sm-job p,:root[data-theme="dark"] .sm-hero p,:root[data-theme="dark"] .sm-switch small,:root[data-theme="dark"] .sm-stat small { color:var(--text-2); }
+:root[data-theme="dark"] .sm-empty b { color:var(--text); }
+:root[data-theme="dark"] .sm-table td,:root[data-theme="dark"] .sm-table th,:root[data-theme="dark"] .sm-job,:root[data-theme="dark"] .sm-switch { border-color:var(--border); }
+:root[data-theme="dark"] .sm-run:hover { background:var(--surface-2); }
+.sm-panel {
+  min-width: 0;
+}
+.sm-overflow {
+  overflow-x: auto;
+}
+@media (max-width: 1150px) {
+  .sm-stats {
+    grid-template-columns: repeat(3, 1fr);
+  }
+  .sm-hero {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .sm-two {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 750px) {
+  .sm-workflow,
+  .sm-checklist {
+    grid-template-columns: 1fr;
+  }
+  .sm-job {
+    grid-template-columns: 60px 1fr;
+  }
+  .sm-job > .sm-actions {
+    grid-column: 2;
+  }
+  .sm-stats {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .sm-tabs button {
+    padding: 10px;
+  }
+  .sm-hero {
+    padding: 20px;
+  }
+}
+</style>
+<script>
+// Profile catalog controls. All numbers below come from the active profile API.
+var smartTab = "overview",
+  smartPage = 0,
+  smartRun = "",
+  trendsTab = "overview",
+  smartReply = null,
+  trendsReply = null;
+var smartDay = "";
+var smartFields = [
+  [
+    "collectAll",
+    "smartCollectAll",
+    "Pull all available jobs",
+    "Finish every available page for every search before AI review.",
+  ],
+  [
+    "rememberJobs",
+    "smartRemember",
+    "Reuse saved reviews",
+    "Keep a job history and reuse unchanged decisions. Turn off to review the current collection again.",
+  ],
+  [
+    "onlyNew",
+    "smartOnlyNew",
+    "Review only new or changed jobs",
+    "A resume, preference, model or description change makes a job eligible for review again.",
+  ],
+  [
+    "excludeConsultantRoles",
+    "smartConsultants",
+    "Exclude consultant roles",
+    "Consultant and customer consulting duties.",
+  ],
+  [
+    "excludeLeadRoles",
+    "smartLeads",
+    "Exclude lead and management roles",
+    "Lead, manager, director and executive roles.",
+  ],
+  [
+    "excludeSalesRoles",
+    "smartSales",
+    "Exclude sales and pre-sales",
+    "Sales, pre-sales and customer success roles.",
+  ],
+];
+function smEsc(value) {
+  return escapeHTML(String(value ?? ""));
+}
+function smNum(n) {
+  return Number(n || 0).toLocaleString();
+}
+function smDate(value) {
+  return value
+    ? new Date(value).toLocaleString([], {
+        month: "short",
+        day: "numeric",
+        hour: "numeric",
+        minute: "2-digit",
+      })
+    : "—";
+}
+function smSafeLink(value) {
+  try {
+    const u = new URL(value);
+    return ["https:", "http:"].includes(u.protocol) &&
+      !u.username &&
+      !u.password
+      ? u.href
+      : "";
+  } catch {
+    return "";
+  }
+}
+function smSwitch(id, label, description, checked = true) {
+  return `<label class="sm-switch" for="${id}"><span>${label}<small>${description}</small></span><input id="${id}" type="checkbox" ${checked ? "checked" : ""}></label>`;
+}
+function smStats(s, hits = false) {
+  return [
+    ["Saved unique jobs", s.unique, ""],
+    ["Strong · 70%+", s.strong, "green"],
+    ["Stretch · 50–69%", s.stretch, "gold"],
+    ["Below 50%", s.below, "gray"],
+    ["Awaiting review", s.pending, "gray"],
+    [hits ? "Collection hits" : "Excluded", hits ? s.hits : s.excluded, ""],
+  ]
+    .map(
+      ([label, n, cls]) =>
+        `<div class="sm-stat ${cls}"><small>${label}</small><strong>${smNum(n)}</strong></div>`,
+    )
+    .join("");
+}
+function smLegend() {
+  return (
+    '<div class="sm-legend">' +
+    [
+      ["Strong · 70%+", "#4d8a65"],
+      ["Stretch · 50–69%", "#d6b66b"],
+      ["Below 50%", "#bdc7bd"],
+      ["Awaiting review", "#e4e8e1"],
+    ]
+      .map(([s, c]) => `<span><i style="background:${c}"></i>${s}</span>`)
+      .join("") +
+    "</div>"
+  );
+}
+function smStack(s) {
+  const n = Math.max(
+    1,
+    (s.strong || 0) + (s.stretch || 0) + (s.below || 0) + (s.pending || 0),
+  );
+  return `<div class="sm-stack">${[
+    ["strong", "#4d8a65"],
+    ["stretch", "#d6b66b"],
+    ["below", "#bdc7bd"],
+    ["pending", "#e4e8e1"],
+  ]
+    .map(
+      ([k, c]) =>
+        `<span style="width:${(100 * (s[k] || 0)) / n}%;background:${c}" title="${k}: ${s[k] || 0}"></span>`,
+    )
+    .join("")}</div>`;
+}
+function initSmartWorkspace() {
+  const nav = document.createElement("a");
+  nav.className = "nav-item";
+  nav.href = "#smart";
+  nav.dataset.view = "smart";
+  nav.innerHTML =
+    '<svg class="ic"><use href="#i-sliders"/></svg><span>Smart Match</span>';
+  document.querySelector('#nav a[data-view="jobs"]').after(nav);
+  const section = document.createElement("section");
+  section.className = "view";
+  section.dataset.view = "smart";
+  section.innerHTML = `
+    <div class="view-intro"><div><span class="eyebrow">YOUR SEARCH, WITH MEMORY</span><h2>Every job. A clearer decision.</h2><p>Collect first, review against your resume, and keep the reasons.</p></div></div>
+    <div class="sm-tabs" id="sm-tabs">${["overview", "results", "excluded", "history"].map((v, i) => `<button data-tab="${v}" class="${i ? "" : "on"}">${v === "history" ? "Job history" : v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div>
+    <div class="sm-panel" id="sm-overview"><div class="sm-hero"><div><span class="sm-step">COLLECT → REVIEW → APPLY</span><h2>Find the work that fits you.</h2><p>Pull all available jobs across your searches. Smart Match reads each full description against this profile’s resume. Your existing scores and percentage bands stay in place.</p><div class="sm-note" id="sm-model">Checking your saved AI connection…</div></div><div class="sm-actions"><button class="primary" id="sm-pull">Pull all &amp; match →</button><button id="sm-continue">Continue review</button><button id="sm-pause">Pause</button></div></div>
+    <div class="sm-stats" id="sm-stats"></div><div class="card"><h2 id="sm-run-label">Ready when you are</h2><div id="sm-progress-text" class="sm-note"></div><div class="sm-meter"><span id="sm-progress" style="width:0%"></span></div><div class="sm-error" id="sm-error" role="status" aria-live="polite"></div></div>
+    <div class="sm-workflow"><div class="card"><span class="sm-step">01 / COLLECT</span><h3>Save everything first</h3><p class="sm-note">Direct application links, search keywords and first / last collection dates. Repeated jobs share one record; different roles at one company stay separate.</p></div><div class="card"><span class="sm-step">02 / REVIEW</span><h3>Your resume, your percentages</h3><p class="sm-note">Strong 70%+, stretch 50–69%. Your saved match floor still applies. Failed requests remain awaiting review.</p></div><div class="card"><span class="sm-step">03 / APPLY</span><h3>Keep your place</h3><p class="sm-note">Restore exclusions, inspect reasons and mark jobs applied. Collecting or reviewing never marks a job applied.</p></div></div>
+    <div class="card" style="margin-top:20px"><h2>Smart Match preferences</h2><div class="sm-checklist">${smSwitch("sm-enabled", "Enable Smart Match", "Use AI with this profile’s uploaded resume.", false)}${smartFields.map(([key, , label, desc]) => smSwitch("sm-" + key, label, desc)).join("")}</div><details style="margin-top:18px"><summary>AI connection &amp; review controls</summary><p class="sm-note">Reviewing thousands of new jobs uses your API account. Saved unchanged reviews avoid repeated AI requests. Job history stays local even when reuse is off.</p><div class="sm-toolbar"><input id="sm-key" type="password" placeholder="Paste an API key to connect or replace" autocomplete="new-password"><button id="sm-save-key">Save key</button><button id="sm-recheck-all">Recheck saved jobs</button></div></details><p class="sm-note" id="sm-preferences-note" role="status"></p></div></div>
+    <div class="sm-panel hidden" id="sm-list-panel"><div class="sm-toolbar"><input id="sm-search" placeholder="Search title, company or location" aria-label="Search saved jobs"><select id="sm-keyword" aria-label="Filter saved jobs by keyword"><option value="">All keywords</option></select><select id="sm-band" aria-label="Match band"><option value="">Every score</option><option value="strong">Strong · 70%+</option><option value="stretch">Stretch · 50–69%</option></select><button id="sm-clear-run" class="hidden">Clear scrape filter</button><a id="sm-csv" class="btn" download>CSV ↓</a><a id="sm-xlsx" class="btn" download>Excel ↓</a></div><div class="card"><div class="sm-actions" style="justify-content:space-between"><h2 id="sm-list-title">Saved jobs</h2><span class="pill" id="sm-list-count"></span></div><div id="sm-jobs"></div><div class="sm-toolbar"><button id="sm-prev">← Previous</button><span class="sm-note" id="sm-page"></span><button id="sm-next">Next →</button></div></div></div>`;
+  document.querySelector("#content > footer").before(section);
+  $("sm-tabs").onclick = (e) => {
+    const b = e.target.closest("[data-tab]");
+    if (!b) return;
+    smartTab = b.dataset.tab;
+    smartPage = 0;
+    renderSmartTabs();
+    loadSmart();
+  };
+  ["sm-search", "sm-keyword", "sm-band"].forEach((id) =>
+    $(id).addEventListener(id === "sm-search" ? "input" : "change", () => {
+      smartPage = 0;
+      clearTimeout(window.__smSearchTimer);
+      window.__smSearchTimer = setTimeout(loadSmart, 250);
+    }),
+  );
+  $("sm-prev").onclick = () => {
+    smartPage--;
+    loadSmart();
+  };
+  $("sm-next").onclick = () => {
+    smartPage++;
+    loadSmart();
+  };
+  $("sm-clear-run").onclick = () => {
+    smartRun = "";
+    smartDay = "";
+    smartPage = 0;
+    loadSmart();
+  };
+  $("sm-pull").onclick = () => startSmart(false);
+  $("sm-continue").onclick = () => startSmart(true);
+  $("sm-pause").onclick = async () => {
+    try {
+    await smartAction("pause");
+    $("sm-error").textContent =
+      "Pause requested. The current page or review request will finish and save first.";
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  $("sm-recheck-all").onclick = async () => {
+    try {
+    await smartAction("recheck-all");
+    await startSmart(true);
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+  $("sm-enabled").onchange = (e) =>
+    saveSmartPreference("enabled", e.target.checked);
+  smartFields.forEach(
+    ([key]) =>
+      ($("sm-" + key).onchange = (e) =>
+        saveSmartPreference(key, e.target.checked)),
+  );
+  $("sm-save-key").onclick = async () => {
+    const value = $("sm-key").value.trim();
+    if (!value) return;
+    const r = await postJSON("/api/settings/set", {
+      path: "scoring.ai.apiKey",
+      value: JSON.stringify(value),
+    });
+    $("sm-key").value = "";
+    $("sm-preferences-note").textContent = r.ok ? "AI key saved." : r.error;
+    loadSmartSettings();
+  };
+  $("sm-jobs").onclick = async (e) => {
+    const b = e.target.closest("[data-job-action]");
+    if (!b) return;
+    b.disabled = true;
+    try {
+      await smartAction(b.dataset.jobAction, b.dataset.id);
+      if (b.dataset.jobAction === 'recheck') await startSmart(true);
+    } catch (error) {
+      toast(error.message, 'bad');
+    } finally {
+      b.disabled = false;
+    }
+  };
+  initSmartTrends();
+  initSmartSetup();
+  setView(currentView());
+  document.querySelector("#nav").addEventListener("click", (e) => {
+    if (e.target.closest('[data-view="smart"]')) {
+      loadSmart();
+      loadSmartSettings();
+    }
+  });
+  setInterval(() => {
+    if (currentView() === "smart" && !document.hidden) loadSmart();
+  }, 10000);
+  if (currentView() === "smart") {
+    loadSmart();
+    loadSmartSettings();
+  }
+}
+function renderSmartTabs() {
+  document
+    .querySelectorAll("#sm-tabs button")
+    .forEach((b) => b.classList.toggle("on", b.dataset.tab === smartTab));
+  $("sm-overview").classList.toggle("hidden", smartTab !== "overview");
+  $("sm-list-panel").classList.toggle("hidden", smartTab === "overview");
+}
+async function saveSmartPreference(key, value) {
+  const r = await postJSON("/api/settings/set", {
+    path: "scoring.ai." + key,
+    value: JSON.stringify(value),
+  });
+  $("sm-preferences-note").textContent = r.ok
+    ? "Saved for this profile."
+    : r.error;
+  loadSmart();
+}
+async function loadSmartSettings() {
+  try {
+    const r = await (
+      await fetch("/api/settings", { cache: "no-store" })
+    ).json();
+    if (!r.ok) return;
+    const s = r.settings;
+    $("sm-enabled").checked = !!s.aiEnabled;
+    smartFields.forEach(
+      ([key, field]) => ($("sm-" + key).checked = s[field] !== false),
+    );
+    $("sm-model").textContent = s.aiHasKey
+      ? `${s.aiModel || s.aiProvider} · saved key · match floor ${s.matchFloorPercent}%`
+      : "Add your AI key below to start Smart Match.";
+  } catch {}
+}
+async function startSmart(resume) {
+  $("sm-error").textContent = "";
+  const b = $(resume ? "sm-continue" : "sm-pull");
+  b.disabled = true;
+  try {
+    if (resume) await smartAction("continue");
+    const r = await postJSON("/api/scrape", {
+      mode: resume ? "resume" : "smart",
+      watch: "false",
+    });
+    if (!r.ok) throw new Error(r.error);
+    $("sm-error").textContent = resume
+      ? "Continuing saved reviews…"
+      : "Starting collection across this profile’s searches…";
+    setTimeout(loadSmart, 1500);
+  } catch (e) {
+    $("sm-error").textContent = e.message;
+  } finally {
+    b.disabled = false;
+  }
+}
+async function smartAction(action, id = "") {
+  const r = await postJSON("/api/smart-match/action", { action, id });
+  if (!r.ok) throw new Error(r.error || "Could not save that action.");
+  await loadSmart();
+  return r;
+}
+function smartOptions() {
+  return new URLSearchParams({
+    scope:
+      smartTab === "results"
+        ? "results"
+        : smartTab === "excluded"
+          ? "excluded"
+          : "history",
+    search: $("sm-search").value,
+    keyword: $("sm-keyword").value,
+    band: $("sm-band").value,
+    run: smartRun,
+    day: smartDay,
+    page: String(smartPage),
+  });
+}
+async function loadSmart() {
+  try {
+    const options = smartOptions();
+    const r = await (
+      await fetch("/api/smart-match?" + options, { cache: "no-store" })
+    ).json();
+    if (!r.ok) throw new Error(r.error || "Could not load saved jobs.");
+    smartReply = r;
+    const selected = $("sm-keyword").value;
+    $("sm-keyword").innerHTML =
+      '<option value="">All keywords</option>' +
+      (r.keywords || [])
+        .map((k) => `<option value="${escapeAttr(k)}">${smEsc(k)}</option>`)
+        .join("");
+    $("sm-keyword").value = selected;
+    $("sm-stats").innerHTML = smStats(r.summary);
+    const s = r.summary,
+      n = s.unique || 0,
+      done = n - s.pending;
+    $("sm-progress").style.width = (n ? (100 * done) / n : 0) + "%";
+    $("sm-progress-text").textContent =
+      `${smNum(done)} reviewed / ${smNum(n)} saved · ${smNum(s.pending)} awaiting review · ${smNum(s.applied)} applied`;
+    $("sm-run-label").textContent = r.run
+      ? `${r.run.status === "collecting" ? "Collecting jobs" : r.run.status === "reviewing" ? "Reviewing descriptions" : r.paused ? "Paused" : r.run.status[0].toUpperCase() + r.run.status.slice(1)} · ${smDate(r.run.startedAt)}`
+      : "Your saved history starts with the next collection.";
+    if (r.run?.error) $("sm-error").textContent = r.run.error;
+    $("sm-list-title").textContent =
+      smartTab === "excluded"
+        ? "Excluded — with reasons"
+        : smartTab === "results"
+          ? "Your reviewed matches"
+          : "Every saved job";
+    $("sm-list-count").textContent = smNum(r.total) + " jobs";
+    $("sm-jobs").innerHTML = r.jobs.length
+      ? r.jobs.map(renderSmartJob).join("")
+      : `<div class="sm-empty"><b>${smartTab === "excluded" ? "Nothing excluded here yet." : "Your jobs will appear here."}</b>Pull all &amp; match to build this profile’s saved history.</div>`;
+    $("sm-page").textContent = r.pages
+      ? `Page ${r.page + 1} of ${r.pages}`
+      : "No pages yet";
+    $("sm-prev").disabled = r.page <= 0;
+    $("sm-next").disabled = r.page + 1 >= r.pages;
+    $("sm-clear-run").classList.toggle("hidden", !smartRun && !smartDay);
+    $("sm-clear-run").textContent = smartDay ? `Clear ${smartDay} filter` : 'Clear scrape filter';
+    for (const fmt of ["csv", "xlsx"]) {
+      $("sm-" + fmt).href =
+        "/api/export?format=" +
+        fmt +
+        "&catalog=" +
+        options.get("scope") +
+        "&" +
+        options.toString();
+    }
+  } catch (e) {
+    $("sm-error").textContent = e.message;
+  }
+}
+function renderSmartJob(job) {
+  const score = job.matchPct == null ? "—" : job.matchPct + "%",
+    cls =
+      job.matchPct == null ? "awaiting" : job.matchPct < 70 ? "stretch" : "";
+  const link = smSafeLink(job.directUrl);
+  return `<article class="sm-job"><div class="sm-score ${cls}">${score}</div><div><h3>${smEsc(job.title)}</h3><div class="sm-note">${smEsc(job.company)} · ${smEsc(job.location)}</div><div>${job.queries.map((q) => `<span class="sm-chip">${smEsc(q)}</span>`).join("")}<span class="sm-chip">${smEsc(job.state)}</span></div><div class="sm-reason">${smEsc(job.exclusions.length ? job.exclusions.join(" ") : job.aiReason || job.descriptionError || "Saved. Awaiting a full description and AI review.")}</div><details><summary class="sm-note">Why &amp; history</summary><p>${smEsc(job.aiReason || "No completed AI review yet.")}</p><p>First collected ${smDate(job.firstSeenAt)} · Last collected ${smDate(job.lastSeenAt)}<br>Reviewed ${smDate(job.reviewedAt)}${job.lastMatchPct != null && job.matchPct == null ? ` · Previous score ${job.lastMatchPct}% (needs recheck)` : ""}</p>${job.reviewHistory.map((r) => `<p>${smDate(r.at)} · ${smEsc(r.matchPct)}% · ${smEsc(r.reason)}</p>`).join("")}${job.events.map((e) => `<p>${smDate(e.at)} · ${smEsc(e.action)}</p>`).join("")}</details></div><div class="sm-actions">${link ? `<a class="btn primary" href="${escapeAttr(link)}" target="_blank" rel="noopener">Apply ↗</a>` : ""}${job.state !== "applied" ? `<button class="sm" data-job-action="applied" data-id="${job.id}">Mark applied</button><button class="sm" data-job-action="${job.state === "excluded" ? "restore" : "exclude"}" data-id="${job.id}">${job.state === "excluded" ? "Restore" : "Exclude"}</button><button class="sm" data-job-action="recheck" data-id="${job.id}">Recheck</button>` : ""}</div></article>`;
+}
+function initSmartTrends() {
+  const section = document.querySelector('section[data-view="trends"]');
+  const legacy = document.createElement("details");
+  legacy.id = "tr-legacy";
+  legacy.className = "hidden";
+  const legacyLabel = document.createElement('summary'); legacyLabel.textContent = 'Earlier delivered batches · collection totals unavailable'; legacy.append(legacyLabel);
+  while (section.firstChild) legacy.append(section.firstChild);
+  section.append(legacy);
+  const main = document.createElement("div");
+  main.id = "tr-main";
+  main.innerHTML = `<div class="view-intro"><div><span class="eyebrow">THE BIGGER PICTURE</span><h2>Your search is telling a story.</h2><p>See what you’re collecting, which keywords find a fit, and what still needs review.</p></div></div><div class="sm-toolbar"><select id="tr-range" aria-label="Trends date range"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="0">All time</option></select><select id="tr-keyword" aria-label="Trends keyword"><option value="">All keywords</option></select><span class="sm-note" id="tr-context">This profile · all sources</span></div><div class="sm-tabs" id="tr-tabs"><button class="on" data-trtab="overview">Overview</button><button data-trtab="keywords">Keyword comparison</button><button data-trtab="history">Scrape history</button></div><div class="sm-stats" id="tr-stats"></div><div id="tr-panels"></div><p class="sm-note" id="tr-method"></p><div class="sm-error" id="tr-error" role="status"></div>`;
+  section.prepend(main);
+  $("tr-tabs").onclick = (e) => {
+    const b = e.target.closest("[data-trtab]");
+    if (!b) return;
+    trendsTab = b.dataset.trtab;
+    renderSmartTrends();
+  };
+  $("tr-range").onchange = () => loadTrends(true);
+  $("tr-keyword").onchange = () => loadTrends(true);
+  $("tr-panels").onclick = (e) => {
+    const b = e.target.closest("[data-run], [data-heat-day]");
+    if (!b) return;
+    smartRun = b.dataset.run || '';
+    smartDay = b.dataset.heatDay || '';
+    $("sm-keyword").value = b.dataset.heatTerm || $("tr-keyword").value;
+    $("sm-band").value = ''; $("sm-search").value = '';
+    smartTab = "history";
+    smartPage = 0;
+    renderSmartTabs();
+    navTo("smart");
+    loadSmart();
+  };
+}
+async function loadTrends(force) {
+  if (!$("tr-range")) return loadLegacyTrends(force);
+  try {
+    const r = await (
+      await fetch(
+        "/api/smart-trends?" +
+          new URLSearchParams({
+            days: $("tr-range").value,
+            keyword: $("tr-keyword").value,
+          }),
+        { cache: "no-store" },
+      )
+    ).json();
+    if (!r.ok) throw new Error(r.error || "Could not load trends.");
+    trendsReply = r;
+    const selected = $("tr-keyword").value;
+    $("tr-keyword").innerHTML =
+      '<option value="">All keywords</option>' +
+      (r.allKeywords || [])
+        .map((k) => `<option value="${escapeAttr(k)}">${smEsc(k)}</option>`)
+        .join("");
+    $("tr-keyword").value = selected;
+    const old = $("sm-keyword").value;
+    $("sm-keyword").innerHTML = $("tr-keyword").innerHTML;
+    $("sm-keyword").value = old;
+    renderSmartTrends();
+    if (r.legacy?.length) {
+      $("tr-legacy").classList.remove("hidden");
+      $("tr-context").textContent =
+        "Earlier history shows delivered batches only; collection totals were not saved.";
+      renderTrendsChart(r.legacy); renderLeaderboard(r.legacy);
+    } else { $("tr-legacy").classList.add("hidden"); $("tr-context").textContent='This profile · all sources'; }
+  } catch (e) {
+    $("tr-error").textContent = e.message;
+  }
+}
+function renderSmartTrends() {
+  const r = trendsReply;
+  if (!r) return;
+  document
+    .querySelectorAll("#tr-tabs button")
+    .forEach((b) => b.classList.toggle("on", b.dataset.trtab === trendsTab));
+  $("tr-stats").innerHTML = smStats(r.totals, true);
+  $("tr-method").textContent = r.note;
+  let content = "";
+  const rows = r.keywords || [];
+  if (trendsTab === "overview") {
+    content = `<div class="sm-two"><div class="card"><div class="sm-actions" style="justify-content:space-between"><h2>Jobs collected over time</h2><select id="tr-metric" aria-label="Chart metric"><option value="unique">New unique jobs</option><option value="hits">All collection hits</option></select></div><p class="sm-note">New jobs grouped by first collection date. Review bands reflect their current decisions.</p><div id="tr-graph">${renderTrendGraph(r.days)}</div>${smLegend()}</div><div class="card"><h2>Where your jobs stand</h2><div style="margin:35px 0">${smStack(r.totals)}</div>${smLegend()}<p class="sm-note">${smNum(r.totals.pending)} jobs are waiting for review. Awaiting review is separate from match quality.</p><p class="sm-note">${smNum(r.totals.excluded)} excluded · ${smNum(r.totals.applied)} applied. These statuses can overlap score bands.</p></div></div><div class="card" style="margin-top:18px"><h2>Keywords at a glance</h2>${renderKeywordTable(rows.slice(0, 6))}</div>`;
+  } else if (trendsTab === "keywords") {
+    content = `<div class="card"><h2>Which searches find your fit?</h2><p class="sm-note">A job found under several keywords appears under each of them. The overall unique total counts it once.</p>${smLegend()}${renderKeywordTable(rows)}</div><div class="card"><h2>Keyword activity over time</h2><p class="sm-note">New unique jobs on each collection date. Open a cell to inspect those jobs. Showing the most recent 14 collection dates in this range.</p>${renderKeywordHeatmap(r.days, rows)}</div>`;
+  } else {
+    content = `<div class="card"><h2>Every collection, with its receipt.</h2><p class="sm-note">Open a scrape to inspect its saved jobs. An incomplete search keeps the jobs it already collected.</p><div class="sm-overflow"><table class="sm-table"><thead><tr><th>Started</th><th>Keywords</th><th>Hits</th><th>Unique</th><th>New</th><th>Reviewed</th><th>Status</th></tr></thead><tbody>${r.runs.map((run) => `<tr class="sm-run" data-run="${escapeAttr(run.id)}" tabindex="0"><td><button class="sm" data-run="${escapeAttr(run.id)}">${smDate(run.at)} ↗</button></td><td>${Object.keys(run.terms).map(smEsc).join(", ") || "Continue review"}</td><td>${smNum(Object.values(run.terms).reduce((s, t) => s + t.hits, 0))}</td><td>${smNum(run.unique)}</td><td>${smNum(run.newJobs)}</td><td>${smNum(run.reviewed)}</td><td>${smEsc(run.status)}${run.coverage?.some((q) => !q.complete) ? " · collection incomplete" : ""}${run.error ? `<p class="sm-note">${smEsc(run.error)}</p>` : ""}</td></tr>`).join("")}</tbody></table></div>${r.runs.length ? "" : '<div class="sm-empty"><b>No collection history yet.</b>Your next scrape will start the timeline.</div>'}</div>`;
+  }
+  $("tr-panels").innerHTML = content;
+  if ($("tr-metric"))
+    $("tr-metric").onchange = (e) =>
+      ($("tr-graph").innerHTML = renderTrendGraph(r.days, e.target.value));
+}
+function renderKeywordTable(rows) {
+  if (!rows.length)
+    return '<div class="sm-empty"><b>Your next search starts the story.</b>Collection and review totals will appear here as you use AMM.</div>';
+  return `<div class="sm-overflow"><table class="sm-table"><thead><tr><th>Keyword</th><th>Collection hits</th><th>Unique jobs</th><th>Strong</th><th>Stretch</th><th>Below 50%</th><th>Awaiting</th><th>Match mix</th></tr></thead><tbody>${rows
+    .sort((a, b) => b.strong - a.strong)
+    .map(
+      (k) =>
+        `<tr><td><b>${smEsc(k.term)}</b></td>${["hits", "unique", "strong", "stretch", "below", "pending"].map((key) => `<td>${smNum(k[key])}</td>`).join("")}<td>${smStack(k)}</td></tr>`,
+    )
+    .join("")}</tbody></table></div>`;
+}
+function renderKeywordHeatmap(days, keywords) {
+  if (!days.length) return '<div class="sm-empty">Your next collection starts this timeline.</div>';
+  const dates = days.slice(-14);
+  const max = Math.max(1, ...dates.flatMap(day => keywords.map(k => day.terms?.[k.term]?.unique || 0)));
+  return `<div class="sm-overflow"><table class="sm-table"><thead><tr><th>Keyword</th>${dates.map(d => `<th>${d.date.slice(5)}</th>`).join('')}</tr></thead><tbody>${keywords.map(k => `<tr><td><b>${smEsc(k.term)}</b></td>${dates.map(d => { const mix = d.terms?.[k.term] || {}, count = mix.unique || 0; return `<td><button class="sm" data-heat-day="${d.date}" data-heat-term="${escapeAttr(k.term)}" ${count ? '' : 'disabled'} style="background:rgba(77,138,101,${.06 + .5 * count/max});min-width:42px" title="${escapeAttr(k.term)} · ${d.date} · ${mix.strong||0} strong · ${mix.stretch||0} stretch · ${mix.pending||0} awaiting review">${count || '—'}</button></td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+}
+function renderTrendGraph(days, metric = "unique") {
+  if (!days?.length)
+    return '<div class="sm-empty"><b>No collections in this period.</b>Choose a wider range or pull jobs to start your timeline.</div>';
+  let list = [...days];
+  const start = new Date(list[0].date + "T00:00:00Z"),
+    end = new Date(list.at(-1).date + "T00:00:00Z");
+  const byDate = new Map(list.map((d) => [d.date, d]));
+  list = [];
+  for (let d = start; d <= end; d = new Date(d.getTime() + 86400000)) {
+    const key = d.toISOString().slice(0, 10);
+    list.push(byDate.get(key) || { date: key });
+  }
+  const width = 720,
+    height = 225,
+    left = 40,
+    bottom = 195,
+    step = (width - left - 15) / Math.max(1, list.length),
+    bw = Math.min(42, step * 0.63),
+    max = Math.ceil(Math.max(1, ...list.map((d) => d[metric] || 0)) / 4) * 4;
+  let svg = "";
+  for (let i = 0; i <= 4; i++) {
+    const y = bottom - (i * 160) / 4;
+    svg += `<line x1="${left}" y1="${y}" x2="705" y2="${y}" stroke="#e9eee7"/><text x="30" y="${y + 4}" text-anchor="end">${Math.round((max * i) / 4)}</text>`;
+  }
+  list.forEach((d, i) => {
+    const x = left + i * step + (step - bw) / 2;
+    let y = bottom;
+    const bands =
+      metric === "hits"
+        ? [["hits", "#6c9677"]]
+        : [
+            ["strong", "#4d8a65"],
+            ["stretch", "#d6b66b"],
+            ["below", "#bdc7bd"],
+            ["pending", "#e4e8e1"],
+          ];
+    for (const [k, c] of bands) {
+      const h = (160 * (d[k] || 0)) / max;
+      y -= h;
+      svg += `<rect x="${x}" y="${y}" width="${bw}" height="${h}" fill="${c}" rx="2"><title>${d.date}: ${k} ${d[k] || 0}</title></rect>`;
+    }
+    if (i % Math.max(1, Math.ceil(list.length / 7)) === 0)
+      svg += `<text x="${x + bw / 2}" y="218" text-anchor="middle">${d.date.slice(5)}</text>`;
+  });
+  return `<svg class="sm-chart" viewBox="0 0 720 230" role="img" aria-label="${metric === "hits" ? "All collection hits" : "New unique jobs and their review bands"} over time">${svg}</svg>`;
+}
+function initSmartSetup() {
+  const card = document.createElement("div");
+  card.className = "sm-setup";
+  card.innerHTML = `<h3>Make it Smart Match</h3><p class="sm-note">Collect every available job, then review the full list against your resume. Your percentage bands and match floor stay the same.</p>${smSwitch("setup-smart-enabled", "Enable Smart Match", "Use your saved AI key, or add one below.", false)}<div id="setup-smart-key-wrap" class="hidden"><input type="password" id="setup-smart-key" autocomplete="new-password" placeholder="AI API key · leave empty to keep your saved key"></div><p class="sm-note" id="setup-smart-key-state">Optional. You can connect an AI key later in Smart Match.</p><p class="sm-note">Recommended: remember reviews, check new or changed jobs, and exclude consultant, lead and pre-sales roles.</p><details><summary>Adjust filters &amp; saved review preferences</summary><div class="sm-checklist">${smartFields
+    .filter(([key]) => key !== "collectAll")
+    .map(([key, , label, desc]) => smSwitch("setup-smart-" + key, label, desc))
+    .join("")}</div></details>`;
+  document.querySelector('.setup-step[data-step="3"] .card').prepend(card);
+  $("setup-smart-key").oninput = (e) => {
+    if (e.target.value.trim()) $("setup-smart-enabled").checked = true;
+    setupUpdateFinish();
+  };
+  $("setup-smart-enabled").onchange = () => { $("setup-smart-key-wrap").classList.toggle('hidden', !$("setup-smart-enabled").checked); setupUpdateFinish(); };
+  document
+    .querySelectorAll('[id^="setup-smart-"]')
+    .forEach((el) =>
+      el.addEventListener("change", () => setupState.touched.add(el.id)),
+    );
+}
+function hydrateSmartSetup(s) {
+  window.__setupHasAIKey = !!s.aiHasKey;
+  $("setup-smart-enabled").checked = !!s.aiEnabled;
+  smartFields
+    .filter(([key]) => key !== "collectAll")
+    .forEach(
+      ([key, field]) => ($("setup-smart-" + key).checked = s[field] !== false),
+    );
+  $("setup-smart-key-state").textContent = s.aiHasKey
+    ? `Saved ${s.aiModel || s.aiProvider} key is ready. Leave the key box empty to keep it.`
+    : "Optional. Add an AI key to enable Smart Match.";
+  $("setup-smart-key-wrap").classList.toggle('hidden', !$("setup-smart-enabled").checked);
+}
+function smartSetupReady() { return !$("setup-smart-enabled")?.checked || window.__setupHasAIKey || !!$("setup-smart-key").value.trim(); }
+function smartSetupValues() {
+  const ai = { collectAll: true, enabled: $("setup-smart-enabled").checked };
+  smartFields
+    .filter(([key]) => key !== "collectAll")
+    .forEach(([key]) => (ai[key] = $("setup-smart-" + key).checked));
+  return ai;
+}
+initSmartWorkspace();
 </script>
 </body>
 </html>

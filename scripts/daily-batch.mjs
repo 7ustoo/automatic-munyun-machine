@@ -55,6 +55,10 @@ import { enrichParsedResume } from './resume-parser.mjs';
 import { set as setConfig } from './config-rw.mjs';
 import { scrubLegacyAiKeysFromSnapshots, setLocalSecret } from './secret-store.mjs';
 import { fetchAllSources } from './sources/index.mjs';
+import { beginCatalogRun, collectCatalogRows, updateCatalog, readCatalog, reviewContext, catalogJobState, catalogSummary, saveCatalogDescription } from './job-catalog.mjs';
+import { reviewCatalog } from './catalog-review.mjs';
+import { isManagementTitle, isSalesTitle } from './job-title-filters.mjs';
+import { createRequestPacer, retryDelayMs, directApplyUrl } from './hcafe-apply-links.mjs';
 
 // v4.3: dedup-line wording per mode (keys from dedupMode()). The Telegram
 // message uses emoji/HTML-free prose; the jobs(date).txt header is plain ASCII.
@@ -457,7 +461,7 @@ async function _scrapeWith(ctx) {
   // hidden because the ranker may inspect more descriptions than it delivers.
   // probe (~5s, one /saved navigation on the already-open page) also
   // refreshes the dashboard's data/hcafe-auth.json pill on every run.
-  const ACCOUNT_DEDUP = !KEYWORD_MODE && SCORING.accountDedup !== false; // default on
+  const ACCOUNT_DEDUP = !KEYWORD_MODE && !SMART_CATALOG && SCORING.accountDedup !== false;
   let hcafeAuthed = false;
   if (ACCOUNT_DEDUP) {
     // Tri-state on purpose: a probe ERROR (flaky /saved navigation) is not a
@@ -489,7 +493,7 @@ async function _scrapeWith(ctx) {
   // stops offering a Next link long before it (observed 15–25 pages), so the
   // real end of the result set is what ends the loop. The old 50 was close
   // enough to real page counts to look like a legitimate stopping point.
-  const MAX_PAGES_PER_QUERY = KEYWORD_MODE ? Infinity : SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
+  const MAX_PAGES_PER_QUERY = KEYWORD_MODE || SMART_CATALOG ? Infinity : SCORING.searchAllPages !== false ? 5000 : (SCORING.maxPagesPerQuery ?? 300);
 
   // v1.0.x: target-driven cross-query early stop. After each query's
   // pagination, we compute the running fresh-after-dedup count. If it
@@ -500,14 +504,16 @@ async function _scrapeWith(ctx) {
   // skip later keywords just because the early ones filled the target. Set
   // scoring.searchAllQueries:false to restore the old "stop once we have
   // ~1.5x target candidates" speed optimization.
-  const SEARCH_ALL_QUERIES = KEYWORD_MODE || SCORING.searchAllQueries !== false;
+  const SEARCH_ALL_QUERIES = KEYWORD_MODE || SMART_CATALOG || SCORING.searchAllQueries !== false;
   const _appliedSet  = loadAppliedState();
   const _blockedSet  = loadBlockedSeen();
   const _crossQuerySeen = new Set(); // dedup hrefs across query boundaries
   let runningFreshEstimate = 0;
 
   for (const [key, query] of HCAFE_QUERIES) {
+    if (SMART_CATALOG && readCatalog(PP.jobCatalog).paused) break;
     const searchState = buildSearchState(query, { formEaseFilter: KEYWORD_MODE ? null : formEaseFilter, accountDedup: hcafeAuthed, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location });
+    if (SMART_CATALOG) searchState.dateFetchedPastNDays = recencyMaxDays(CFG.filters?.maxJobAge) ?? -1;
     const url = 'https://hiringcafe.com/?searchState=' + encodeURIComponent(JSON.stringify(searchState));
     log(`Scraping "${query}" — All time…`);
     const applyCachePath = path.join(PP.dir, 'apply-link-cache.json');
@@ -518,11 +524,20 @@ async function _scrapeWith(ctx) {
     let allRows, coverage;
     try {
       ({ rows: allRows, coverage } = await crawlSearch({
-        page, url, extract: KEYWORD_MODE ? keywordSearchExtractor(EXTRACT_FN) : EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
+        page, url, extract: KEYWORD_MODE || SMART_CATALOG ? keywordSearchExtractor(EXTRACT_FN) : EXTRACT_FN, maxPages: MAX_PAGES_PER_QUERY, log,
+        ...(SMART_CATALOG ? { jobKey: keywordCandidateKey, useSourceLastPage: true,
+          expandGroups: rows => !rows.some(row => row.embeddedApplyLink),
+          processPageRows: async (rows, info) => {
+            await collectCatalogRows(PP.jobCatalog, catalogRunId, query, rows, info.page);
+            if (readCatalog(PP.jobCatalog).paused) throw new Error('Collection paused. Collected jobs are saved; continue reviewing or pull all again to finish collection.');
+          } } : {}),
         ...(KEYWORD_MODE ? { targetJobs: KEYWORD_LIMIT, jobKey: keywordCandidateKey,
           useSourceLastPage: true,
           expandGroups: rows => !rows.some(row => row.embeddedApplyLink),
-          processPageRows: applyCollector.collect, targetCount: applyCollector.count,
+          processPageRows: async (rows, info) => {
+            await applyCollector.collect(rows);
+            await collectCatalogRows(PP.jobCatalog, catalogRunId, query, rows, info.page);
+          }, targetCount: applyCollector.count,
           beforeRequest: applyCollector.beforeRequest, onThrottle: applyCollector.backoff } : {}),
         checkpoint: state => {
           searchCoverage[key] = { query, ...state };
@@ -688,6 +703,10 @@ const AI_CFG = {
   // with local-only candidates. Users can explicitly choose fail-open.
   requireForDelivery: SCORING.ai?.requireForDelivery !== false,
 };
+const SMART_CATALOG = !KEYWORD_MODE && (process.env.AMM_SMART_MATCH === '1' || (AI_CFG.enabled && SCORING.ai?.collectAll !== false));
+const SMART_RESUME = SMART_CATALOG && process.env.AMM_SMART_MATCH_RESUME === '1';
+const CATALOG_CONTEXT = reviewContext(CFG, { parsed: CV, text: CV_RAW }, AI_CFG.provider?.model || '');
+let catalogRunId = '';
 
 const clamp100 = v => Math.max(0, Math.min(100, Math.round(v)));
 let smartMatchFailedOpen = false;
@@ -718,11 +737,14 @@ async function applySmartMatch(rows) {
     const batch = batches[batchIndex];
     const candidates = batch.map((r, n) => ({
       n, title: r.title, company: r.company,
-      text: (r.__jd || r.cardText || '').slice(0, 16000),
+      text: (r.__jd || r.cardText || '').slice(0, SMART_CATALOG ? 40000 : 16000),
     }));
     let ratings;
     try {
-      ratings = await aiRerank({ apiKey: AI_CFG.apiKey, cvSummary, candidates });
+      ratings = await aiRerank({ apiKey: AI_CFG.apiKey, cvSummary, candidates,
+        ...(SMART_CATALOG ? { preferences: { user: CFG.user, workplaceTypes: CFG.search?.workplaceTypes, location: CFG.search?.location,
+          filters: { ...CFG.filters, filterManagementTitles: SCORING.ai?.excludeLeadRoles !== false, filterSalesTitles: SCORING.ai?.excludeSalesRoles !== false },
+          roleFilters: { excludeConsultantRoles: SCORING.ai?.excludeConsultantRoles !== false, excludeLeadRoles: SCORING.ai?.excludeLeadRoles !== false, excludeSalesRoles: SCORING.ai?.excludeSalesRoles !== false } } } : {}) });
       const unique = new Set((ratings || []).map(r => r.n).filter(n => Number.isInteger(n) && n >= 0 && n < batch.length));
       if (unique.size !== batch.length) throw new Error(`incomplete response (${unique.size}/${batch.length} jobs)`);
     } catch (e) {
@@ -742,6 +764,7 @@ async function applySmartMatch(rows) {
       if (!r || typeof rt.fit !== 'number') continue;
       r.aiPct = clamp100(rt.fit);
       r.aiReason = String(rt.reason || '').slice(0, 180);
+      r.aiExclusions = rt.exclusions || [];
       if (Number.isInteger(rt.skills) && Number.isInteger(rt.seniority) && Number.isInteger(rt.role)) {
         r.aiSub = { skills: clamp100(rt.skills), seniority: clamp100(rt.seniority), role: clamp100(rt.role) };
       }
@@ -1542,6 +1565,106 @@ function writeBatchTsv(top, directUrls, funnel) {
   return lastBatch;
 }
 
+async function runSmartCatalog(atsCards, byQuery) {
+  const sourceGroups = new Map();
+  for (const row of atsCards) {
+    const term = row.q || row.source || 'Other sources';
+    if (!sourceGroups.has(term)) sourceGroups.set(term, []);
+    sourceGroups.get(term).push({ ...row, directUrl: row.directUrl || row.href });
+  }
+  for (const [term, rows] of sourceGroups) await collectCatalogRows(PP.jobCatalog, catalogRunId, term, rows, 'feeds');
+  // ATS adapters may expose lazy descriptions. Load them before persisting;
+  // a search summary alone is never treated as the complete description.
+  const adapters = new Map(atsCards.map(row => [row.directUrl || row.href, row]));
+  // The applied ledger is also used by My matches and Telegram. Match exact
+  // URLs here so two different openings at one company remain independent.
+  const appliedLinks = new Set(Object.values(readAppliedLedger(PP.appliedJobs).jobs).flatMap(j => [j.url, j.identity?.url]).filter(Boolean));
+  await updateCatalog(PP.jobCatalog, c => { for (const job of Object.values(c.jobs)) if (appliedLinks.has(job.directUrl) || appliedLinks.has(job.href)) job.appliedAt ||= new Date().toISOString(); });
+  await updateCatalog(PP.jobCatalog, c => { c.runs.find(r => r.id === catalogRunId).coverage = Object.values(searchCoverage); });
+  let ctx, page;
+  const pacer = createRequestPacer({ intervalMs: 1200 });
+  const loader = async job => {
+    const adapter = adapters.get(job.directUrl);
+    if (adapter) {
+      const resolved = (await resolveAll([adapter]))[0];
+      return resolved;
+    }
+    if (!job.href) throw new Error('The source did not supply a job description link. Pull all again to refresh it.');
+    ctx ||= await launchBrowser();
+    page ||= ctx.pages()[0] || await ctx.newPage();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await pacer.wait();
+      try {
+        const response = await page.goto(job.href, { waitUntil: 'domcontentloaded', timeout: 30000 });
+        if ([429, 503].includes(response?.status())) {
+          pacer.pause(retryDelayMs(response.headers()['retry-after']));
+          throw new Error('Source asked us to slow down.');
+        }
+        if (response && !response.ok()) throw new Error(`Description unavailable (HTTP ${response.status()}).`);
+        await page.locator('#job-description').waitFor({ timeout: 15000 });
+        const jdText = (await page.locator('#job-description').innerText()).trim();
+        const link = await readJobApplyLink(page);
+        if (link.status === 'expired') throw new Error('Posting has expired; pull all again to refresh it.');
+        return { jdText, directUrl: link.directUrl || job.directUrl, descriptionQuality: 'full' };
+      } catch (error) { if (attempt === 2) throw error; }
+    }
+  };
+  const exclusions = row => {
+    const reasons = [...(row.aiExclusions || [])];
+    const settings = SCORING.ai || {};
+    if (settings.excludeConsultantRoles !== false && (/\bconsult(?:ant|ing)\b/i.test(row.title) || analyzeConsultantSlop({ title: row.title, text: row.__jd }, 'balanced').excluded)) reasons.push('Consultant or customer consulting duties are excluded in Smart Match.');
+    if (settings.excludeLeadRoles !== false && isManagementTitle(row.title)) reasons.push('Lead or management role is excluded in Smart Match.');
+    if (settings.excludeSalesRoles !== false && (isSalesTitle(row.title) || /pre[- ]?sales/i.test(row.title))) reasons.push('Sales or pre-sales role is excluded in Smart Match.');
+    if (CFG.filters?.filterClearance && CLEARANCE_RX.test(row.title + ' ' + row.__jd)) reasons.push('Posting requires clearance or citizenship excluded by this profile.');
+    if (SKIP_COMPANIES.some(company => String(company).toLowerCase() === row.company.toLowerCase())) reasons.push('Company is on your blocked list.');
+    if (row.title && DROP_TITLE.test(row.title)) reasons.push('Title matches this profile’s excluded-title rule.');
+    if (row.yoe != null && row.yoe > (CFG.user?.maxYoeAcceptable ?? 100)) reasons.push(`Requires ${row.yoe}+ years, above your profile preference.`);
+    if (row.matchPct < MATCH_FLOOR_PCT) reasons.push(`Below your ${MATCH_FLOOR_PCT}% match floor.`);
+    if (!directApplyUrl(row.directUrl)) reasons.push('No verified direct application link is available.');
+    return [...new Set(reasons)];
+  };
+  let reviewError = '';
+  try {
+    await reviewCatalog({ file: PP.jobCatalog, directory: PP.jobDescriptions, runId: catalogRunId, context: CATALOG_CONTEXT,
+      reuse: SCORING.ai?.rememberJobs !== false && SCORING.ai?.onlyNew !== false,
+      loadDescription: loader,
+      score: (job, text) => {
+        const local = scoreJob({ ...job, cardText: text });
+        const req = requirementScore(job, text, jdScoreToPercent(local.score));
+        return { ...req, score: local.score, salaryK: local.salaryK, matched: req.matched.length ? req.matched : local.matched };
+      },
+      review: applySmartMatch, exclusions,
+      onProgress: () => log(`Smart Match saved: ${JSON.stringify(catalogSummary(readCatalog(PP.jobCatalog), CATALOG_CONTEXT))}`),
+    });
+  } catch (error) { reviewError = SCRUB(String(error.message || error)); }
+  finally { await ctx?.close().catch(() => {}); }
+  const catalog = readCatalog(PP.jobCatalog);
+  const summary = catalogSummary(catalog, CATALOG_CONTEXT);
+  const top = Object.values(catalog.jobs).filter(job => catalogJobState(job, CATALOG_CONTEXT) === 'reviewed' && directApplyUrl(job.directUrl))
+    .map(job => ({ ...job, ...job.review, aiReason: job.review.reason, __direct: job.directUrl, q: Object.keys(job.queries || {}).join(', ') }))
+    .sort(compareJobs).slice(0, DELIVER_COUNT);
+  const run = catalog.runs.find(r => r.id === catalogRunId);
+  const raw = Object.values(run.terms).flatMap(term => Object.values(term.pages)).reduce((sum, p) => sum + p.hits, 0);
+  const funnel = { mode: 'smart', raw, uniqueBeforeFilter: run.ids.length, sent: top.length, ...summary,
+    matchFloorPercent: MATCH_FLOOR_PCT, targetJobsPerBatch: DELIVER_COUNT, smartMatchStatus: run.status,
+    smartMatchEvaluated: run.reviewedIds.length, smartMatchModel: AI_CFG.provider?.model, smartMatchError: reviewError,
+    searchCoverage: run.coverage, searchIncomplete: run.coverage.some(q => !q.complete), descriptionEvaluated: run.reviewedIds.length };
+  const urls = top.map(job => job.directUrl);
+  const lastBatch = writeBatchTsv(top, urls, funnel);
+  let deliveryTxtPath;
+  try { deliveryTxtPath = writeApplyLinksTxt(); } catch {}
+  if (TELEGRAM_ON && top.length) try {
+    await tgChunked(`<b>Smart Match</b>\n${summary.unique} saved jobs · ${summary.strong} strong · ${summary.stretch} stretch · ${summary.pending} awaiting review.\n${top.length} matches are ready in AMM.`);
+    if (deliveryTxtPath) await tgDocument(deliveryTxtPath, `Smart Match — ${top.length} direct application links`);
+  } catch (error) { log(`Telegram delivery failed (non-fatal): ${SCRUB(error.message)}`); }
+  if (deliveryTxtPath && EMAIL_ON && CFG.email?.enabled && CFG.email?.autoSend && CFG.email?.to && top.length) try {
+    const attachment = buildAutoEmailAttachment({ lastBatch, format: CFG.email.format || 'txt', deliveryTxtPath, date: DATE });
+    await sendConfiguredEmail({ env, to: CFG.email.to, from: CFG.email.from || env.SMTP_USER, subject: renderSubject(CFG.email.subject, DATE), text: 'Your Smart Match job batch is attached.', attachments: [attachment] });
+  } catch (error) { log(`Email delivery failed (non-fatal): ${SCRUB(error.message)}`); }
+  writeScrapeStatus(!reviewError, { jobCount: top.length, mode: 'smart', ...(reviewError ? { error: reviewError.slice(0, 300), kind: 'review' } : {}) });
+  log(`Smart Match ${run.status}: ${summary.unique} saved, ${summary.pending} awaiting review. ${reviewError}`);
+}
+
 // Run the scrape pipeline only when invoked as a CLI (see IS_CLI computation
 // at the top of the file). Skipped on `import`, so test files can pull
 // scoreJob / parseSalaryK without triggering a real scrape.
@@ -1579,12 +1702,14 @@ if (IS_CLI) (async () => {
       return;
     }
 
+    if (SMART_CATALOG && (!AI_CFG.enabled || !AI_CFG.apiKey)) throw new Error('Enable Smart Match and add an AI key before reviewing jobs.');
+    if (KEYWORD_MODE || SMART_CATALOG) catalogRunId = await beginCatalogRun(PP.jobCatalog, KEYWORD_MODE ? 'keyword' : 'smart', CATALOG_CONTEXT, { resume: SMART_RESUME });
     let byQuery, hcafeAuthed = false, accountDedupEnabled = true;
     // v7.3: when the source selection leaves hiring.cafe with zero terms
     // (scrapeSources='dice' or every term tagged Dice-only), skip the whole
     // Playwright scrape — Dice + ATS feeds are plain fetch. Auth state falls
     // back to the cached probe so dedup-mode wording stays honest.
-    if (!HCAFE_QUERIES.length) {
+    if (SMART_RESUME || !HCAFE_QUERIES.length) {
       byQuery = {};
       hcafeAuthed = readHcafeAuthCache().authed === true;
       accountDedupEnabled = SCORING.accountDedup !== false;
@@ -1610,6 +1735,8 @@ if (IS_CLI) (async () => {
       // ignores CV scores, match filters, local seen history, and AI services.
       const { top, funnel } = buildKeywordCollection(byQuery['manual-keyword'], KEYWORD_TERM, KEYWORD_REQUEST, Object.values(searchCoverage));
       const directUrls = top.map(row => row.directUrl);
+      await collectCatalogRows(PP.jobCatalog, catalogRunId, KEYWORD_TERM, top, 'resolved');
+      await updateCatalog(PP.jobCatalog, c => { const r = c.runs.find(r => r.id === catalogRunId); delete r.terms[KEYWORD_TERM]?.pages.resolved; r.status = funnel.searchIncomplete ? 'incomplete' : 'complete'; r.coverage = Object.values(searchCoverage); r.finishedAt = new Date().toISOString(); });
       writeBatchTsv(top, directUrls, funnel);
       try { writeApplyLinksTxt(); } catch (e) { log(`Keyword links text export skipped: ${SCRUB(e.message || e)}`); }
       writeScrapeStatus(true, { jobCount: top.length, mode: 'keyword' });
@@ -1650,11 +1777,15 @@ if (IS_CLI) (async () => {
       }).catch(() => {});
       return watchChain;
     } : undefined;
-    const atsCards = (SOURCES_CONFIGURED || DICE_QUERY_TERMS.length)
+    const atsCards = !SMART_RESUME && (SOURCES_CONFIGURED || DICE_QUERY_TERMS.length)
       ? await fetchAllSources(SOURCES, { workplaceTypes: normalizeWorkplaceTypes(CFG.search?.workplaceTypes), log, queries: DICE_QUERY_TERMS, diceOptions: { filters: diceFilters, onPage: onDicePage } }).catch((e) => { log(`ATS sources skipped: ${SCRUB(String(e.message || e))}`); return []; })
       : [];
     if (watchCtx) { try { await watchChain; await watchCtx.close(); } catch {} }
     if (atsCards.length) log(`ATS sources contributed ${atsCards.length} jobs`);
+    if (SMART_CATALOG) {
+      await runSmartCatalog(atsCards, byQuery);
+      return;
+    }
     const {
       all, kept, rawCount, droppedDuplicates,
       droppedClearance, droppedStale, droppedManagement, droppedSales,
@@ -1962,6 +2093,7 @@ if (IS_CLI) (async () => {
     writeScrapeStatus(true, { jobCount: top.length });
     log('=== done ===');
   } catch (e) {
+    if (catalogRunId) await updateCatalog(PP.jobCatalog, c => { const r = c.runs.find(r => r.id === catalogRunId); r.status = c.paused ? 'paused' : 'interrupted'; r.error = SCRUB(String(e.message || e)).slice(0, 240); r.coverage = Object.values(searchCoverage); }).catch(() => {});
     const msg = '❌ daily-batch failed: ' + SCRUB(e.message || e);
     writeScrapeStatus(false, { error: SCRUB(String(e.message || e)).slice(0, 300), kind: 'crash' });
     log(msg);

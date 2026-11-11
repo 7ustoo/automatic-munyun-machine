@@ -148,6 +148,8 @@ export function paths(slug) {
   fs.mkdirSync(dir, { recursive: true });
   return {
     dir,
+    jobCatalog:         path.join(dir, 'job-catalog.json'),
+    jobDescriptions:    path.join(dir, 'job-descriptions'),
     cvParsed:           path.join(dir, 'cv-parsed.json'),
     seenJobs:           path.join(dir, 'seen-jobs.json'),
     lastBatch:          path.join(dir, 'last-batch.json'),

@@ -132,6 +132,41 @@ const countedRequest = page.waitForRequest(r => r.url().endsWith('/api/scrape') 
 await count.press('Enter');
 if ((await countedRequest).postDataJSON().limit !== '2423') throw new Error('custom keyword count above 1,000 did not reach the server');
 
+// Smart Match: the real page renders saved percentages/reasons and sends
+// profile-scoped actions. A tiny local API fixture models persisted state.
+let catalogState = 'excluded';
+await page.route('**/api/smart-match?*', async route => {
+  const q=new URL(route.request().url()).searchParams;
+  const job={id:'a'.repeat(24),title:'Lead Linux Engineer',company:'Example',location:'Remote',directUrl:'https://jobs.example.com/apply/linux',state:catalogState,queries:['linux'],matchPct:82,lastMatchPct:82,aiReason:'Linux experience fits; this is a lead position.',exclusions:['Lead roles are excluded.'],firstSeenAt:'2026-11-11T10:00:00Z',lastSeenAt:'2026-11-11T11:00:00Z',reviewedAt:'2026-11-11T11:01:00Z',reviewHistory:[],events:[]};
+  const visible=(q.get('scope')==='excluded'&&catalogState==='excluded')||(q.get('scope')==='results'&&catalogState==='reviewed')||q.get('scope')==='history';
+  await route.fulfill({json:{ok:true,summary:{unique:1,strong:1,stretch:0,below:0,pending:0,excluded:catalogState==='excluded'?1:0,applied:catalogState==='applied'?1:0},keywords:['linux'],jobs:visible?[job]:[],total:visible?1:0,page:0,pages:visible?1:0,paused:false,run:null}});
+});
+await page.route('**/api/smart-match/action',async route=>{const b=route.request().postDataJSON();if(b.action==='restore')catalogState='reviewed';if(b.action==='applied')catalogState='applied';await route.fulfill({json:{ok:true}});});
+await page.goto('http://127.0.0.1:8765/#smart',{waitUntil:'networkidle'});
+await page.click('#sm-tabs [data-tab="excluded"]');
+await page.waitForSelector('#sm-jobs [data-job-action="restore"]');
+if (!(await page.locator('#sm-jobs').textContent()).includes('82%') || !(await page.locator('#sm-jobs').textContent()).includes('Lead roles are excluded.')) throw new Error('Excluded jobs lost their score or reason');
+const applyLink=await page.locator('#sm-jobs a').getAttribute('href');
+if(applyLink!=='https://jobs.example.com/apply/linux')throw new Error('Smart Match Apply did not use the direct employer URL');
+await page.click('#sm-jobs [data-job-action="restore"]');
+await page.waitForFunction(()=>document.querySelector('#sm-list-count').textContent==='0 jobs');
+await page.click('#sm-tabs [data-tab="results"]');
+await page.waitForSelector('#sm-jobs [data-job-action="applied"]');
+if(!(await page.locator('#sm-xlsx').getAttribute('href')).includes('catalog=results'))throw new Error('Smart Match export is not scoped to the selected view');
+await page.click('#sm-jobs [data-job-action="applied"]');
+await page.waitForFunction(()=>document.querySelector('#sm-list-count').textContent==='0 jobs');
+await page.click('#sm-tabs [data-tab="overview"]');
+const smartRequest=page.waitForRequest(r=>r.url().endsWith('/api/scrape')&&r.method()==='POST');
+await page.click('#sm-pull');if((await smartRequest).postDataJSON().mode!=='smart')throw new Error('Smart Match did not start full collection');
+await page.goto('http://127.0.0.1:8765/#trends',{waitUntil:'networkidle'});
+await page.waitForSelector('.sm-chart');
+await page.click('[data-trtab="keywords"]');
+if(!(await page.locator('#tr-panels').textContent()).includes('Awaiting'))throw new Error('Trends lost the separate pending band');
+const trendsRequest=page.waitForRequest(r=>r.url().includes('/api/smart-trends?')&&new URL(r.url()).searchParams.get('days')==='7');
+await page.selectOption('#tr-range','7');await trendsRequest;
+await page.click('[data-trtab="history"]');
+await page.waitForSelector('#tr-panels .sm-empty');
+
 if (errors.length) throw new Error('dashboard console errors:\n' + errors.join('\n'));
 await browser.close();
 console.log('E2E: dashboard jobs, profiles, Gmail OAuth, previous scrapes, and keyword collection passed');

@@ -6,7 +6,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
-## [Unreleased]
+## [12.3.0] — 2026-11-11
+
+- OpenAI Smart Match and resume analysis now use GPT-6.1 Sol with the existing saved API key.
+- Added a Smart Match workspace: collect every available search page first, review full descriptions in resumable batches, and retain profile-local job history. Unchanged reviews can be reused; resume, model, preference and description changes trigger a new review.
+- Results, Excluded and Job history retain percentage scores, review reasons, first/last collection dates, manual restores and applied status. CSV and Excel exports include direct apply links and reasons. Collecting a job never marks it applied.
+- Consultant, lead/management and sales/pre-sales filters are grouped under Smart Match. Strong (70%+) and stretch (50–69%) bands, existing match floors and the 35% local / 65% AI blend are preserved.
+- Trends now includes Overview, Keyword comparison and Scrape history with date/keyword filters, collection hits, unique jobs and separate awaiting-review counts. Earlier delivered-only history remains labeled as such.
+- Quick setup now includes Smart Match and saved-review preferences, and can reopen safely with the current profile’s saved resume and settings.
 
 ## [12.2.0] — 2026-11-09
 

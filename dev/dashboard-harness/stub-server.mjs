@@ -41,6 +41,8 @@ const genAt = () => scrapeDone() ? "2026-07-06T22:45:00" : "2026-07-06T07:02:11"
 const liveJobs = () => scrapeDone() ? jobs : jobs.slice(0, 27);
 
 const routes = (needsSetup, opts = {}) => ({
+  '/api/smart-match': { ok: true, summary: { unique: 4, strong: 2, stretch: 1, below: 0, pending: 1, excluded: 1, applied: 0 }, jobs: [], total: 0, page: 0, pages: 0, keywords: ['linux','cloud'], paused: false, run: null, floor: 45, model: 'gpt-6.1-sol' },
+  '/api/smart-trends': { ok: true, totals: { unique: 4, hits: 7, strong: 2, stretch: 1, below: 0, pending: 1, excluded: 1, applied: 0 }, days: [{date:'2026-11-10',unique:3,hits:5,strong:2,stretch:1,below:0,pending:0,terms:{linux:{unique:3,strong:2,stretch:1,hits:5},cloud:{unique:1,strong:1,hits:1}}},{date:'2026-11-11',unique:1,hits:2,strong:0,stretch:0,below:0,pending:1,terms:{cloud:{unique:1,pending:1,hits:1}}}], keywords: [{term:'linux',hits:5,unique:3,strong:2,stretch:1,below:0,pending:0},{term:'cloud',hits:2,unique:2,strong:1,stretch:0,below:0,pending:1}], allKeywords: ['linux','cloud'], runs: [], legacy: [], note: 'Fixture data. Keyword totals overlap; awaiting review is separate from match quality.' },
   "/api/update/check": opts.update
     ? { ok: true, hasUpdate: true, current: "3.0.1", latest: "3.0.2", canAutoUpdate: true, releaseUrl: "https://example.com/rel" }
     : { ok: true, hasUpdate: false, current: "12.1.0" },
