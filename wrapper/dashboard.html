@@ -1309,6 +1309,9 @@
         </div>
         <div class="ai-audit hidden" id="ai-audit"></div>
         <div class="muted-sm" id="st-funnel" style="margin:-4px 0 14px"></div>
+        <div class="card hidden" id="batch-description-card" style="margin-bottom:18px">
+          <div class="toolbar" style="border:0;padding:0;margin:0;justify-content:space-between"><div><b id="batch-description-count">Job descriptions</b><p class="muted-sm" id="batch-description-note" role="status" style="margin:6px 0 0"></p></div><div class="sm-actions"><button class="sm" id="batch-description-retry">Load descriptions</button><a class="btn sm" id="batch-description-download" href="/api/export?format=csv" download>Download CSV</a></div></div>
+        </div>
 
         <div class="card">
           <div class="toolbar">
@@ -1329,6 +1332,7 @@
               <option value="company">Sort: Company</option>
               <option value="yoe">Sort: YOE</option>
             </select>
+            <button class="sm primary" id="match-saved-list" title="Review the entire saved list against this profile’s resume">Smart match this list</button>
             <details class="menu" id="export-menu">
               <summary class="btn sm"><svg class="ic"><use href="#i-download"/></svg>Export<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
@@ -2323,6 +2327,42 @@ async function loadBatch() {
   }
 }
 
+let descriptionStatusBusy = false;
+async function loadBatchDescriptionStatus() {
+  const card = $('batch-description-card');
+  const show = state.batchMeta.mode === 'keyword' && !state.archiveId && state.jobs.length;
+  card.classList.toggle('hidden', !show);
+  if (!show || descriptionStatusBusy) return;
+  descriptionStatusBusy = true;
+  const generatedAt = state.batchMeta.generatedAt;
+  try {
+    const result = await (await fetch('/api/batch/descriptions', { cache: 'no-store' })).json();
+    if (!result.ok) throw new Error(result.error || 'Could not read description progress.');
+    if (state.archiveId || state.batchMeta.generatedAt !== generatedAt || result.generatedAt !== generatedAt) return;
+    state.descriptionStatus = result;
+    $('batch-description-count').textContent = `${result.available} of ${result.total} full job descriptions saved`;
+    $('batch-description-note').textContent = result.available === result.total
+      ? 'CSV is ready with the full descriptions. Smart Match can use this saved text without visiting the job pages again.'
+      : result.loading ? `Loading descriptions. ${result.unavailable} unavailable so far. A download now includes only the descriptions already saved; download again when ready.`
+      : `${result.pending} pending · ${result.unavailable} unavailable. Retry loading, or use Smart match this list. Empty description cells are not completed reviews.`;
+    $('batch-description-retry').disabled = result.loading || result.available === result.total;
+    $('batch-description-retry').textContent = result.loading ? 'Loading…' : 'Retry missing descriptions';
+    $('batch-description-download').textContent = result.available === result.total ? 'Download CSV with descriptions' : `Download CSV · ${result.available}/${result.total} descriptions`;
+  } catch (error) { $('batch-description-note').textContent = error.message; }
+  finally { descriptionStatusBusy = false; }
+}
+$('batch-description-retry').onclick = async () => {
+  const status = state.descriptionStatus;
+  if (!status) return;
+  $('batch-description-retry').disabled = true;
+  try {
+    const result = await postJSON('/api/batch/descriptions/retry', { profile: status.profile, generatedAt: status.generatedAt });
+    if (!result.ok) throw new Error(result.error || 'Could not start description loading.');
+    await loadBatchDescriptionStatus();
+  } catch (error) { $('batch-description-note').textContent = error.message; $('batch-description-retry').disabled = false; }
+};
+setInterval(() => { if (currentView() === 'jobs' && !document.hidden) loadBatchDescriptionStatus(); }, 10000);
+
 async function loadArchivedBatch(id, label = "") {
   if (!id) return;
   renderSkeleton();
@@ -2396,7 +2436,7 @@ function renderStats() {
   if (!f || state.batchMeta.mode === 'keyword') {
     audit.classList.add("hidden");
   } else {
-    const complete = f.smartMatchStatus === "complete" && aiChecked === checked;
+    const complete = checked > 0 && aiChecked === checked;
     audit.className = "ai-audit " + (complete ? "good" : "warn");
     audit.textContent = complete
       ? `AI verified every evaluated job (${aiChecked}/${checked}) with ${f.smartMatchProvider || "the configured provider"}. Final scores blend 65% AI judgment with 35% local requirement scoring.`
@@ -2407,6 +2447,7 @@ function renderStats() {
     ? "generated " + state.batchMeta.generatedAt.replace("T", " ").slice(0, 16) : "no batch yet";
   // v4.1: funnel breakdown — where the raw scrape went before the final list.
   $("st-funnel").textContent = f ? funnelLineJS(f) : "";
+  loadBatchDescriptionStatus();
   $("nav-jobs-badge").textContent = jobs.length ? String(jobs.length) : "";
 }
 
@@ -2504,6 +2545,7 @@ function whyRowHTML(idx) {
 }
 
 function renderJobs() {
+  $("match-saved-list").disabled = !state.jobs.length;
   const all = state.jobs;
   const keywordMode = state.batchMeta.mode === "keyword";
   const directKeyword = keywordMode && state.batchMeta.funnel?.directApplyLinks;
@@ -2833,7 +2875,8 @@ async function loadSettings() {
     $("set-ai-required").value = String(s.aiRequireForDelivery !== false);
     $("ai-pill").textContent = s.aiEnabled ? "on" : "off";
     $("set-ai-key").value = "";
-    $("set-ai-key").placeholder = s.aiHasKey ? "•••••••• saved — paste to replace" : "Paste API key";
+    $("set-ai-key").placeholder = s.aiConnection === 'chatgpt' ? 'Not used with ChatGPT subscription' : s.aiHasKey ? "•••••••• saved — paste to replace" : "Paste API key";
+    $("set-ai-key").disabled = s.aiConnection === 'chatgpt';
     $("ai-provider").textContent = s.aiProvider || "Paste key to detect";
     $("muted-count").textContent = (s.mutedTerms || []).length;
     // v4.0: thin-CV honesty — weak extraction means weak matching.
@@ -3913,7 +3956,7 @@ async function loadResumeEvidence() {
     } else {
       $("resume-ai-status").textContent = r.aiAnalysisError
         ? `AI analysis failed: ${r.aiAnalysisError} Local resume analysis is still active.`
-        : (r.aiConfigured ? "Ready for AI analysis. This will improve this profile's roles, keywords, and verified skill set." : "Add a Smart Match API key in Settings to enable AI resume analysis.");
+        : (r.aiConfigured ? "Ready for AI analysis. This will improve this profile's roles, keywords, and verified skill set." : "Connect ChatGPT or an API key in Smart Match to enable AI resume analysis.");
       $("resume-ai-summary-block").classList.add("hidden");
     }
     $("resume-proof-text").textContent = r.raw || "The parser found no readable text.";
@@ -4687,6 +4730,17 @@ async function setupFinish() {
   color: #235e47;
   box-shadow: 0 2px 8px #1836250b;
 }
+.sm-import-card { display:flex; align-items:center; justify-content:space-between; gap:24px; margin:18px 0; }
+.sm-import-card h3 { margin:7px 0; }
+.sm-import-card p { max-width:760px; margin:7px 0; }
+.sm-import-count { display:flex; align-items:center; gap:16px; padding:18px; border-radius:14px; background:var(--surface-2); }
+.sm-import-count strong { font-size:38px; color:var(--accent); }
+#modal .m-body .sm-note { font-size:13px; }
+#modal.sm-import-modal { max-width:600px; max-height:calc(100vh - 40px); display:flex; flex-direction:column; }
+#modal.sm-import-modal h3 { font-size:22px; }
+#modal.sm-import-modal .m-body { overflow:auto; min-height:0; white-space:normal; }
+#modal.sm-import-modal .m-actions { flex-shrink:0; }
+@media(max-width:760px) { .sm-import-card { align-items:flex-start; flex-direction:column; } }
 .sm-hero {
   border: 1px solid #c9dcd1;
   background: linear-gradient(115deg, #eaf5ed, #f9fbf6);
@@ -5151,9 +5205,13 @@ function initSmartWorkspace() {
     <div class="view-intro"><div><span class="eyebrow">YOUR SEARCH, WITH MEMORY</span><h2>Every job. A clearer decision.</h2><p>Collect first, review against your resume, and keep the reasons.</p></div></div>
     <div class="sm-tabs" id="sm-tabs">${["overview", "results", "excluded", "history"].map((v, i) => `<button data-tab="${v}" class="${i ? "" : "on"}">${v === "history" ? "Job history" : v[0].toUpperCase() + v.slice(1)}</button>`).join("")}</div>
     <div class="sm-panel" id="sm-overview"><div class="sm-hero"><div><span class="sm-step">COLLECT → REVIEW → APPLY</span><h2>Find the work that fits you.</h2><p>Pull all available jobs across your searches. Smart Match reads each full description against this profile’s resume. Your existing scores and percentage bands stay in place.</p><div class="sm-note" id="sm-model">Checking your saved AI connection…</div></div><div class="sm-actions"><button class="primary" id="sm-pull">Pull all &amp; match →</button><button id="sm-continue">Continue review</button><button id="sm-pause">Pause</button></div></div>
+    <div class="card sm-import-card"><div><span class="sm-step">ALREADY HAVE A LIST?</span><h3>Bring your jobs to Smart Match.</h3><p class="sm-note">Review a saved pull or import a CSV. Use Job Title and Apply Link columns; a Description column is optional. Your percentages, exclusions and job history stay together.</p></div><div class="sm-actions"><button class="primary" id="sm-import-csv">Import CSV ↑</button><button id="sm-use-matches">Use My matches</button><input id="sm-csv-file" type="file" accept=".csv,text/csv" hidden aria-label="Import jobs CSV"></div></div>
     <div class="sm-stats" id="sm-stats"></div><div class="card"><h2 id="sm-run-label">Ready when you are</h2><div id="sm-progress-text" class="sm-note"></div><div class="sm-meter"><span id="sm-progress" style="width:0%"></span></div><div class="sm-error" id="sm-error" role="status" aria-live="polite"></div></div>
     <div class="sm-workflow"><div class="card"><span class="sm-step">01 / COLLECT</span><h3>Save everything first</h3><p class="sm-note">Direct application links, search keywords and first / last collection dates. Repeated jobs share one record; different roles at one company stay separate.</p></div><div class="card"><span class="sm-step">02 / REVIEW</span><h3>Your resume, your percentages</h3><p class="sm-note">Strong 70%+, stretch 50–69%. Your saved match floor still applies. Failed requests remain awaiting review.</p></div><div class="card"><span class="sm-step">03 / APPLY</span><h3>Keep your place</h3><p class="sm-note">Restore exclusions, inspect reasons and mark jobs applied. Collecting or reviewing never marks a job applied.</p></div></div>
-    <div class="card" style="margin-top:20px"><h2>Smart Match preferences</h2><div class="sm-checklist">${smSwitch("sm-enabled", "Enable Smart Match", "Use AI with this profile’s uploaded resume.", false)}${smartFields.map(([key, , label, desc]) => smSwitch("sm-" + key, label, desc)).join("")}</div><details style="margin-top:18px"><summary>AI connection &amp; review controls</summary><p class="sm-note">Reviewing thousands of new jobs uses your API account. Saved unchanged reviews avoid repeated AI requests. Job history stays local even when reuse is off.</p><div class="sm-toolbar"><input id="sm-key" type="password" placeholder="Paste an API key to connect or replace" autocomplete="new-password"><button id="sm-save-key">Save key</button><button id="sm-recheck-all">Recheck saved jobs</button></div></details><p class="sm-note" id="sm-preferences-note" role="status"></p></div></div>
+    <div class="card" style="margin-top:20px"><h2>Smart Match preferences</h2><div class="sm-checklist">${smSwitch("sm-enabled", "Enable Smart Match", "Use AI with this profile’s uploaded resume.", false)}${smartFields.map(([key, , label, desc]) => smSwitch("sm-" + key, label, desc)).join("")}</div>
+    <div class="sm-toolbar" style="margin-top:18px"><label for="sm-connection">Match using</label><select id="sm-connection"><option value="chatgpt">ChatGPT subscription</option><option value="api">API key · separate billing</option></select><button class="primary" id="sm-connect-chatgpt">Connect ChatGPT</button></div>
+    <p class="sm-note" id="sm-connection-note" role="status"></p>
+    <details style="margin-top:18px"><summary>AI connection &amp; review controls</summary><p class="sm-note">ChatGPT subscription mode uses your included Codex allowance and pauses when a usage limit prevents review. It never falls back to API billing. Saved unchanged reviews are reused.</p><div class="sm-toolbar" id="sm-api-settings"><input id="sm-key" type="password" placeholder="Paste an API key to connect or replace" autocomplete="new-password"><button id="sm-save-key">Save key</button></div><div class="sm-toolbar"><button id="sm-recheck-all">Recheck saved jobs</button></div></details><p class="sm-note" id="sm-preferences-note" role="status"></p></div></div>
     <div class="sm-panel hidden" id="sm-list-panel"><div class="sm-toolbar"><input id="sm-search" placeholder="Search title, company or location" aria-label="Search saved jobs"><select id="sm-keyword" aria-label="Filter saved jobs by keyword"><option value="">All keywords</option></select><select id="sm-band" aria-label="Match band"><option value="">Every score</option><option value="strong">Strong · 70%+</option><option value="stretch">Stretch · 50–69%</option></select><button id="sm-clear-run" class="hidden">Clear scrape filter</button><a id="sm-csv" class="btn" download>CSV ↓</a><a id="sm-xlsx" class="btn" download>Excel ↓</a></div><div class="card"><div class="sm-actions" style="justify-content:space-between"><h2 id="sm-list-title">Saved jobs</h2><span class="pill" id="sm-list-count"></span></div><div id="sm-jobs"></div><div class="sm-toolbar"><button id="sm-prev">← Previous</button><span class="sm-note" id="sm-page"></span><button id="sm-next">Next →</button></div></div></div>`;
   document.querySelector("#content > footer").before(section);
   $("sm-tabs").onclick = (e) => {
@@ -5186,6 +5244,26 @@ function initSmartWorkspace() {
     loadSmart();
   };
   $("sm-pull").onclick = () => startSmart(false);
+  $("match-saved-list").onclick = async () => {
+    const button = $("match-saved-list"); button.disabled = true;
+    try { await reviewPreparedList(await postJSON('/api/smart-match/prepare', { archive: state.archiveId || '' })); }
+    catch (error) { toast(error.message, 'bad'); }
+    finally { button.disabled = !state.jobs.length; }
+  };
+  $("sm-import-csv").onclick = () => $("sm-csv-file").click();
+  $("sm-use-matches").onclick = () => $("match-saved-list").click();
+  $("sm-csv-file").onchange = async (event) => {
+    const file = event.target.files[0]; if (!file) return;
+    const button = $("sm-import-csv"); button.disabled = true; button.textContent = 'Reading CSV…';
+    try {
+      if (file.size > 20 * 1024 * 1024) throw new Error('CSV must be 20 MB or smaller.');
+      const body = new FormData(); body.append('csv', file);
+      const response = await fetch('/api/smart-match/import', { method: 'POST', headers: { 'X-AMM-Token': AMM_TOKEN }, body });
+      if (!response.ok) throw new Error('Could not upload this CSV. Try again.');
+      await reviewPreparedList(await response.json());
+    } catch (error) { toast(error.message, 'bad'); }
+    finally { button.disabled = false; button.textContent = 'Import CSV ↑'; event.target.value = ''; }
+  };
   $("sm-continue").onclick = () => startSmart(true);
   $("sm-pause").onclick = async () => {
     try {
@@ -5197,11 +5275,26 @@ function initSmartWorkspace() {
   $("sm-recheck-all").onclick = async () => {
     try {
     await smartAction("recheck-all");
+    smartRun = ''; smartReply = null;
     await startSmart(true);
     } catch (e) { toast(e.message, 'bad'); }
   };
   $("sm-enabled").onchange = (e) =>
     saveSmartPreference("enabled", e.target.checked);
+  $("sm-connection").onchange = async e => {
+    await saveSmartPreference('connection', e.target.value);
+    await loadSmartSettings();
+  };
+  $("sm-connect-chatgpt").onclick = async () => {
+    const button = $("sm-connect-chatgpt"); button.disabled = true;
+    try {
+      const r = await postJSON('/api/smart-match/connect', {});
+      if (!r.ok) throw new Error(r.error || 'Could not connect ChatGPT.');
+      await loadSmartSettings();
+      $("sm-connection-note").textContent = r.message;
+    } catch (error) { $("sm-connection-note").textContent = error.message; }
+    finally { button.disabled = false; }
+  };
   smartFields.forEach(
     ([key]) =>
       ($("sm-" + key).onchange = (e) =>
@@ -5272,25 +5365,56 @@ async function loadSmartSettings() {
     ).json();
     if (!r.ok) return;
     const s = r.settings;
+    const subscription = s.aiConnection === 'chatgpt';
+    $("sm-connection").value = subscription ? 'chatgpt' : 'api';
+    $("sm-api-settings").classList.toggle('hidden', subscription);
+    $("sm-connect-chatgpt").classList.toggle('hidden', !subscription);
     $("sm-enabled").checked = !!s.aiEnabled;
     smartFields.forEach(
       ([key, field]) => ($("sm-" + key).checked = s[field] !== false),
     );
-    $("sm-model").textContent = s.aiHasKey
-      ? `${s.aiModel || s.aiProvider} · saved key · match floor ${s.matchFloorPercent}%`
-      : "Add your AI key below to start Smart Match.";
+    $("sm-model").textContent = subscription
+      ? `${s.aiModel} · ChatGPT subscription · match floor ${s.matchFloorPercent}%`
+      : s.aiHasKey ? `${s.aiModel || s.aiProvider} · saved key · match floor ${s.matchFloorPercent}%`
+      : "Connect ChatGPT or an API key below to start Smart Match.";
+    if (subscription) {
+      $("sm-connection-note").textContent = 'Checking your saved ChatGPT sign-in…';
+      const connection = await (await fetch('/api/smart-match/connection', { cache: 'no-store' })).json();
+      $("sm-connection-note").textContent = connection.message || connection.error || 'Could not check ChatGPT.';
+      $("sm-connect-chatgpt").textContent = connection.connected ? 'Check connection' : 'Connect ChatGPT';
+    } else $("sm-connection-note").textContent = 'API mode uses the saved key and separate provider billing.';
   } catch {}
+}
+async function reviewPreparedList(preview) {
+  if (!preview.ok) throw new Error(preview.error || 'Could not read this list.');
+  const accepted = openModal({ title: 'Smart match this list', body: '', confirmText: `Smart match ${smNum(preview.total)} jobs`, cancelText: 'Not now' });
+  $('modal').classList.add('sm-import-modal');
+  document.querySelector('#modal .m-body').innerHTML = `<p class="sm-note">${smEsc(preview.label)} · Profile: <b>${smEsc(preview.profile)}</b></p><div class="sm-import-count"><strong>${smNum(preview.total)}</strong><span>unique jobs ready to review</span></div><p>${smNum(preview.known)} already in your history · ${smNum(preview.descriptions)} include descriptions</p>${preview.duplicates || preview.invalid ? `<p class="sm-note">${smNum(preview.duplicates)} duplicate rows removed · ${smNum(preview.invalid)} invalid rows skipped</p>` : ''}${(preview.issues || []).map(issue => `<p class="sm-note">${smEsc(issue)}</p>`).join('')}<p>Smart Match reads full job descriptions against this profile’s resume using your saved AI connection. Strong 70%+, stretch 50–69%, and your saved match floor still apply.</p><p class="sm-note">Unchanged reviews are reused when enabled. Applied jobs are skipped. Unavailable descriptions stay awaiting review with a reason. New reviews use the connection selected in Smart Match.</p><p class="sm-note">Find decisions in Smart Match → Results, Excluded and Job history. Your original job list stays saved.</p>`;
+  if (!await accepted) return;
+  const result = await postJSON('/api/smart-match/review', { id: preview.id, profile: preview.profile });
+  if (!result.ok) throw new Error(result.error || 'Could not start this review.');
+  smartRun = result.run; smartDay = ''; smartPage = 0; smartTab = 'overview';
+  $('sm-search').value = ''; $('sm-keyword').value = ''; $('sm-band').value = '';
+  setView('smart'); renderSmartTabs(); await loadSmart(); loadSmartSettings();
+  $('sm-error').textContent = 'Review started. Your original list is saved; decisions will appear as each batch finishes.';
 }
 async function startSmart(resume) {
   $("sm-error").textContent = "";
   const b = $(resume ? "sm-continue" : "sm-pull");
   b.disabled = true;
   try {
-    if (resume) await smartAction("continue");
-    const r = await postJSON("/api/scrape", {
-      mode: resume ? "resume" : "smart",
-      watch: "false",
-    });
+    // Import continuation is cleared under the scrape lock by the review API.
+    if (resume && smartReply?.run?.mode !== 'import') await smartAction("continue");
+    const selectedImport = resume && smartReply?.run?.mode === 'import' ? smartReply.run.id : '';
+    let r;
+    if (selectedImport) {
+      const status = await (await fetch('/api/status', { cache: 'no-store' })).json();
+      r = await postJSON('/api/smart-match/review', { run: selectedImport, profile: status.profile?.active || '' });
+      if (r.ok) smartRun = r.run;
+    } else {
+      if (!resume) { smartRun = ''; smartDay = ''; }
+      r = await postJSON('/api/scrape', { mode: resume ? 'resume' : 'smart', watch: 'false' });
+    }
     if (!r.ok) throw new Error(r.error);
     $("sm-error").textContent = resume
       ? "Continuing saved reviews…"
@@ -5344,12 +5468,15 @@ async function loadSmart() {
       n = s.unique || 0,
       done = n - s.pending;
     $("sm-progress").style.width = (n ? (100 * done) / n : 0) + "%";
+    const progress = r.run?.progress;
     $("sm-progress-text").textContent =
-      `${smNum(done)} reviewed / ${smNum(n)} saved · ${smNum(s.pending)} awaiting review · ${smNum(s.applied)} applied`;
+      `${smNum(done)} processed / ${smNum(n)} saved · ${smNum(s.pending)} awaiting review · ${smNum(s.applied)} applied` +
+      (progress ? ` · ${smNum(progress.checked)} checked this pass · ${smNum(progress.descriptionErrors)} descriptions unavailable` : "") +
+      (r.run?.workerRunning && progress ? ` · ${smNum(progress.activeDescriptions)} pages / ${smNum(progress.activeReviews)} AI requests active` : "");
     $("sm-run-label").textContent = r.run
-      ? `${r.run.status === "collecting" ? "Collecting jobs" : r.run.status === "reviewing" ? "Reviewing descriptions" : r.paused ? "Paused" : r.run.status[0].toUpperCase() + r.run.status.slice(1)} · ${smDate(r.run.startedAt)}`
+      ? `${r.run.status === "collecting" ? "Collecting jobs" : r.run.status === "reviewing" ? "Reviewing descriptions" : r.paused ? "Paused" : r.run.status[0].toUpperCase() + r.run.status.slice(1)} · ${smDate(r.run.startedAt)}${r.run.sourceLabel ? ' · ' + r.run.sourceLabel : ''}`
       : "Your saved history starts with the next collection.";
-    if (r.run?.error) $("sm-error").textContent = r.run.error;
+    $("sm-error").textContent = r.run?.error || "";
     $("sm-list-title").textContent =
       smartTab === "excluded"
         ? "Excluded — with reasons"
@@ -5472,7 +5599,7 @@ function renderSmartTrends() {
   } else if (trendsTab === "keywords") {
     content = `<div class="card"><h2>Which searches find your fit?</h2><p class="sm-note">A job found under several keywords appears under each of them. The overall unique total counts it once.</p>${smLegend()}${renderKeywordTable(rows)}</div><div class="card"><h2>Keyword activity over time</h2><p class="sm-note">New unique jobs on each collection date. Open a cell to inspect those jobs. Showing the most recent 14 collection dates in this range.</p>${renderKeywordHeatmap(r.days, rows)}</div>`;
   } else {
-    content = `<div class="card"><h2>Every collection, with its receipt.</h2><p class="sm-note">Open a scrape to inspect its saved jobs. An incomplete search keeps the jobs it already collected.</p><div class="sm-overflow"><table class="sm-table"><thead><tr><th>Started</th><th>Keywords</th><th>Hits</th><th>Unique</th><th>New</th><th>Reviewed</th><th>Status</th></tr></thead><tbody>${r.runs.map((run) => `<tr class="sm-run" data-run="${escapeAttr(run.id)}" tabindex="0"><td><button class="sm" data-run="${escapeAttr(run.id)}">${smDate(run.at)} ↗</button></td><td>${Object.keys(run.terms).map(smEsc).join(", ") || "Continue review"}</td><td>${smNum(Object.values(run.terms).reduce((s, t) => s + t.hits, 0))}</td><td>${smNum(run.unique)}</td><td>${smNum(run.newJobs)}</td><td>${smNum(run.reviewed)}</td><td>${smEsc(run.status)}${run.coverage?.some((q) => !q.complete) ? " · collection incomplete" : ""}${run.error ? `<p class="sm-note">${smEsc(run.error)}</p>` : ""}</td></tr>`).join("")}</tbody></table></div>${r.runs.length ? "" : '<div class="sm-empty"><b>No collection history yet.</b>Your next scrape will start the timeline.</div>'}</div>`;
+    content = `<div class="card"><h2>Every collection, with its receipt.</h2><p class="sm-note">Open a scrape to inspect its saved jobs. An incomplete search keeps the jobs it already collected.</p><div class="sm-overflow"><table class="sm-table"><thead><tr><th>Started</th><th>Keywords</th><th>Hits</th><th>Unique</th><th>New</th><th>Reviewed</th><th>Status</th></tr></thead><tbody>${r.runs.map((run) => `<tr class="sm-run" data-run="${escapeAttr(run.id)}" tabindex="0"><td><button class="sm" data-run="${escapeAttr(run.id)}">${smDate(run.at)} ↗</button></td><td>${run.mode === 'import' ? 'Imported list · ' + smEsc(run.sourceLabel) : Object.keys(run.terms).map(smEsc).join(", ") || "Continue review"}</td><td>${smNum(Object.values(run.terms).reduce((s, t) => s + t.hits, 0))}</td><td>${smNum(run.unique)}</td><td>${smNum(run.newJobs)}</td><td>${smNum(run.reviewed)}</td><td>${smEsc(run.status)}${run.coverage?.some((q) => !q.complete) ? " · collection incomplete" : ""}${run.error ? `<p class="sm-note">${smEsc(run.error)}</p>` : ""}</td></tr>`).join("")}</tbody></table></div>${r.runs.length ? "" : '<div class="sm-empty"><b>No collection history yet.</b>Your next scrape will start the timeline.</div>'}</div>`;
   }
   $("tr-panels").innerHTML = content;
   if ($("tr-metric"))
@@ -5545,7 +5672,7 @@ function renderTrendGraph(days, metric = "unique") {
 function initSmartSetup() {
   const card = document.createElement("div");
   card.className = "sm-setup";
-  card.innerHTML = `<h3>Make it Smart Match</h3><p class="sm-note">Collect every available job, then review the full list against your resume. Your percentage bands and match floor stay the same.</p>${smSwitch("setup-smart-enabled", "Enable Smart Match", "Use your saved AI key, or add one below.", false)}<div id="setup-smart-key-wrap" class="hidden"><input type="password" id="setup-smart-key" autocomplete="new-password" placeholder="AI API key · leave empty to keep your saved key"></div><p class="sm-note" id="setup-smart-key-state">Optional. You can connect an AI key later in Smart Match.</p><p class="sm-note">Recommended: remember reviews, check new or changed jobs, and exclude consultant, lead and pre-sales roles.</p><details><summary>Adjust filters &amp; saved review preferences</summary><div class="sm-checklist">${smartFields
+  card.innerHTML = `<h3>Make it Smart Match</h3><p class="sm-note">Collect every available job, then review the full list against your resume. Your percentage bands and match floor stay the same.</p>${smSwitch("setup-smart-enabled", "Enable Smart Match", "Use your selected ChatGPT subscription or API connection.", false)}<div id="setup-smart-key-wrap" class="hidden"><input type="password" id="setup-smart-key" autocomplete="new-password" placeholder="AI API key · leave empty to keep your saved key"></div><p class="sm-note" id="setup-smart-key-state">Optional. Connect ChatGPT or an API key later in Smart Match.</p><p class="sm-note">Recommended: remember reviews, check new or changed jobs, and exclude consultant, lead and pre-sales roles.</p><details><summary>Adjust filters &amp; saved review preferences</summary><div class="sm-checklist">${smartFields
     .filter(([key]) => key !== "collectAll")
     .map(([key, , label, desc]) => smSwitch("setup-smart-" + key, label, desc))
     .join("")}</div></details>`;
@@ -5562,14 +5689,17 @@ function initSmartSetup() {
     );
 }
 function hydrateSmartSetup(s) {
-  window.__setupHasAIKey = !!s.aiHasKey;
+  window.__setupHasAIKey = !!s.aiConfigured || !!s.aiHasKey;
   $("setup-smart-enabled").checked = !!s.aiEnabled;
   smartFields
     .filter(([key]) => key !== "collectAll")
     .forEach(
       ([key, field]) => ($("setup-smart-" + key).checked = s[field] !== false),
     );
-  $("setup-smart-key-state").textContent = s.aiHasKey
+  $("setup-smart-key").disabled = s.aiConnection === 'chatgpt';
+  $("setup-smart-key-state").textContent = s.aiConnection === 'chatgpt'
+    ? 'ChatGPT subscription is selected. Check your connection in Smart Match.'
+    : s.aiHasKey
     ? `Saved ${s.aiModel || s.aiProvider} key is ready. Leave the key box empty to keep it.`
     : "Optional. Add an AI key to enable Smart Match.";
   $("setup-smart-key-wrap").classList.toggle('hidden', !$("setup-smart-enabled").checked);

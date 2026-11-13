@@ -64,3 +64,10 @@ test('saved AI analysis is ignored after resume text changes', () => {
   parsed.raw += '\nNew experience';
   assert.equal(currentAiAnalysis(parsed), null);
 });
+
+test('resume analysis uses the selected ChatGPT subscription without an API request',async()=>{
+ const analysis=await analyzeResumeWithAI({connection:'chatgpt',apiKey:'unused-paid-key',resumeText:resume,
+  fetchImpl:()=>assert.fail('Must not use paid API'),
+  subscriptionImpl:async()=>({provider:{label:'ChatGPT subscription',model:'gpt-6.1-sol'},value:modelValue})});
+ assert.equal(analysis.provider,'ChatGPT subscription');assert.deepEqual(analysis.skills.map(x=>x.name),['Okta','Terraform']);
+});

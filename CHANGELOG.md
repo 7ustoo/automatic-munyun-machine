@@ -6,6 +6,35 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [13.0.2] — 2026-11-13
+
+- Background job-description loading now uses shared employer feeds and individual employer fallbacks. A HiringCafe throttle no longer prevents every remaining job from being attempted.
+- Counted keyword pulls load descriptions only for the jobs actually published, preserving all collected history separately.
+- Saved-list and CSV imports checkpoint descriptions together instead of rewriting the complete job history for every row. Branded Greenhouse links reuse exact posting IDs, and employer pages can use matching role headings with scoped main content.
+- A source cooldown continues with employer fallbacks rather than holding the entire description queue. Background worker leases and interrupted status recover accurately.
+- My matches shows the number of full descriptions saved, explicit CSV readiness and a Retry missing descriptions button. CSV exports remain accurate snapshots; incomplete downloads are labeled clearly.
+- Fixed a misleading audit warning when every evaluated job had an AI decision but other saved jobs were still pending. Retirement-plan mentions such as 401k no longer become a $401k salary.
+
+## [13.0.1] — 2026-11-13
+
+- Smart Match packs successful jobs across failed-page gaps, instead of sending tiny AI requests. Saved descriptions are reviewed first; up to 100 jobs share a compact response and four review batches can run concurrently. Percentages, match floors, role filters, model and selected billing connection stay the same.
+- Greenhouse, Lever and Ashby descriptions share company-board requests, avoiding a separate browser visit for every opening. Eight bounded description workers handle remaining jobs.
+- Description and error checkpoints update the catalog in groups, avoiding thousands of full-history file rewrites.
+- Closed description browsers are replaced with bounded recovery. Repeated failures interrupt the run with saved progress instead of marking thousands of untouched jobs unavailable. Existing worker/progress checks show stopped reviews accurately.
+
+## [13.0.0] — 2026-11-11
+
+- HiringCafe keyword pulls return links without waiting for JD pages. Full descriptions fill in through a separate background loader that yields to foreground work and makes no AI calls. CSV downloads include company, HiringCafe link, saved JD and pending/unavailable reasons, and later downloads acquire completed descriptions. Saved-list review reuses the cache. TXT/XLSX stay compact.
+
+- Added **ChatGPT subscription** as a profile-scoped Smart Match connection. Connect through your saved local Codex sign-in or the browser login flow. Matching and resume analysis use GPT-6.1 Sol with included Codex allowance; subscription failures never use the paid API key. Allowance limits pause review with completed decisions saved. API-key billing remains a separate explicit option.
+- Smart Match now overlaps up to four description reads and three AI requests, reviewing up to 40 jobs per request. Saved full descriptions are reused before opening websites; Greenhouse/Lever posting APIs and structured employer descriptions provide faster reads.
+- Review progress counts checked jobs and unavailable descriptions, keeps a worker heartbeat, and reports stopped workers as interrupted with a Continue review action. Successful in-flight decisions survive another request failing.
+- **Smart match this list** in My matches reviews the complete current or archived pull against the active profile’s resume, without another search.
+- **Import CSV** in Smart Match accepts AMM exports and title/application-link lists, with optional company, location, keyword and full-description columns. Preview usable jobs, existing history, duplicates and invalid rows before starting. There is no job-count cap; files may be up to 20 MB.
+- Saved lists use the existing percentage blend, strong/stretch bands, match floor and role exclusions. Full descriptions load from employer pages when needed; unavailable postings remain awaiting review with a reason.
+- Reviews save to Results, Excluded and Job history, preserve applied status and reuse unchanged decisions when enabled. Continue review resumes the selected imported list. Original batches remain available and reviewing a list does not automatically send email or Telegram.
+- Import history and exports stay profile-scoped, with source labels in Trends.
+
 ## [12.3.0] — 2026-11-11
 
 - OpenAI Smart Match and resume analysis now use GPT-6.1 Sol with the existing saved API key.

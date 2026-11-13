@@ -150,6 +150,7 @@ export function paths(slug) {
     dir,
     jobCatalog:         path.join(dir, 'job-catalog.json'),
     jobDescriptions:    path.join(dir, 'job-descriptions'),
+    jobImports:         path.join(dir, 'job-imports'),
     cvParsed:           path.join(dir, 'cv-parsed.json'),
     seenJobs:           path.join(dir, 'seen-jobs.json'),
     lastBatch:          path.join(dir, 'last-batch.json'),

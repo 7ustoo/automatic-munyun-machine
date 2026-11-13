@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { verifyEmployerExtraction } from './check-employer.mjs';
 import { pathToFileURL } from 'node:url';
 
 const repo = process.argv[2];
@@ -6,6 +7,7 @@ const { chromium } = await import(pathToFileURL(path.join(repo, 'node_modules', 
 const { resolveBrowser } = await import(pathToFileURL(path.join(repo, 'scripts', 'browser-launcher.mjs')).href);
 const resolved = await resolveBrowser();
 const browser = await chromium.launch({ ...resolved.launchOptions, headless: true });
+await verifyEmployerExtraction(browser);
 const context = await browser.newContext({ viewport: { width: 1360, height: 900 } });
 const page = await context.newPage();
 const errors = [];
@@ -132,6 +134,67 @@ const countedRequest = page.waitForRequest(r => r.url().endsWith('/api/scrape') 
 await count.press('Enter');
 if ((await countedRequest).postDataJSON().limit !== '2423') throw new Error('custom keyword count above 1,000 did not reach the server');
 
+// CSV readiness reflects actual saved descriptions and retry stays scoped.
+let descriptionsReady = false;
+await page.route('**/api/batch/descriptions', route => route.fulfill({json:{ok:true,total:100,available:descriptionsReady?100:1,unavailable:descriptionsReady?0:99,pending:0,loading:false,generatedAt:'description-test',profile:'default'}}));
+await page.route('**/api/batch/descriptions/retry', async route => {
+  const body=route.request().postDataJSON();
+  if(body.generatedAt!=='description-test'||body.profile!=='default') throw new Error('Description retry lost its batch/profile guard');
+  descriptionsReady=true;await route.fulfill({json:{ok:true}});
+});
+await page.goto('http://127.0.0.1:8765/#jobs',{waitUntil:'networkidle'});
+await page.evaluate(async()=>{await useBatch({mode:'keyword',keyword:'cloud engineer',generatedAt:'description-test',jobs:[{idx:1,title:'Cloud Engineer',company:'Example',directUrl:'https://jobs.example.com/1'}]});});
+await page.waitForFunction(()=>document.querySelector('#batch-description-count').textContent==='1 of 100 full job descriptions saved');
+if(!(await page.locator('#batch-description-download').textContent()).includes('1/100')) throw new Error('Incomplete CSV was presented as fully populated');
+await page.click('#batch-description-retry');
+await page.waitForFunction(()=>document.querySelector('#batch-description-count').textContent==='100 of 100 full job descriptions saved');
+if(!(await page.locator('#batch-description-retry').isDisabled()))throw new Error('Completed descriptions should not be reloaded');
+await page.unroute('**/api/batch/descriptions');await page.unroute('**/api/batch/descriptions/retry');
+
+// v13: current/archive lists and CSV uploads enter the same review preview.
+let preparedArchive = '', importedCsv = false, reviewedSelection = null;
+const importRun = '11111111-2222-4333-8444-555555555555';
+await page.route('**/api/smart-match/prepare', async route => {
+  preparedArchive = route.request().postDataJSON().archive;
+  await route.fulfill({ json: { ok: true, id: 'preview-current', profile: 'default', label: preparedArchive ? 'Previous CI/CD pull' : 'CI/CD pull', total: 3287, known: 10, descriptions: 0, invalid: 0, duplicates: 0, issues: [] } });
+});
+await page.route('**/api/smart-match/import', async route => {
+  importedCsv = route.request().headers()['content-type'].startsWith('multipart/form-data') && route.request().postDataBuffer().includes(Buffer.from('linux.csv'));
+  await route.fulfill({ json: { ok: true, id: 'preview-csv', profile: 'default', label: '<linux>.csv', total: 2, known: 1, descriptions: 1, invalid: 1, duplicates: 1, issues: ['Row 4: no valid application link.'] } });
+});
+await page.route('**/api/smart-match/review', async route => {
+  reviewedSelection = route.request().postDataJSON();
+  await route.fulfill({ json: { ok: true, run: importRun, profile: 'default' } });
+});
+await page.route('**/api/smart-match?*', async route => {
+  const q = new URL(route.request().url()).searchParams;
+  await route.fulfill({ json: { ok: true, summary: { unique: 2, strong: 0, stretch: 0, below: 0, pending: 2, excluded: 0, applied: 0 }, jobs: [], keywords: ['ci/cd'], total: 0, page: 0, pages: 0, paused: false, run: q.get('run') ? { id: importRun, mode: 'import', status: 'pending', sourceLabel: 'linux.csv', startedAt: '2026-11-11T12:00:00Z' } : null } });
+});
+await page.goto('http://127.0.0.1:8765/#jobs', { waitUntil: 'networkidle' });
+await page.click('#match-saved-list');
+await page.waitForSelector('#modal');
+if (!(await page.locator('#modal').textContent()).includes('3,287')) throw new Error('Saved-list preview lost the full list count');
+await page.click('#modal-cancel');
+if (reviewedSelection) throw new Error('Cancel started a paid review');
+await page.click('.arch-view[data-id="batch-2026-07-06T14-30-00"]');
+await page.waitForSelector('#history-view-bar:not(.hidden)');
+await page.click('#match-saved-list'); await page.waitForSelector('#modal');
+if (preparedArchive !== 'batch-2026-07-06T14-30-00') throw new Error('Archived-list review used the latest batch');
+await page.click('#modal-cancel');
+await page.goto('http://127.0.0.1:8765/#smart', { waitUntil: 'networkidle' });
+await page.locator('#sm-csv-file').setInputFiles({ name: 'linux.csv', mimeType: 'text/csv', buffer: Buffer.from('Job Title,Apply Link\nLinux Engineer,https://jobs.example.com/linux') });
+await page.waitForSelector('#modal');
+if (!importedCsv || !(await page.locator('#modal').textContent()).includes('1 invalid rows skipped')) throw new Error('CSV upload or validation preview failed');
+if (await page.locator('#modal linux').count()) throw new Error('CSV filename became HTML');
+await page.click('#modal-ok');
+await page.waitForFunction(() => document.querySelector('#sm-run-label').textContent.includes('linux.csv'));
+if (reviewedSelection.id !== 'preview-csv' || reviewedSelection.profile !== 'default') throw new Error('CSV review did not bind the prepared profile');
+await page.click('#sm-continue');
+await page.waitForFunction(() => document.querySelector('#sm-error').textContent.includes('Continuing'));
+if (reviewedSelection.run !== importRun) throw new Error('Continue review lost the selected imported list');
+await page.click('#sm-tabs [data-tab="results"]');
+if (!(await page.locator('#sm-csv').getAttribute('href')).includes('run=' + importRun)) throw new Error('Imported-list export lost its run filter');
+
 // Smart Match: the real page renders saved percentages/reasons and sends
 // profile-scoped actions. A tiny local API fixture models persisted state.
 let catalogState = 'excluded';
@@ -158,6 +221,13 @@ await page.waitForFunction(()=>document.querySelector('#sm-list-count').textCont
 await page.click('#sm-tabs [data-tab="overview"]');
 const smartRequest=page.waitForRequest(r=>r.url().endsWith('/api/scrape')&&r.method()==='POST');
 await page.click('#sm-pull');if((await smartRequest).postDataJSON().mode!=='smart')throw new Error('Smart Match did not start full collection');
+// Subscription selection persists explicitly; paid-key controls disappear.
+await page.selectOption('#sm-connection','chatgpt');
+await page.waitForFunction(()=>document.querySelector('#sm-connection-note').textContent.includes('API fallback is disabled'));
+if(!(await page.locator('#sm-api-settings').evaluate(el=>el.classList.contains('hidden'))))throw new Error('Paid key controls remained active for subscription mode');
+const connectRequest=page.waitForRequest(r=>r.url().endsWith('/api/smart-match/connect')&&r.method()==='POST');
+await page.click('#sm-connect-chatgpt');await connectRequest;
+await page.waitForFunction(()=>document.querySelector('#sm-model').textContent.includes('ChatGPT subscription'));
 await page.goto('http://127.0.0.1:8765/#trends',{waitUntil:'networkidle'});
 await page.waitForSelector('.sm-chart');
 await page.click('[data-trtab="keywords"]');

@@ -13,6 +13,7 @@ const titles = ["IAM Engineer", "Identity & Access Management Analyst", "Cloud S
 const queries = ["iam", "cloud security", "m365", "linux"];
 let oauthEmailConnected = false;
 let scheduleEnabled = true;
+let aiConnection = 'api';
 const jobs = Array.from({ length: 42 }, (_, i) => ({
   idx: i + 1,
   title: titles[i % titles.length] + (i > 19 ? ` ${["II","III","Sr.","Lead"][i % 4]}` : ""),
@@ -42,6 +43,8 @@ const liveJobs = () => scrapeDone() ? jobs : jobs.slice(0, 27);
 
 const routes = (needsSetup, opts = {}) => ({
   '/api/smart-match': { ok: true, summary: { unique: 4, strong: 2, stretch: 1, below: 0, pending: 1, excluded: 1, applied: 0 }, jobs: [], total: 0, page: 0, pages: 0, keywords: ['linux','cloud'], paused: false, run: null, floor: 45, model: 'gpt-6.1-sol' },
+  '/api/batch/descriptions': () => ({ok:true,total:liveJobs().length,available:liveJobs().length,unavailable:0,pending:0,loading:false,status:'complete',generatedAt:genAt(),profile:'default'}),
+  '/api/smart-match/connection': { ok: true, available: true, connected: true, model: 'gpt-6.1-sol', message: 'Connected to your ChatGPT subscription. API fallback is disabled.' },
   '/api/smart-trends': { ok: true, totals: { unique: 4, hits: 7, strong: 2, stretch: 1, below: 0, pending: 1, excluded: 1, applied: 0 }, days: [{date:'2026-11-10',unique:3,hits:5,strong:2,stretch:1,below:0,pending:0,terms:{linux:{unique:3,strong:2,stretch:1,hits:5},cloud:{unique:1,strong:1,hits:1}}},{date:'2026-11-11',unique:1,hits:2,strong:0,stretch:0,below:0,pending:1,terms:{cloud:{unique:1,pending:1,hits:1}}}], keywords: [{term:'linux',hits:5,unique:3,strong:2,stretch:1,below:0,pending:0},{term:'cloud',hits:2,unique:2,strong:1,stretch:0,below:0,pending:1}], allKeywords: ['linux','cloud'], runs: [], legacy: [], note: 'Fixture data. Keyword totals overlap; awaiting review is separate from match quality.' },
   "/api/update/check": opts.update
     ? { ok: true, hasUpdate: true, current: "3.0.1", latest: "3.0.2", canAutoUpdate: true, releaseUrl: "https://example.com/rel" }
@@ -70,7 +73,7 @@ const routes = (needsSetup, opts = {}) => ({
       queryEngines: Object.fromEntries(queries.map((q, i) => [q, i === 1 ? "hcafe" : i === 2 ? "dice" : "both"])),
       scrapeSources: "both",
       showSalary: true, skipCompanies: ["Deloitte", "Accenture"],
-      aiEnabled: true, aiRequireForDelivery: true, aiHasKey: true, aiProvider: "Anthropic", mutedTerms: ["palo alto"], cvTermCount: 34,
+      aiEnabled: true, aiRequireForDelivery: true, aiConnection, aiConfigured: true, aiHasKey: true, aiModel: aiConnection === 'chatgpt' ? 'gpt-6.1-sol' : '', aiProvider: aiConnection === 'chatgpt' ? 'ChatGPT subscription' : "Anthropic", mutedTerms: ["palo alto"], cvTermCount: 34,
       email: { enabled: oauthEmailConnected, hasCreds: oauthEmailConnected, provider: oauthEmailConnected ? "gmail-oauth" : null, connectedEmail: oauthEmailConnected ? "owner@gmail.com" : "", oauthAvailable: true, to: oauthEmailConnected ? "helper@example.com" : "", autoSend: true } } }),
   "/api/config/backups": { ok: true, backups: ["config-2026-07-06T12-00-00-000Z-pre-setup.json", "config-2026-07-05T09-10-00-000Z-pre-rename.json"] },
   "/api/profile/list": () => ({ ok: true, profiles: [
@@ -133,8 +136,10 @@ const postReplies = {
   },
   "/api/settings/set": body => {
     if (body?.path === "schedule.enabled") scheduleEnabled = body.value === "true";
+    if (body?.path === "scoring.ai.connection") aiConnection = JSON.parse(body.value);
     return { ok: true, value: body.value };
   },
+  "/api/smart-match/connect": () => { aiConnection = 'chatgpt'; return { ok: true, connected: true, message: 'Connected to your ChatGPT subscription. API fallback is disabled.' }; },
   "/api/jobs/add": { ok: true, added: true, list: [...queries, "new term"] },
   "/api/jobs/remove": { ok: true, list: queries.slice(0, 3) },
   "/api/jobs/clear": { ok: true, list: [] },

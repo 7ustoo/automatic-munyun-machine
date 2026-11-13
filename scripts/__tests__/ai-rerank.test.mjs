@@ -1,12 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { aiRerank, validateRatings } from '../ai-rerank.mjs';
+import { aiRerank, validateRatings, columnRatingsSchema, expandColumnRatings } from '../ai-rerank.mjs';
 
 const ratings = [{ n: 0, fit: 91, reason: 'Strong fit.', skills: 93, seniority: 88, role: 94 }];
 const options = {
   cvSummary: { skills: ['Node.js'] },
   candidates: [{ n: 0, title: 'Backend Engineer', company: 'A', text: 'Build APIs.' }],
 };
+
+test('compact bulk output keeps job identities, percentages and reasons while rejecting shifted or incomplete columns', async () => {
+  const columns={n:[0],fit:[91],skills:[93],seniority:[88],role:[94],reason:['Strong Linux operations; gap: Kubernetes.'],exclusions:[[]]};
+  assert.ok(columnRatingsSchema(true).required.includes('exclusions'));
+  const result=await aiRerank({...options,connection:'chatgpt',compact:true,preferences:{},subscriptionImpl:async ({schema,prompt})=>{
+    assert.equal(schema.properties.fit.type,'array');assert.match(prompt,/SAME order/);return {value:columns};
+  }});
+  assert.equal(result[0].n,0);assert.equal(result[0].fit,91);assert.deepEqual(result[0].exclusions,[]);
+  assert.throws(()=>expandColumnRatings({...columns,n:[99]},options.candidates,true),/column order/);
+  assert.throws(()=>expandColumnRatings({...columns,reason:[]},options.candidates,true),/incomplete/);
+});
 
 test('full review adds explicit eligibility reasons without changing percentage ratings and rejects missing exclusions',async()=>{
   const key=`sk-proj-${'o'.repeat(32)}`;

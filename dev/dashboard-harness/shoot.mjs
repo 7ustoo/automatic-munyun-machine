@@ -112,6 +112,17 @@ await shot("http://127.0.0.1:8765/#jobs", "11b-open-jobs-menu.png", async () => 
 });
 // 12. Narrow viewport (responsive rail)
 await shot("http://127.0.0.1:8765/#smart", "13-smart-match.png");
+await page.route('**/api/smart-match/prepare', route => route.fulfill({ json: { ok: true, id: 'preview', profile: 'default', label: 'ci/cd · 2026-11-09', total: 3287, known: 124, descriptions: 0, invalid: 0, duplicates: 0, issues: [] } }));
+await shot("http://127.0.0.1:8765/#jobs", "13b-saved-list-preview.png", async () => {
+  await page.click('#match-saved-list'); await page.waitForSelector('#modal');
+  await page.waitForTimeout(250);
+});
+await page.setViewportSize({ width: 390, height: 780 });
+const confirmBounds = await page.locator('#modal-ok').boundingBox();
+if (confirmBounds.y < 0 || confirmBounds.y + confirmBounds.height > 780) throw new Error('Import confirmation is outside the mobile viewport');
+await page.screenshot({ path: path.join(outDir, '13c-import-mobile.png') });
+await page.click('#modal-cancel');
+await page.setViewportSize({ width: 1440, height: 900 });
 await shot("http://127.0.0.1:8765/#trends", "14-trends-overview.png");
 await shot("http://127.0.0.1:8765/#trends", "15-trends-keywords.png",async()=>page.click('[data-trtab="keywords"]'));
 await shot("http://127.0.0.1:8765/#trends", "16-trends-history.png",async()=>page.click('[data-trtab="history"]'));
