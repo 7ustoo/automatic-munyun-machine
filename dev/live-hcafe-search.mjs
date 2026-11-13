@@ -8,6 +8,8 @@ import { buildKeywordCollection } from '../scripts/keyword-collection.mjs';
 import { parseKeywordBatchSize } from '../scripts/batch-size.mjs';
 import { createApplyLinkCollector, directApplyKey, pruneApplyLinkCache, keywordSearchExtractor, keywordCandidateKey } from '../scripts/hcafe-apply-links.mjs';
 import { atomicWriteJson, atomicWriteText } from '../scripts/io-helpers.mjs';
+import { createHiringCafeDescriptionCollector } from '../scripts/hcafe-descriptions.mjs';
+const started=Date.now();
 const requested = process.argv[3] ? parseKeywordBatchSize(process.argv[3]) : 0;
 if (requested === null) throw new Error('Target must be a positive whole number or "all".');
 const target = requested === 'all' ? Infinity : requested;
@@ -31,11 +33,12 @@ try {
       atomicWriteJson(fileURLToPath(new URL('../data/live-keyword-apply-progress.json', import.meta.url)), { rows: progress.rows, stats: progress.stats });
       atomicWriteText(fileURLToPath(new URL('../data/live-keyword-links.txt', import.meta.url)), progress.rows.map(j => j.directUrl).join('\n') + '\n');
     } }) : null;
+  const descriptions=createHiringCafeDescriptionCollector({context:ctx,read:async()=>{throw Error('Fast collection attempted a JD request');}});
   const result = await crawlSearch({ page, url: 'https://hiringcafe.com/?searchState=' + encodeURIComponent(JSON.stringify(state)),
     extract: target ? keywordSearchExtractor(extract) : extract, maxPages: target ? Infinity : 2, ...(target ? { targetJobs: target, jobKey: keywordCandidateKey,
       useSourceLastPage: true,
       expandGroups: rows => !rows.some(row => row.embeddedApplyLink),
-      processPageRows: applyCollector.collect, targetCount: applyCollector.count,
+      processPageRows: async rows=>{await applyCollector.collect(rows);await descriptions.collect(applyCollector.rows(),{fetchMissing:false});}, targetCount: applyCollector.count,
       beforeRequest: applyCollector.beforeRequest, onThrottle: applyCollector.backoff } : {}), log: console.log });
   console.log(JSON.stringify({ coverage: result.coverage, jobs: result.rows.length }));
   if (target) {
@@ -44,7 +47,7 @@ try {
     const output = fileURLToPath(new URL('../data/live-keyword-collection.json', import.meta.url));
     atomicWriteJson(output, collection);
     atomicWriteText(fileURLToPath(new URL('../data/live-keyword-links.txt', import.meta.url)), collection.top.map(j => j.directUrl).join('\n') + '\n');
-    console.log(JSON.stringify({ saved: collection.top.length, uniqueDirectLinks: new Set(collection.top.map(j => directApplyKey(j.directUrl))).size, output }));
+    console.log(JSON.stringify({ saved: collection.top.length, uniqueDirectLinks: new Set(collection.top.map(j => directApplyKey(j.directUrl))).size, seconds:(Date.now()-started)/1000, detailPageReads:0, output }));
     await applyCollector.close();
     if (requested === 'all' ? !result.coverage.complete : collection.top.length !== target) process.exitCode = 1;
   } else if (result.coverage.pages !== 2 || !result.rows.length) process.exitCode = 1;

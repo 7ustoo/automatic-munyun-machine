@@ -1,10 +1,11 @@
 import fs from 'node:fs';
+import path from 'node:path';
 import { read as readConfig } from './config-rw.mjs';
 import { paths } from './profile-store.mjs';
 import { enrichParsedResume } from './resume-parser.mjs';
-import { detectAiProvider } from './ai-rerank.mjs';
+import { aiConnection } from './ai-rerank.mjs';
 import { readEmailEnv } from './email.mjs';
-import { readCatalog, reviewContext, catalogPublicJob, catalogSummary, catalogAnalytics, catalogAction } from './job-catalog.mjs';
+import { readCatalog, reviewContext, catalogPublicJob, catalogSummary, catalogAnalytics, catalogAction, catalogRunActivity, readCatalogDescription } from './job-catalog.mjs';
 import { recordAppliedJob } from './application-ledger.mjs';
 import { buildXlsx } from './xlsx-writer.mjs';
 
@@ -13,8 +14,12 @@ export function activeCatalog() {
   let cv = { titles: [], certs: [], skills: [], compliance: [] };
   try { cv = enrichParsedResume(JSON.parse(fs.readFileSync(pp.cvParsed, 'utf8'))); } catch {}
   const key = readEmailEnv().AMM_AI_KEY || process.env.AMM_AI_KEY || config.scoring?.ai?.apiKey || '';
-  const model = detectAiProvider(key)?.model || '';
-  return { pp, config, context: reviewContext(config, { parsed: cv, text: cv.raw || '' }, model), catalog: readCatalog(pp.jobCatalog), model };
+  const model = aiConnection(config, key).provider?.model || '';
+  const catalog = readCatalog(pp.jobCatalog);
+  let lockActive = false;
+  try { lockActive = Date.now() - fs.statSync(path.resolve(pp.dir, '../../scrape.lock.lock')).mtimeMs < 30000; } catch {}
+  catalog.runs = catalog.runs.map(run => catalogRunActivity(run, { lockActive }));
+  return { pp, config, context: reviewContext(config, { parsed: cv, text: cv.raw || '' }, model), catalog, model };
 }
 
 export function selectCatalogJobs(catalog, context, options = {}) {
@@ -38,12 +43,21 @@ export function selectCatalogJobs(catalog, context, options = {}) {
 export function smartMatchGet(options = {}) {
   const { catalog, context, model, config } = activeCatalog();
   const jobs = selectCatalogJobs(catalog, context, options);
+  const selectedRun = selectCatalogRun(catalog, options);
+  const runIds = options.run && selectedRun ? new Set(selectedRun.ids) : null;
   const page = Math.max(0, parseInt(options.page) || 0), size = 40;
-  return { ok: true, summary: catalogSummary(catalog, context), jobs: jobs.slice(page * size, (page + 1) * size),
+  return { ok: true, summary: catalogSummary(runIds ? { ...catalog, jobs: Object.fromEntries(Object.entries(catalog.jobs).filter(([id]) => runIds.has(id))) } : catalog, context), jobs: jobs.slice(page * size, (page + 1) * size),
     keywords: [...new Set(Object.values(catalog.jobs).flatMap(job => Object.keys(job.queries || {})))].sort(),
     total: jobs.length, page, pages: Math.ceil(jobs.length / size), paused: catalog.paused,
-    run: catalog.runs.at(-1) ? { ...catalog.runs.at(-1), ids: undefined, newIds: undefined, reviewedIds: undefined, reusedIds: undefined, terms: undefined } : null,
+    run: selectedRun ? { ...selectedRun, ids: undefined, newIds: undefined, reviewedIds: undefined, reusedIds: undefined, terms: undefined } : null,
     model, floor: config.scoring?.matchFloorPercent ?? 70 };
+}
+
+export function selectCatalogRun(catalog, options = {}) {
+  if (options.run) return catalog.runs.find(r => r.id === options.run);
+  // Continuing an older saved list must show that active worker, rather than
+  // an unrelated newer completed scrape that happens to be last in history.
+  return catalog.runs.filter(r => r.workerRunning).at(-1) || catalog.runs.at(-1);
 }
 
 export function smartTrendsGet(options = {}) {
@@ -82,13 +96,15 @@ export async function smartMatchAction(action, id) {
 }
 
 export function smartMatchExport(format, options = {}) {
-  const { catalog, context } = activeCatalog();
+  const { catalog, context, pp } = activeCatalog();
   const jobs = selectCatalogJobs(catalog, context, options);
   const headers = ['Job title', 'Company', 'Location', 'Direct apply link', 'Match %', 'Status', 'Reason', 'Search keywords', 'First collected', 'Last collected'];
   const rows = jobs.map(j => [j.title, j.company, j.location, j.directUrl, j.matchPct ?? '', j.state,
     [...j.exclusions, j.aiReason, j.descriptionError].filter(Boolean).join(' | '), j.queries.join('; '), j.firstSeenAt, j.lastSeenAt]);
   const filename = `Smart Match - ${['results', 'excluded', 'awaiting'].includes(options.scope) ? options.scope : 'job history'} - ${new Date().toISOString().slice(0, 10)}`;
   if (format === 'xlsx') return { ok: true, filename: filename + '.xlsx', contentBase64: buildXlsx({ sheetName: 'Smart Match', columns: headers.map((header, i) => ({ header, width: i === 3 ? 75 : i === 6 ? 90 : 26, hyperlink: i === 3 })), rows }).toString('base64') };
+  headers.push('HiringCafe Link', 'Job Description');
+  rows.forEach((row, i) => row.push(jobs[i].viewjobUrl || '', readCatalogDescription(pp.jobDescriptions, jobs[i].id)));
   const cell = v => '"' + String(v).replace(/^[=+@\-\t\r]/, "'$&").replaceAll('"', '""') + '"';
   return { ok: true, filename: filename + '.csv', content: '\uFEFF' + [headers, ...rows].map(row => row.map(cell).join(',')).join('\r\n') + '\r\n' };
 }

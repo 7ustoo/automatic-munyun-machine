@@ -12,7 +12,31 @@
 
 ## What AMM does
 
-### What happens when you use Smart Match (v12.3)
+### CSV description readiness (v13.0.2)
+
+After a keyword pull, My matches shows exactly how many full descriptions are saved. The loader uses public employer feeds when available and fills descriptions in the background. **Retry missing descriptions** retries only the published list without running AI. A CSV downloaded early contains only the text available at that moment; download it again when the panel says it is ready. Unavailable postings keep their direct links and an explicit reason. **Smart match this list** reuses the saved descriptions, and importing the downloaded CSV preserves them.
+
+### Faster saved-list reviews (v13.0.1)
+
+Smart Match reviews saved descriptions first, shares employer-board downloads, and groups jobs into larger parallel review batches. Completed scores remain saved if a browser closes or a request fails. A stopped worker is shown as interrupted and can be continued. Jobs without a readable full description remain awaiting review with a reason; they do not receive invented scores. Your existing model, billing connection, match floor and strong/stretch percentages stay in place. Completion time depends on the amount of saved text, employer-page availability and your AI connection.
+
+### Review a saved list or CSV (v13)
+
+To use your ChatGPT subscription, open **Smart Match**, choose **ChatGPT subscription** under **Match using**, and click **Connect ChatGPT**. AMM reuses your official local Codex sign-in or opens the browser sign-in flow. Install a recent Codex CLI or the ChatGPT/Codex desktop app first. Matching and resume analysis use GPT-6.1 Sol through that sign-in, draw on your included Codex allowance, and never fall back to a saved API key. If your allowance is exhausted, the review pauses with completed work saved. **API key · separate billing** remains an explicit alternative. This setting belongs to the active profile.
+
+Already collected jobs without matching? Open **My matches → Smart match this list**. This reviews the whole current list, including your existing keyword pulls. You can also open a previous scrape and review that list.
+
+For jobs collected elsewhere, use **Smart Match → Import CSV**. Include **Job Title** and **Apply Link** (or **Title** and **URL**) columns. AMM’s CSV exports work directly. Company, Location, Keyword and Description columns are optional. Preview the jobs, then start the review. There is no job-count limit; the CSV file must be 20 MB or smaller.
+
+HiringCafe keyword pulls return their direct links without waiting for job-description pages. Cached full descriptions appear immediately; missing descriptions are queued for a separate background loader that yields to foreground scrapes/reviews and makes no AI calls. CSV downloads include **Company**, **HiringCafe Link**, **Job Description**, and **Description Status**. Download the CSV again as background descriptions finish to include the newly saved text; an already downloaded file cannot update itself. Paragraphs and quotes stay inside the same job’s cell. Smart Match reuses saved descriptions through CSV imports or **Smart match this list**. Missing/blocked descriptions keep their jobs with a reason, and card summaries are never labeled full JDs. TXT and XLSX remain compact link lists. For exactly 100 links, use **Settings → Keyword collection → Number of links**; the ranked strong-match target is a desired result count, not a collection limit.
+
+Smart Match uses the active profile’s uploaded resume, saved AI connection, match percentages and exclusions. It loads full descriptions from public employer pages when necessary. If a posting has expired or the description cannot be loaded, it stays awaiting review with a reason; retry later or include its full text in a Description column. Results, exclusions and explanations appear in **Smart Match**. **Continue review** resumes that saved list, and CSV/Excel exports respect the selected list and view.
+
+Reviews reuse saved full descriptions, read up to eight missing descriptions at once, and run up to four AI requests of 100 jobs each concurrently. Employer posting APIs and structured descriptions avoid browser visits when available. Progress shows checked jobs, unavailable descriptions and active requests. If a worker stops, AMM shows **Interrupted**; use **Continue review** to resume saved work. Large link-only lists still depend on website response times and your API limits.
+
+Exact duplicate links reuse existing history when enabled, different roles at the same company remain separate, and applied jobs stay applied. Your original My matches list remains saved. Reviewing an imported list does not trigger automatic email or Telegram delivery.
+
+### What happens when you use Smart Match
 
 1. AMM collects every available page across your profile’s keywords and saves each unique posting locally with its direct application link.
 2. It reads full descriptions and reviews new or changed jobs against your resume. Unchanged decisions can be reused. Progress is saved between small review batches.
@@ -99,7 +123,7 @@ The optional **Consultant Slop Filter** reads those full descriptions before del
 
 Optional **Smart Match** accepts a Google Gemini, Anthropic, or OpenAI API key. Paste the key once; AMM detects the provider and selects the model automatically. **Pull all & match** collects every available page across your profile’s searches before reviewing the full descriptions against your resume in small, resumable batches. The shortlist size controls your batch handoff, not how many jobs are collected or reviewed. The key stays in the private local secret file outside config backups.
 
-OpenAI keys use **GPT-6.1 Sol** for Smart Match and AI resume analysis. The model is selected by AMM, so changing models uses your existing OpenAI key.
+OpenAI keys and the **ChatGPT subscription** connection use **GPT-6.1 Sol** for Smart Match and AI resume analysis. Subscription mode uses your saved ChatGPT sign-in through local Codex; API mode uses the saved key with separate provider billing. Changing only the connection keeps unchanged reviews for the same model.
 
 The **Smart Match** page has Overview, Results, Excluded and Job history tabs. Save time with **Reuse saved reviews** and **Review only new or changed jobs**. Your local history keeps first/last collection dates, keywords, scores and reasons. Resume, preference, model or description changes require a fresh review. **Pause** saves progress; **Continue review** retries pending jobs without collecting again. If collection was interrupted, use **Pull all & match** again to finish finding jobs. Job history stays available when review reuse is off.
 

@@ -48,7 +48,8 @@ import { listArchives, readArchive } from './batch-archive.mjs';
 import { readExclusions, writeExclusion } from './batch-exclusions.mjs';
 import { clampBatchSize, parseRankedBatchSize } from './batch-size.mjs';
 import { normalizeConsultantSlopMode } from './consultant-slop-filter.mjs';
-import { detectAiProvider } from './ai-rerank.mjs';
+import { detectAiProvider, aiConnection } from './ai-rerank.mjs';
+import { chatgptStatus, connectChatgpt } from './codex-subscription.mjs';
 import { analyzeResumeWithAI, currentAiAnalysis } from './ai-resume-analysis.mjs';
 import {
   emailConfigured, readEmailEnv, writeEmailEnv,
@@ -58,6 +59,8 @@ import {
 import { beginOAuth, completeOAuth } from './gmail-oauth.mjs';
 import { geocode } from './geocode.mjs';
 import { smartMatchGet, smartTrendsGet, smartMatchAction, smartMatchExport } from './smart-match-api.mjs';
+import { prepareJobImport, startJobImport } from './job-import-api.mjs';
+import { batchDescriptionsGet, batchDescriptionsRetry } from './batch-description-api.mjs';
 import { registerSchedulerForPlatform } from './scheduler-register.mjs';
 import { readLocalSecrets, scrubLegacyAiKeysFromSnapshots, setLocalSecret } from './secret-store.mjs';
 import { recordAppliedJob } from './application-ledger.mjs';
@@ -83,6 +86,7 @@ function settingsGet() {
     secrets.AMM_AI_KEY = secrets.AMM_AI_KEY || legacyAiKey;
   }
   const delivery = emailDeliveryStatus(readEmailEnv());
+  const ai = aiConnection(cfg, secrets.AMM_AI_KEY);
   out({
     ok: true,
     settings: {
@@ -122,10 +126,12 @@ function settingsGet() {
       smartConsultants: cfg.scoring?.ai?.excludeConsultantRoles !== false,
       smartLeads: cfg.scoring?.ai?.excludeLeadRoles !== false,
       smartSales: cfg.scoring?.ai?.excludeSalesRoles !== false,
-      aiModel: detectAiProvider(secrets.AMM_AI_KEY)?.model || '',
+      aiConnection: ai.connection,
+      aiConfigured: ai.configured,
+      aiModel: ai.provider?.model || '',
       aiRequireForDelivery: cfg.scoring?.ai?.requireForDelivery !== false,
       aiHasKey: !!secrets.AMM_AI_KEY,
-      aiProvider: detectAiProvider(secrets.AMM_AI_KEY)?.label || '',
+      aiProvider: ai.provider?.label || '',
       mutedTerms: cfg.scoring?.mutedTerms || [],
       // v4.3: email-to-VA. The app password is NEVER returned — only whether
       // Gmail credentials are present in .env (hasCreds).
@@ -166,13 +172,14 @@ async function settingsSet(dotPath, jsonValue) {
     'sources.greenhouse', 'sources.lever', 'sources.ashby', 'sources.remoteConfigUrl', // v5.0
     'search.scrapeSources', // v7.3: what to scrape — both/hcafe/dice (v7.4: the only Dice knob — the enable toggle is gone)
     'display.showSalary',
-    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.requireForDelivery', 'scoring.jdRescore',
+    'scoring.ai.enabled', 'scoring.ai.apiKey', 'scoring.ai.connection', 'scoring.ai.requireForDelivery', 'scoring.jdRescore',
     // v4.3: email-to-VA. Credentials (SMTP_USER/SMTP_APP_PASSWORD) are NOT set
     // here — they go through email-save into .env. These are the plain knobs.
     'email.autoSend', 'email.subject', 'email.to',
     'email.format' // v7.0: attachment format for the batch email (txt | csv | xlsx)
   ]);
   if (!allowed.has(dotPath)) return out({ ok: false, error: 'not an editable setting: ' + dotPath });
+  if (dotPath === 'scoring.ai.connection' && !['chatgpt', 'api'].includes(value)) return out({ ok: false, error: 'Choose ChatGPT subscription or API.' });
   if (/^scoring\.ai\.(collectAll|rememberJobs|onlyNew|excludeConsultantRoles|excludeLeadRoles|excludeSalesRoles)$/.test(dotPath)) value = value === true || value === 'true' || value === 'on';
   if (dotPath === 'scoring.targetJobsPerBatch') {
     value = parseRankedBatchSize(value);
@@ -436,10 +443,11 @@ async function resumeParse(filePath, modeArg, originalName = '') {
   if (!freshInstall) {
     const cfg = cfgRW.read();
     const aiKey = readLocalSecrets().AMM_AI_KEY || process.env.AMM_AI_KEY || cfg.scoring?.ai?.apiKey || '';
-    if (cfg.scoring?.ai?.enabled && aiKey) {
+    const ai = aiConnection(cfg, aiKey);
+    if (cfg.scoring?.ai?.enabled && ai.configured) {
       aiStatus = 'analyzing';
       try {
-        parsed.aiAnalysis = await analyzeResumeWithAI({ apiKey: aiKey, resumeText: parsed.raw });
+        parsed.aiAnalysis = await analyzeResumeWithAI({ apiKey: aiKey, connection: ai.connection, resumeText: parsed.raw });
         aiStatus = 'complete';
       } catch (e) {
         aiStatus = 'failed';
@@ -479,8 +487,9 @@ async function resumeAnalyze() {
     const parsed = enrichParsedResume(JSON.parse(fs.readFileSync(cvPath, 'utf8')));
     const cfg = cfgRW.read();
     const aiKey = readLocalSecrets().AMM_AI_KEY || process.env.AMM_AI_KEY || cfg.scoring?.ai?.apiKey || '';
-    if (!aiKey) return out({ ok: false, error: 'Add a Smart Match API key in Settings first.' });
-    parsed.aiAnalysis = await analyzeResumeWithAI({ apiKey: aiKey, resumeText: parsed.raw });
+    const ai = aiConnection(cfg, aiKey);
+    if (!ai.configured) return out({ ok: false, error: 'Connect ChatGPT or add an API key in Smart Match first.' });
+    parsed.aiAnalysis = await analyzeResumeWithAI({ apiKey: aiKey, connection: ai.connection, resumeText: parsed.raw });
     writeParsedCV(parsed);
     const mode = cfg.search?.mode === 'keywords' ? 'keywords' : 'titles';
     return out({ ok: true, ...suggestTermsForMode(parsed, mode), analysis: parsed.aiAnalysis });
@@ -518,7 +527,7 @@ function resumeGet() {
       careerYears: cv.careerYears || 0,
       employment: (cv.employment || []).slice(0, 20),
       analysisSource: ai ? 'ai' : 'local',
-      aiConfigured: !!aiKey,
+      aiConfigured: aiConnection(cfg, aiKey).configured,
       aiAnalysis: ai ? {
         provider: ai.provider, model: ai.model, analyzedAt: ai.analyzedAt,
         summary: ai.summary, seniority: ai.seniority,
@@ -1048,6 +1057,17 @@ const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.ar
 const [, , cmd, a, b, a3, a4, a5] = process.argv;
 if (isMain) (async () => {
   switch (cmd) {
+    case 'smart-import-prepare': return out(prepareJobImport('batch', a));
+    case 'batch-descriptions-get': return out(batchDescriptionsGet());
+    case 'batch-descriptions-retry': return out(await batchDescriptionsRetry(JSON.parse(a||'{}')));
+    case 'smart-import-csv': return out(prepareJobImport('csv', a, b));
+    case 'smart-import-review': return out(await startJobImport(JSON.parse(a || '{}')));
+    case 'smart-chatgpt-status': return out({ ok: true, ...await chatgptStatus() });
+    case 'smart-chatgpt-connect': {
+      cfgRW.set('scoring.ai.connection', 'chatgpt');
+      cfgRW.set('scoring.ai.enabled', true);
+      return out({ ok: true, ...await connectChatgpt() });
+    }
     case 'smart-get': return out(smartMatchGet(JSON.parse(a || '{}')));
     case 'smart-trends': return out(smartTrendsGet(JSON.parse(a || '{}')));
     case 'smart-action': return out(await smartMatchAction(a, b));

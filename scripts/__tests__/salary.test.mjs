@@ -12,6 +12,12 @@ test('basic $K format', () => {
   assert.deepEqual(parseSalaryK('$135K base'), [135]);
 });
 
+test('401k retirement benefits never become a 401-thousand-dollar salary',()=>{
+  assert.deepEqual(parseSalaryK('Benefits include medical coverage and 401k matching.'),[]);
+  assert.deepEqual(parseSalaryK('Salary $130k. Benefits: 401k plan and paid leave.'),[130]);
+  assert.deepEqual(parseSalaryK('Salary: $401k base'),[401]);
+});
+
 test('range with hyphen', () => {
   assert.deepEqual(parseSalaryK('$120k-$160K'), [120, 160]);
 });

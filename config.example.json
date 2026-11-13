@@ -78,6 +78,7 @@
     "mutedTerms": [],
     "ai": {
       "enabled": false,
+      "connection": "api",
       "requireForDelivery": true,
       "collectAll": true,
       "rememberJobs": true,

@@ -3,9 +3,11 @@ import path from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { atomicWriteJson, withFileLock } from './io-helpers.mjs';
 import { directApplyKey, directApplyUrl, keywordListingUrl } from './hcafe-apply-links.mjs';
+import { collectedDescription } from './hcafe-descriptions.mjs';
 
 export const catalogHash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const emptyCatalog = () => ({ version: 1, jobs: {}, aliases: {}, runs: [], paused: false });
+const catalogUpdates = new Map();
 
 export function readCatalog(file) {
   try {
@@ -21,16 +23,21 @@ export function readCatalog(file) {
 }
 
 export async function updateCatalog(file, mutate) {
-  return withFileLock(file, () => {
+  // Local workers queue in memory instead of repeatedly colliding with their
+  // own filesystem lock. The lock still protects other AMM processes.
+  const pending = (catalogUpdates.get(file) || Promise.resolve()).catch(() => {}).then(() => withFileLock(file, () => {
     const catalog = readCatalog(file);
     const result = mutate(catalog);
     atomicWriteJson(file, catalog);
     return result;
-  });
+  }));
+  catalogUpdates.set(file, pending);
+  try { return await pending; }
+  finally { if (catalogUpdates.get(file) === pending) catalogUpdates.delete(file); }
 }
 
 export function reviewContext(config, resume, model) {
-  const { apiKey, ...ai } = config.scoring?.ai || {};
+  const { apiKey, connection, ...ai } = config.scoring?.ai || {};
   return catalogHash({ version: 1, resume, model, filters: config.filters, user: config.user,
     search: config.search, queries: config.queries, scoring: { ...config.scoring, ai } });
 }
@@ -40,9 +47,21 @@ export async function beginCatalogRun(file, mode, context, options = {}) {
   await updateCatalog(file, catalog => {
     catalog.paused = false;
     catalog.runs.push({ id, mode, context, startedAt: new Date().toISOString(), status: options.resume ? 'reviewing' : 'collecting',
-      terms: {}, ids: [], newIds: [], reviewedIds: [], reusedIds: [], coverage: [], resume: !!options.resume });
+      terms: {}, ids: [], newIds: [], reviewedIds: [], reusedIds: [], coverage: [], resume: !!options.resume,
+      workerPid: process.pid, heartbeatAt: new Date().toISOString() });
   });
   return id;
+}
+
+// Presentation reconciles old interrupted workers without rewriting history on
+// a GET. Legacy runs did not record a PID, so use the shared scrape-lock lease.
+export function catalogRunActivity(run, { lockActive = false, isAlive = pid => {
+  try { process.kill(pid, 0); return true; } catch (error) { return error.code === 'EPERM'; }
+} } = {}) {
+  if (!['collecting', 'reviewing'].includes(run.status)) return { ...run, workerRunning: false };
+  const running = Number.isInteger(run.workerPid) && run.workerPid > 0 ? isAlive(run.workerPid) : lockActive;
+  return running ? { ...run, workerRunning: true } : { ...run, status: 'interrupted', workerRunning: false,
+    error: run.error || 'The review worker stopped. Completed reviews are saved. Use Continue review to resume.' };
 }
 
 function aliasesFor(row) {
@@ -87,13 +106,13 @@ export async function collectCatalogRows(file, runId, term, rows, pageKey = '0')
       if (!aliases.length) continue;
       const id = mergeAliases(catalog, aliases) || catalogHash(aliases[0]).slice(0, 24);
       const previous = catalog.jobs[id];
-      const sourceHash = catalogHash({ title: row.title, company: row.company, location: row.location,
+      const sourceHash = row.preserveMetadata && previous ? previous.sourceHash : catalogHash({ title: row.title, company: row.company, location: row.location,
         sourceVersion: row.sourceVersion || '', summary: row.cardText || '', directUrl: row.directUrl || '' });
       const metadata = {
         sourceId: row.sourceId || previous?.sourceId || '', source: row.source || previous?.source || 'hcafe',
-        title: String(row.title || previous?.title || '(untitled)').slice(0, 500),
-        company: String(row.company || previous?.company || '').slice(0, 300),
-        location: String(row.location || previous?.location || '').slice(0, 500),
+        title: String((row.preserveMetadata && previous?.title) || row.title || previous?.title || '(untitled)').slice(0, 500),
+        company: String((row.preserveMetadata && previous?.company) || row.company || previous?.company || '').slice(0, 300),
+        location: String((row.preserveMetadata && previous?.location) || row.location || previous?.location || '').slice(0, 500),
         href: keywordListingUrl(row.viewjobUrl || row.href) || previous?.href || '',
         directUrl: directApplyUrl(row.directUrl) || previous?.directUrl || '',
         yoe: row.yoe ?? previous?.yoe ?? null, sourceHash, lastSeenAt: now,
@@ -115,24 +134,37 @@ export async function collectCatalogRows(file, runId, term, rows, pageKey = '0')
 }
 
 export async function saveCatalogDescription(file, directory, job, description, directUrl) {
-  const text = String(description || '').trim().slice(0, 40000);
-  if (!text) return;
+  const saved = await saveCatalogDescriptions(file, directory, [{ job, jdText: description, directUrl }]);
+  return saved[job.id];
+}
+
+// One durable catalog checkpoint per prepared group, rather than a full-history
+// JSON read/write for every individual job. Keep exact-identity alias merging.
+export async function saveCatalogDescriptions(file, directory, entries, mutate = () => {}) {
   return updateCatalog(file, catalog => {
-    let current = catalog.jobs[job.id];
-    if (!current || current.sourceHash !== job.sourceHash) return;
-    if (directApplyUrl(directUrl)) {
-      const aliases = aliasesFor({ ...current, directUrl });
-      const id = mergeAliases(catalog, aliases) || current.id;
-      current = catalog.jobs[id];
-      for (const alias of aliases) catalog.aliases[alias] = id;
-      current.directUrl = directApplyUrl(directUrl);
+    const saved = {};
+    for (const { job, jdText, directUrl, title, company } of entries) {
+      const text = String(jdText || '').trim().slice(0, 40000);
+      let current = catalog.jobs[job.id];
+      if (!text || !current || current.sourceHash !== job.sourceHash) continue;
+      if (directApplyUrl(directUrl)) {
+        const aliases = aliasesFor({ ...current, directUrl });
+        const id = mergeAliases(catalog, aliases) || current.id;
+        current = catalog.jobs[id];
+        for (const alias of aliases) catalog.aliases[alias] = id;
+        current.directUrl = directApplyUrl(directUrl);
+      }
+      atomicWriteJson(path.join(directory, `${current.id}.json`), { text });
+      current.descriptionHash = catalogHash(text);
+      current.descriptionAt = new Date().toISOString();
+      current.needsDescription = false;
+      current.descriptionError = '';
+      if (!current.title || current.title === '(untitled)') current.title = String(title || current.title).slice(0, 500);
+      if (!current.company) current.company = String(company || '').slice(0, 300);
+      saved[job.id] = current.id;
     }
-    atomicWriteJson(path.join(directory, `${current.id}.json`), { text });
-    current.descriptionHash = catalogHash(text);
-    current.descriptionAt = new Date().toISOString();
-    current.needsDescription = false;
-    current.descriptionError = '';
-    return current.id;
+    mutate(catalog, saved);
+    return saved;
   });
 }
 
@@ -142,10 +174,41 @@ export function readCatalogDescription(directory, id) {
   catch { return ''; }
 }
 
+// Persist one collected page in one catalog write, rather than rewriting the
+// entire job history for every description. Keep full text outside the catalog.
+export async function saveCollectedDescriptions(file, directory, rows) {
+  const complete = rows.map(row => ({ row, text: collectedDescription(row) })).filter(item => item.text);
+  if (!complete.length) return;
+  await updateCatalog(file, catalog => {
+    for (const { row, text } of complete) {
+      const id = aliasesFor(row).map(alias => catalog.aliases[alias]).find(Boolean);
+      const job = catalog.jobs[id];
+      if (!job) continue;
+      if (row.sourceHash && row.sourceHash !== job.sourceHash) continue;
+      atomicWriteJson(path.join(directory, `${id}.json`), { text });
+      Object.assign(job, { descriptionHash: catalogHash(text), descriptionAt: new Date().toISOString(),
+        needsDescription: false, descriptionError: '' });
+    }
+  });
+}
+
+// Enrichment is supplemental: exports read it by exact identity without
+// rewriting a current batch or replacing a newer scrape with an older one.
+export function withCatalogDescriptions(batch, catalog, directory) {
+  return {...batch,jobs:(batch?.jobs||[]).map(row=>{
+    if(collectedDescription(row))return row;
+    const id=aliasesFor({ ...row,sourceId:row.sourceId||row.id,source:row.source||row.src }).map(alias=>catalog.aliases[alias]).find(Boolean);
+    const job=catalog.jobs[id];
+    const text=job&&!job.needsDescription?readCatalogDescription(directory,id):'';
+    return text?{...row,description:text,descriptionQuality:'full',descriptionError:''}
+      :{...row,descriptionError:job?.descriptionError||row.descriptionError||'Description pending or unavailable.'};
+  })};
+}
+
 export function catalogJobState(job, context) {
   if (job.appliedAt) return 'applied';
   if (job.override === 'excluded') return 'excluded';
-  if (!job.review || job.forceReview || job.needsDescription || (context && job.review.context !== context)) return 'awaiting';
+  if (!job.review || job.forceReview || job.needsDescription || job.review.descriptionHash !== job.descriptionHash || (context && job.review.context !== context)) return 'awaiting';
   if (job.override === 'included') return 'reviewed';
   return job.review.exclusions?.length ? 'excluded' : 'reviewed';
 }
@@ -190,7 +253,8 @@ export function catalogSummary(catalog, context) {
     const state = catalogJobState(job, context);
     if (state === 'excluded') summary.excluded++;
     if (state === 'applied') summary.applied++;
-    if (!job.review || state === 'awaiting') { summary.pending++; continue; }
+    if (state === 'awaiting') { summary.pending++; continue; }
+    if (!job.review) continue;
     const score = job.review.matchPct;
     if (score >= 70) summary.strong++;
     else if (score >= 50) summary.stretch++;
@@ -223,22 +287,22 @@ export function catalogAnalytics(catalog, context, days = 30) {
   }
   for (const job of selected) {
     const state = catalogJobState(job, context);
-    const band = !job.review || state === 'awaiting' ? 'pending' : job.review.matchPct >= 70 ? 'strong' : job.review.matchPct >= 50 ? 'stretch' : 'below';
+    const band = state === 'awaiting' ? 'pending' : !job.review ? null : job.review.matchPct >= 70 ? 'strong' : job.review.matchPct >= 50 ? 'stretch' : 'below';
     const day = ensureDay(job.firstSeenAt.slice(0, 10));
     day.unique++;
-    day[band]++;
+    if (band) day[band]++;
     for (const term of Object.keys(job.queries || {})) {
       day.terms[term] ||= { hits: 0 };
       day.terms[term].unique = (day.terms[term].unique || 0) + 1;
-      day.terms[term][band] = (day.terms[term][band] || 0) + 1;
+      if (band) day.terms[term][band] = (day.terms[term][band] || 0) + 1;
       terms[term] ||= { term, hits: 0, unique: 0, strong: 0, stretch: 0, below: 0, pending: 0 };
       terms[term].unique++;
-      terms[term][band]++;
+      if (band) terms[term][band]++;
     }
   }
   return { totals, days: Object.values(daily).sort((a, b) => a.date.localeCompare(b.date)), keywords: Object.values(terms),
     runs: catalog.runs.filter(run => !cutoff || run.startedAt.slice(0, 10) >= cutoff).map(run => ({
-      id: run.id, at: run.startedAt, status: run.status, error: run.error || '', unique: run.ids.length, newJobs: run.newIds.length,
+      id: run.id, mode: run.mode, sourceLabel: run.sourceLabel || '', at: run.startedAt, status: run.status, error: run.error || '', unique: run.ids.length, newJobs: run.newIds.length,
       reviewed: run.reviewedIds.length, coverage: run.coverage,
       terms: Object.fromEntries(Object.entries(run.terms).map(([term, source]) => [term, {
         hits: Object.values(source.pages).reduce((sum, page) => sum + page.hits, 0),

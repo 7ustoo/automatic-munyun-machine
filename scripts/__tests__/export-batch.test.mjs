@@ -14,10 +14,11 @@ const LB = {
   ]
 };
 
-test('exportRows: number + title + apply link only, direct URL preferred', () => {
+test('exportRows: direct URL preferred, rich CSV fields are retained', () => {
   const rows = exportRows(LB);
   assert.equal(rows.length, 3);
-  assert.deepEqual(Object.keys(rows[0]).sort(), ['applyUrl', 'n', 'title']);
+  assert.equal(rows[0].description, '');
+  assert.equal(rows[0].company, '');
   assert.equal(rows[0].applyUrl, 'https://ats.example/apply/1'); // direct wins
   assert.equal(rows[1].applyUrl, 'https://hiring.cafe/viewjob/bbb'); // fallback
   assert.equal(rows[2].title, '(untitled)');
@@ -55,8 +56,8 @@ test('csv export: BOM + header + CRLF rows', () => {
   const csv = buildExportCsv(exportRows(LB));
   assert.equal(csv.charCodeAt(0), 0xFEFF, 'Excel needs a UTF-8 BOM');
   const lines = csv.slice(1).split('\r\n');
-  assert.equal(lines[0], '#,Job Title,Apply Link');
-  assert.equal(lines[1], '1,IAM Engineer,https://ats.example/apply/1');
+  assert.equal(lines[0], '#,Job Title,Apply Link,Company,HiringCafe Link,Job Description,Description Status');
+  assert.equal(lines[1], '1,IAM Engineer,https://ats.example/apply/1,,,,Description unavailable');
   assert.equal(lines[lines.length - 1], '', 'trailing CRLF');
 });
 

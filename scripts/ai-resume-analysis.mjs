@@ -108,11 +108,11 @@ export function validateResumeAnalysis(value, resumeText) {
   return { summary, seniority, skills, targetRoles, searchKeywords };
 }
 
-export async function analyzeResumeWithAI({ apiKey, resumeText, fetchImpl = fetch, sleepImpl }) {
+export async function analyzeResumeWithAI({ apiKey, connection = 'api', subscriptionImpl, resumeText, fetchImpl = fetch, sleepImpl }) {
   const text = String(resumeText || '').trim();
   if (!text) throw new Error('resume has no readable text');
   const { provider, value } = await aiStructuredOutput({
-    apiKey,
+    apiKey, connection, subscriptionImpl,
     prompt: buildResumeAnalysisPrompt(text),
     schema: RESUME_ANALYSIS_SCHEMA,
     schemaName: 'resume_search_analysis',

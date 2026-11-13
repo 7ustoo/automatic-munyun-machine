@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * Minimal batch export (v2.4): number · job title · apply link — nothing else.
+ * Batch export: compact TXT/XLSX and reusable CSV with saved full descriptions.
  *
  * Three formats:
  *   txt  — plain numbered list, one job per block, easy to read/paste
  *   csv  — Excel-ready sheet (UTF-8 BOM so Excel detects the encoding,
- *          CRLF rows, proper quoting) with columns: #, Job Title, Apply Link.
+ *          CRLF rows, proper quoting) with company, HiringCafe link and full JD.
  *          NOTE: CSV is plain text (RFC 4180) — it cannot carry hyperlinks,
  *          so the Apply Link column is inert text in Excel.
  *   xlsx — real Excel workbook (v2.4.1) where the Apply Link column is a
@@ -34,16 +34,22 @@ import { paths as profilePaths } from './profile-store.mjs';
 import { readArchive } from './batch-archive.mjs';
 import { readExclusions } from './batch-exclusions.mjs';
 import { buildXlsx } from './xlsx-writer.mjs';
+import { keywordListingUrl } from './hcafe-apply-links.mjs';
+import { readCatalog, withCatalogDescriptions } from './job-catalog.mjs';
 
 // ---- pure builders (unit-tested) ----
 
-// last-batch jobs → minimal rows. Apply link prefers the resolved direct
-// ATS URL; falls back to the hiring.cafe viewjob page.
+// Batch jobs → compact links plus reusable full-text CSV fields. Apply links
+// prefer resolved employer URLs, with source fallback only for older batches.
 export function exportRows(lastBatch) {
   return (lastBatch?.jobs || []).map(j => ({
     n: j.idx,
     title: (j.title || '(untitled)').trim(),
-    applyUrl: lastBatch?.funnel?.directApplyLinks ? (j.directUrl || '') : (j.directUrl || j.viewjobUrl || '')
+    applyUrl: lastBatch?.funnel?.directApplyLinks ? (j.directUrl || '') : (j.directUrl || j.viewjobUrl || ''),
+    company: j.company || '',
+    viewjobUrl: keywordListingUrl(j.viewjobUrl) || '',
+    description: ['summary', 'missing'].includes(j.descriptionQuality) ? '' : String(j.description || (j.descriptionQuality === 'full' ? j.jdText || j.__jd || '' : '')).trim(),
+    descriptionError: j.descriptionError || ''
   }));
 }
 
@@ -71,8 +77,9 @@ export function csvCell(v) {
 export function buildExportCsv(rows, linkLabel = 'Apply Link') {
   // \uFEFF: UTF-8 BOM — without it Excel guesses ANSI and mangles any
   // non-ASCII characters in job titles. CRLF rows per RFC 4180.
-  const head = ['#', 'Job Title', linkLabel].map(csvCell).join(',');
-  const body = rows.map(r => [r.n, r.title, r.applyUrl].map(csvCell).join(','));
+  const head = ['#', 'Job Title', linkLabel, 'Company', 'HiringCafe Link', 'Job Description', 'Description Status'].map(csvCell).join(',');
+  const body = rows.map(r => [r.n, r.title, r.applyUrl, r.company, r.viewjobUrl, r.description,
+    r.description ? 'Full description saved' : r.descriptionError || 'Description unavailable'].map(csvCell).join(','));
   return '\uFEFF' + [head, ...body].join('\r\n') + '\r\n';
 }
 
@@ -94,6 +101,7 @@ export function buildExportXlsx(rows, date = '', linkLabel = 'Apply Link') {
 
 export function loadExport(format, archiveId) {
   const fmt = format === 'csv' ? 'csv' : format === 'xlsx' ? 'xlsx' : 'txt';
+  const pp = profilePaths();
   let lb;
   if (archiveId) {
     // v7.2: export a previous scrape from the batch archive instead of the
@@ -109,6 +117,7 @@ export function loadExport(format, archiveId) {
   } catch {
     return { ok: false, error: 'No batch yet — run a scrape first.' };
   }
+  if (fmt === 'csv') try { lb = withCatalogDescriptions(lb, readCatalog(pp.jobCatalog), pp.jobDescriptions); } catch { /* Original links remain exportable. */ }
   const rows = exportRows(lb);
   if (!rows.length) {
     return { ok: false, error: 'The latest batch has no jobs to export.' };
