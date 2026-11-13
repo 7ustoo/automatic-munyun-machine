@@ -8,7 +8,9 @@ import { spawnSync } from 'node:child_process';
 
 test('saved-list API validates profile/lock, binds the worker, keeps original batch and ignores CSV scores', async t => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'amm-import-api-'));
+  // macOS aliases /var to /private/var. Use the canonical path so the helper's
+  // ESM entry-point check and the child argv refer to the same file.
+  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'amm-import-api-')));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   fs.cpSync(path.join(root, 'scripts'), path.join(dir, 'scripts'), { recursive: true });
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), process.platform === 'win32' ? 'junction' : 'dir');
