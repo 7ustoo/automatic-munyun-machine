@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { parseCsv } from '../job-import.mjs';
 
 test('saved-list API validates profile/lock, binds the worker, keeps original batch and ignores CSV scores', async t => {
   const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -29,12 +30,22 @@ test('saved-list API validates profile/lock, binds the worker, keeps original ba
     assert.ok(child.stdout.trim(), child.stderr);
     return JSON.parse(child.stdout.trim());
   };
+  const simple = cli('export','csv-simple');
+  assert.equal(simple.format,'csv');assert.match(simple.filename,/simple-jobs.*\.csv$/);
+  assert.deepEqual(parseCsv(simple.content),[['Job Title','Company','Direct Apply Link','Keyword'],['Linux Engineer','Example','https://jobs.example.com/one','ci/cd']]);
+  const archive='batch-2026-11-09T15-41-49';
+  const archiveDir=path.join(pp,'batch-archive');fs.mkdirSync(archiveDir);
+  fs.writeFileSync(path.join(archiveDir,archive+'.json'),batch);
+  assert.equal(cli('export','csv-simple',archive).content,simple.content);
+  assert.equal(fs.readFileSync(path.join(archiveDir,archive+'.json'),'utf8'),batch);
   const preview = cli('smart-import-prepare'); assert.equal(preview.total, 1); assert.equal(preview.profile, 'default');
   const wrong = cli('smart-import-review', JSON.stringify({ id: preview.id, profile: 'different' })); assert.equal(wrong.ok, false); assert.match(wrong.error, /Profile changed/);
   const lockdir = path.join(dir, 'data/scrape.lock.lock'); fs.mkdirSync(lockdir);
   const busy = cli('smart-import-review', JSON.stringify({ id: preview.id, profile: 'default' })); assert.match(busy.error, /already running/);
   fs.rmdirSync(lockdir);
   const started = cli('smart-import-review', JSON.stringify({ id: preview.id, profile: 'default' })); assert.equal(started.ok, true);
+  const smartSimple=cli('smart-export','csv-simple',JSON.stringify({run:started.run,scope:'history'}));
+  assert.deepEqual(parseCsv(smartSimple.content),parseCsv(simple.content));
   for (let n = 0; !fs.existsSync(path.join(dir, 'worker.json')) && n < 40; n++) await new Promise(resolve => setTimeout(resolve, 50));
   const worker = JSON.parse(fs.readFileSync(path.join(dir, 'worker.json'))); assert.equal(worker.profile, 'default'); assert.equal(worker.run, started.run); assert.equal(worker.keyword, '');
   assert.equal(fs.readFileSync(path.join(pp, 'last-batch.json'), 'utf8'), batch);

@@ -115,6 +115,8 @@ The desktop dashboard is the primary app. Extra delivery channels are optional:
 - **Email:** send the apply-link list to yourself or a helper through Gmail as `.txt`, `.csv`, or `.xlsx`
 - **Export:** download `.txt`, `.csv`, or `.xlsx` files with direct apply links
 
+Choose **Export → Simple CSV — links only** for exactly four columns: **Job Title, Company, Direct Apply Link, Keyword**. **Full CSV — descriptions** keeps the detailed export. Simple CSV also works under **Previous scrapes**: download it beside a saved scrape, or open the scrape and use its Export menu. No new scrape is required. Original per-job keywords are retained; missing keywords use the batch keyword. Older snapshots without a direct application link leave that cell blank unless an exact record in saved history supplies it. Listing links are never labeled as direct application links. Smart Match offers Simple CSV for its filtered Results, Excluded and Job history views; a job found under several keywords lists them separated by semicolons.
+
 ### Explainable matching
 
 AMM uses the job card for a broad first pass, then loads the full description for every candidate it evaluates until it fills the requested batch or runs out of candidates. The final score measures recognized requirement coverage, target-role fit, demonstrated resume evidence, and strict experience gaps. Standard equivalents such as SSO/Single Sign-On, Entra ID/Azure AD, and OIDC/OpenID Connect count as the same skill. The same opening found on multiple sites is delivered once. Repeated buzzwords count once.

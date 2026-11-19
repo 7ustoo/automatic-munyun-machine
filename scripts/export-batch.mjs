@@ -2,12 +2,13 @@
 /**
  * Batch export: compact TXT/XLSX and reusable CSV with saved full descriptions.
  *
- * Three formats:
+ * Four formats:
  *   txt  — plain numbered list, one job per block, easy to read/paste
  *   csv  — Excel-ready sheet (UTF-8 BOM so Excel detects the encoding,
  *          CRLF rows, proper quoting) with company, HiringCafe link and full JD.
  *          NOTE: CSV is plain text (RFC 4180) — it cannot carry hyperlinks,
  *          so the Apply Link column is inert text in Excel.
+ *   csv-simple — role, company, direct application link and original keyword.
  *   xlsx — real Excel workbook (v2.4.1) where the Apply Link column is a
  *          NATIVE clickable hyperlink (blue + underlined). Built by
  *          scripts/xlsx-writer.mjs, zero dependencies.
@@ -34,7 +35,7 @@ import { paths as profilePaths } from './profile-store.mjs';
 import { readArchive } from './batch-archive.mjs';
 import { readExclusions } from './batch-exclusions.mjs';
 import { buildXlsx } from './xlsx-writer.mjs';
-import { keywordListingUrl } from './hcafe-apply-links.mjs';
+import { keywordListingUrl, directApplyUrl, directApplyKey } from './hcafe-apply-links.mjs';
 import { readCatalog, withCatalogDescriptions } from './job-catalog.mjs';
 
 // ---- pure builders (unit-tested) ----
@@ -83,6 +84,29 @@ export function buildExportCsv(rows, linkLabel = 'Apply Link') {
   return '\uFEFF' + [head, ...body].join('\r\n') + '\r\n';
 }
 
+// Older snapshots need no migration. Only exact saved identities may supply
+// missing metadata; a listing URL must never masquerade as a direct apply URL.
+export function simpleExportRows(batch, catalog = {}) {
+  return (batch?.jobs || []).map(job => {
+    const listing = keywordListingUrl(job.viewjobUrl || job.href);
+    const aliases = [`apply:${directApplyKey(job.directUrl)}`,
+      listing && `listing:${new URL(listing).pathname}`,
+      (job.sourceId || job.id) && `${job.source || 'hcafe'}:${job.sourceId || job.id}`].filter(Boolean);
+    const id = aliases.map(alias => catalog.aliases?.[alias]).find(Boolean);
+    const saved = catalog.jobs?.[id];
+    return { title: String(job.title || '(untitled)').trim(), company: job.company || saved?.company || '',
+      directUrl: directApplyUrl(job.directUrl) || directApplyUrl(saved?.directUrl) || directApplyUrl(job.viewjobUrl || job.href),
+      keyword: job.q || job.keyword || batch.keyword || '' };
+  });
+}
+
+export function buildSimpleExportCsv(rows) {
+  const cell = value => csvCell(String(value ?? '').replace(/^[=+@\-\t\r]/, "'$&"));
+  const header = ['Job Title', 'Company', 'Direct Apply Link', 'Keyword'];
+  return '\uFEFF' + [header, ...rows.map(row => [row.title, row.company, directApplyUrl(row.directUrl), row.keyword])]
+    .map(row => row.map(cell).join(',')).join('\r\n') + '\r\n';
+}
+
 // Excel workbook with the Apply Link column as native clickable hyperlinks —
 // the thing CSV structurally can't do. Returns a Buffer.
 export function buildExportXlsx(rows, date = '', linkLabel = 'Apply Link') {
@@ -100,7 +124,7 @@ export function buildExportXlsx(rows, date = '', linkLabel = 'Apply Link') {
 // ---- loader (reads the active profile's last batch) ----
 
 export function loadExport(format, archiveId) {
-  const fmt = format === 'csv' ? 'csv' : format === 'xlsx' ? 'xlsx' : 'txt';
+  const fmt = ['csv', 'csv-simple', 'xlsx'].includes(format) ? format : 'txt';
   const pp = profilePaths();
   let lb;
   if (archiveId) {
@@ -118,7 +142,11 @@ export function loadExport(format, archiveId) {
     return { ok: false, error: 'No batch yet — run a scrape first.' };
   }
   if (fmt === 'csv') try { lb = withCatalogDescriptions(lb, readCatalog(pp.jobCatalog), pp.jobDescriptions); } catch { /* Original links remain exportable. */ }
-  const rows = exportRows(lb);
+  let catalog;
+  if (fmt === 'csv-simple' && (lb.jobs || []).some(job => !directApplyUrl(job.directUrl) || !job.company)) {
+    try { catalog = readCatalog(pp.jobCatalog); } catch { /* Missing legacy metadata stays blank. */ }
+  }
+  const rows = fmt === 'csv-simple' ? simpleExportRows(lb, catalog) : exportRows(lb);
   if (!rows.length) {
     return { ok: false, error: 'The latest batch has no jobs to export.' };
   }
@@ -126,6 +154,8 @@ export function loadExport(format, archiveId) {
   // Archived exports carry the full scrape timestamp so two same-day
   // downloads don't overwrite each other in the user's Downloads folder.
   const stamp = archiveId ? archiveId.replace(/^batch-/, '') : date;
+  if (fmt === 'csv-simple') return { ok: true, format: 'csv', filename: `simple-jobs(${stamp}).csv`,
+    content: buildSimpleExportCsv(rows), count: rows.length, date };
   const listingOnly = lb.mode === 'keyword' && !lb.funnel?.directApplyLinks;
   const filename = `${listingOnly ? 'listing-links' : 'apply-links'}(${stamp}).${fmt}`;
   if (fmt === 'xlsx') {

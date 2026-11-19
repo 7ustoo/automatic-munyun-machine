@@ -4,6 +4,7 @@
 // Port 8765 = normal dashboard; port 8766 = first-run (needsSetup) mode.
 import { createServer } from "node:http";
 import { readFileSync } from "node:fs";
+import { simpleExportRows, buildSimpleExportCsv } from '../../scripts/export-batch.mjs';
 
 const HTML_PATH = process.argv[2];
 const page = () => readFileSync(HTML_PATH, "utf8").replace("__AMM_TOKEN__", "stub-token-123");
@@ -164,6 +165,12 @@ function serve(port, needsSetup, opts) {
   const R = routes(needsSetup, opts);
   createServer(async (req, res) => {
     const path = req.url.split("?")[0];
+    if (path === '/api/export' && new URL(req.url,'http://127.0.0.1').searchParams.get('format') === 'csv-simple') {
+      const archive = new URL(req.url,'http://127.0.0.1').searchParams.get('archive');
+      const batch = {jobs:archive?jobs:liveJobs()};
+      res.writeHead(200,{'content-type':'text/csv; charset=utf-8','content-disposition':`attachment; filename="simple-jobs(${archive || 'latest'}).csv"`});
+      res.end(buildSimpleExportCsv(simpleExportRows(batch)));return;
+    }
     if (path === "/" ) { res.writeHead(200, { "content-type": "text/html" }); res.end(page()); return; }
     if (path === "/oauth/google/callback") {
       oauthEmailConnected = true;
