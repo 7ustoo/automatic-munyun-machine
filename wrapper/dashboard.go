@@ -372,14 +372,14 @@ func (d *dashboardServer) handleFavicon(w http.ResponseWriter, r *http.Request) 
 // never-reimplement-in-Go rule.
 func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 	format := r.URL.Query().Get("format")
-	if format != "csv" && format != "xlsx" {
+	if format != "csv" && format != "csv-simple" && format != "xlsx" {
 		format = "txt"
 	}
 	// v7.2: &archive=batch-… exports a previous scrape instead of the live
 	// batch. Validate here too so garbage never reaches the exec layer.
 	args := []string{"export", format}
 	if scope := r.URL.Query().Get("catalog"); scope != "" {
-		if format != "xlsx" {
+		if format != "xlsx" && format != "csv-simple" {
 			format = "csv"
 		}
 		options, _ := json.Marshal(map[string]string{"scope": scope, "keyword": r.URL.Query().Get("keyword"), "search": r.URL.Query().Get("search"), "band": r.URL.Query().Get("band"), "run": r.URL.Query().Get("run"), "day": r.URL.Query().Get("day")})
@@ -423,7 +423,7 @@ func (d *dashboardServer) handleExport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		body = decoded
-	case "csv":
+	case "csv", "csv-simple":
 		mime = "text/csv; charset=utf-8"
 		body = []byte(res.Content)
 	default:

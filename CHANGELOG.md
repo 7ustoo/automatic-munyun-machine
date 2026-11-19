@@ -6,6 +6,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ---
 
+## [13.0.3] — 2026-11-19
+
+- Added **Simple CSV — links only** with exactly Job Title, Company, Direct Apply Link and Keyword columns, alongside the existing full-description CSV.
+- Simple exports work for current batches, saved older scrapes and filtered Smart Match lists without scraping again or changing saved jobs. Missing legacy metadata uses exact saved identities when available; unavailable direct links remain blank.
+
 ## [13.0.2] — 2026-11-13
 
 - Background job-description loading now uses shared employer feeds and individual employer fallbacks. A HiringCafe throttle no longer prevents every remaining job from being attempted.

@@ -3,7 +3,41 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { exportRows, buildExportTxt, buildExportCsv, csvCell } from '../export-batch.mjs';
+import { exportRows, buildExportTxt, buildExportCsv, csvCell, simpleExportRows, buildSimpleExportCsv } from '../export-batch.mjs';
+import { parseCsv, csvJobs } from '../job-import.mjs';
+
+test('simple CSV has exactly four columns and round-trips role/company/keyword without descriptions or scores', () => {
+  const batch = {keyword:'cloud engineer',jobs:[{title:'Cloud Engineer, "II"',company:'Example, Inc.',directUrl:'https://jobs.example.com/apply?id=1&team=cloud',q:'linux',description:'PRIVATE FULL DESCRIPTION',matchPct:87},
+    {title:'Azure Engineer',company:'Cloud Systems',directUrl:'https://jobs.example.com/2'}]};
+  const before=JSON.stringify(batch),csv=buildSimpleExportCsv(simpleExportRows(batch));
+  assert.equal(csv.charCodeAt(0),0xFEFF);
+  const [headers,...rows]=parseCsv(csv);
+  assert.deepEqual(headers,['Job Title','Company','Direct Apply Link','Keyword']);
+  assert.deepEqual(rows[0],['Cloud Engineer, "II"','Example, Inc.','https://jobs.example.com/apply?id=1&team=cloud','linux']);
+  assert.equal(rows[1][3],'cloud engineer');
+  assert.ok(rows.every(row=>row.length===4));
+  assert.doesNotMatch(csv,/PRIVATE FULL DESCRIPTION|87|Match %|Description/);
+  assert.equal(JSON.stringify(batch),before);
+  assert.equal(csvJobs(csv).rows[0].q,'linux');
+});
+
+test('old snapshots use only exact saved identities for missing employer metadata, never listing links or similar titles', () => {
+  const jobs=[{id:'legacy',title:'Cloud Engineer',viewjobUrl:'https://hiringcafe.com/job/exact',q:'cloud'},
+    {title:'Cloud Engineer',viewjobUrl:'https://hiringcafe.com/job/other',q:'linux'}];
+  const catalog={aliases:{'listing:/job/exact':'saved'},jobs:{saved:{company:'Original Company',directUrl:'https://jobs.example.com/1'}}};
+  const rows=simpleExportRows({jobs},catalog);
+  assert.equal(rows[0].directUrl,'https://jobs.example.com/1');assert.equal(rows[0].company,'Original Company');
+  assert.equal(rows[1].directUrl,'');assert.equal(rows[1].company,'');assert.equal(rows[1].keyword,'linux');
+  assert.equal(parseCsv(buildSimpleExportCsv(rows))[2][2],'');
+  assert.doesNotMatch(buildSimpleExportCsv(rows),/hiringcafe/);
+});
+
+test('simple CSV keeps all rows, protects spreadsheet formulas, and rejects non-employer destinations', () => {
+  const csv=buildSimpleExportCsv([{title:'=HYPERLINK("bad")',company:'+Example',directUrl:'javascript:bad',keyword:'@cloud'},
+    ...Array.from({length:6380},(_,i)=>({title:'Engineer '+i,company:'Example',directUrl:'https://jobs.example.com/'+i,keyword:'cloud'}))]);
+  const [headers,...rows]=parseCsv(csv);assert.equal(headers.length,4);assert.equal(rows.length,6381);
+  assert.equal(rows[0][0],"'=HYPERLINK(\"bad\")");assert.equal(rows[0][1],"'+Example");assert.equal(rows[0][2],'');assert.equal(rows[0][3],"'@cloud");
+});
 
 const LB = {
   date: '2026-07-02',

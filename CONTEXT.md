@@ -2,10 +2,16 @@
 
 > Current state for contributors and future development sessions.
 
-**Version:** 13.0.2
-**Active release branch:** `v13.0.2`
+**Version:** 13.0.3
+**Active release branch:** `v13.0.3`
 **Platforms:** Windows, macOS, Linux
-**Last refreshed:** 2026-11-13
+**Last refreshed:** 2026-11-19
+
+### v13.0.3 simple CSV exports
+
+- `format=csv-simple` on guarded GET `/api/export` selects the four-column Job Title / Company / Direct Apply Link / Keyword CSV, including `archive=<id>` and catalog scope/filter options. `loadExport('csv-simple', archiveId)` returns a `.csv` filename and `format:'csv'`; TXT, full CSV, XLSX and delivery formats retain their existing behavior.
+- `simpleExportRows` preserves each snapshot's `q`/keyword (batch keyword fallback). Exact saved application/listing/source identities may fill missing company/direct URL; no matching by title/company, no network reads or archive rewrites, and no listing-URL fallback in the direct-link column. CSV uses BOM/CRLF, quoted cells and formula escaping. Simple exports do not load description files. Smart Match shares the builder and joins all original keywords with semicolons.
+- My matches adds **Simple CSV — links only**, Previous scrapes adds a Simple CSV download, and opening an archived scrape keeps Export scoped to it. Smart Match adds a Simple CSV download beside the detailed CSV/XLSX controls.
 
 ### v13.0.2 CSV readiness and live sample repairs
 

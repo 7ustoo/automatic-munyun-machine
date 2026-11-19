@@ -8,6 +8,7 @@ import { readEmailEnv } from './email.mjs';
 import { readCatalog, reviewContext, catalogPublicJob, catalogSummary, catalogAnalytics, catalogAction, catalogRunActivity, readCatalogDescription } from './job-catalog.mjs';
 import { recordAppliedJob } from './application-ledger.mjs';
 import { buildXlsx } from './xlsx-writer.mjs';
+import { buildSimpleExportCsv } from './export-batch.mjs';
 
 export function activeCatalog() {
   const pp = paths(), config = readConfig();
@@ -102,6 +103,8 @@ export function smartMatchExport(format, options = {}) {
   const rows = jobs.map(j => [j.title, j.company, j.location, j.directUrl, j.matchPct ?? '', j.state,
     [...j.exclusions, j.aiReason, j.descriptionError].filter(Boolean).join(' | '), j.queries.join('; '), j.firstSeenAt, j.lastSeenAt]);
   const filename = `Smart Match - ${['results', 'excluded', 'awaiting'].includes(options.scope) ? options.scope : 'job history'} - ${new Date().toISOString().slice(0, 10)}`;
+  if (format === 'csv-simple') return { ok: true, filename: filename + ' - links only.csv',
+    content: buildSimpleExportCsv(jobs.map(job => ({title:job.title,company:job.company,directUrl:job.directUrl,keyword:job.queries.join('; ')}))) };
   if (format === 'xlsx') return { ok: true, filename: filename + '.xlsx', contentBase64: buildXlsx({ sheetName: 'Smart Match', columns: headers.map((header, i) => ({ header, width: i === 3 ? 75 : i === 6 ? 90 : 26, hyperlink: i === 3 })), rows }).toString('base64') };
   headers.push('HiringCafe Link', 'Job Description');
   rows.forEach((row, i) => row.push(jobs[i].viewjobUrl || '', readCatalogDescription(pp.jobDescriptions, jobs[i].id)));

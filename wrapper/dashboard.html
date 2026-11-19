@@ -381,6 +381,7 @@
     width: 100%; border: 0; background: transparent; text-align: left; font-weight: 400; cursor: pointer;
   }
   details.menu .menu-panel a:hover, details.menu .menu-panel button:hover { background: var(--surface-3); }
+  #export-menu .menu-panel { min-width: 300px; }
   details.menu .menu-panel a small, details.menu .menu-panel button small { color: var(--text-3); margin-left: auto; padding-left: 12px; }
   .open-jobs-panel { min-width: 248px !important; }
   .open-jobs-panel .menu-label {
@@ -1337,7 +1338,8 @@
               <summary class="btn sm"><svg class="ic"><use href="#i-download"/></svg>Export<svg class="ic" style="width:12px;height:12px"><use href="#i-chevron"/></svg></summary>
               <div class="menu-panel">
                 <a href="/api/export?format=txt" data-batch-export="txt"><svg class="ic"><use href="#i-file"/></svg>Plain text <small>.txt</small></a>
-                <a href="/api/export?format=csv" data-batch-export="csv" title="Links are text — CSV can't carry hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Spreadsheet <small>.csv</small></a>
+                <a href="/api/export?format=csv-simple" data-batch-export="csv-simple" title="Job title, company, direct application link and keyword"><svg class="ic"><use href="#i-file"/></svg>Simple CSV — links only <small>.csv</small></a>
+                <a href="/api/export?format=csv" data-batch-export="csv" title="Includes saved full job descriptions"><svg class="ic"><use href="#i-file"/></svg>Full CSV — descriptions <small>.csv</small></a>
                 <a href="/api/export?format=xlsx" data-batch-export="xlsx" title="Apply Link column is clickable hyperlinks"><svg class="ic"><use href="#i-file"/></svg>Excel workbook <small>.xlsx</small></a>
               </div>
             </details>
@@ -3195,6 +3197,7 @@ async function loadArchives() {
         <td class="arch-dl">
           <a class="sm" href="/api/export?format=txt&archive=${encodeURIComponent(e.id)}" title="Plain text">.txt</a>
           <a class="sm" href="/api/export?format=csv&archive=${encodeURIComponent(e.id)}" title="Spreadsheet (links are text)">.csv</a>
+          <a class="sm" href="/api/export?format=csv-simple&archive=${encodeURIComponent(e.id)}" title="Job title, company, direct application link and keyword">Simple CSV</a>
           <a class="sm" href="/api/export?format=xlsx&archive=${encodeURIComponent(e.id)}" title="Excel workbook, clickable links">.xlsx</a>
         </td>
         <td><button class="sm arch-view${state.archiveId === e.id ? " on" : ""}" data-id="${escapeHTML(e.id)}" data-label="${escapeAttr(archLabel(e.id))}" ${state.archiveId === e.id ? "disabled" : ""}>${state.archiveId === e.id ? "Viewing" : "View"}</button></td>
@@ -5212,7 +5215,7 @@ function initSmartWorkspace() {
     <div class="sm-toolbar" style="margin-top:18px"><label for="sm-connection">Match using</label><select id="sm-connection"><option value="chatgpt">ChatGPT subscription</option><option value="api">API key · separate billing</option></select><button class="primary" id="sm-connect-chatgpt">Connect ChatGPT</button></div>
     <p class="sm-note" id="sm-connection-note" role="status"></p>
     <details style="margin-top:18px"><summary>AI connection &amp; review controls</summary><p class="sm-note">ChatGPT subscription mode uses your included Codex allowance and pauses when a usage limit prevents review. It never falls back to API billing. Saved unchanged reviews are reused.</p><div class="sm-toolbar" id="sm-api-settings"><input id="sm-key" type="password" placeholder="Paste an API key to connect or replace" autocomplete="new-password"><button id="sm-save-key">Save key</button></div><div class="sm-toolbar"><button id="sm-recheck-all">Recheck saved jobs</button></div></details><p class="sm-note" id="sm-preferences-note" role="status"></p></div></div>
-    <div class="sm-panel hidden" id="sm-list-panel"><div class="sm-toolbar"><input id="sm-search" placeholder="Search title, company or location" aria-label="Search saved jobs"><select id="sm-keyword" aria-label="Filter saved jobs by keyword"><option value="">All keywords</option></select><select id="sm-band" aria-label="Match band"><option value="">Every score</option><option value="strong">Strong · 70%+</option><option value="stretch">Stretch · 50–69%</option></select><button id="sm-clear-run" class="hidden">Clear scrape filter</button><a id="sm-csv" class="btn" download>CSV ↓</a><a id="sm-xlsx" class="btn" download>Excel ↓</a></div><div class="card"><div class="sm-actions" style="justify-content:space-between"><h2 id="sm-list-title">Saved jobs</h2><span class="pill" id="sm-list-count"></span></div><div id="sm-jobs"></div><div class="sm-toolbar"><button id="sm-prev">← Previous</button><span class="sm-note" id="sm-page"></span><button id="sm-next">Next →</button></div></div></div>`;
+    <div class="sm-panel hidden" id="sm-list-panel"><div class="sm-toolbar"><input id="sm-search" placeholder="Search title, company or location" aria-label="Search saved jobs"><select id="sm-keyword" aria-label="Filter saved jobs by keyword"><option value="">All keywords</option></select><select id="sm-band" aria-label="Match band"><option value="">Every score</option><option value="strong">Strong · 70%+</option><option value="stretch">Stretch · 50–69%</option></select><button id="sm-clear-run" class="hidden">Clear scrape filter</button><a id="sm-simple-csv" class="btn" download title="Job title, company, direct application link and keywords">Simple CSV ↓</a><a id="sm-csv" class="btn" download title="Includes descriptions, percentages and reasons">Full CSV ↓</a><a id="sm-xlsx" class="btn" download>Excel ↓</a></div><div class="card"><div class="sm-actions" style="justify-content:space-between"><h2 id="sm-list-title">Saved jobs</h2><span class="pill" id="sm-list-count"></span></div><div id="sm-jobs"></div><div class="sm-toolbar"><button id="sm-prev">← Previous</button><span class="sm-note" id="sm-page"></span><button id="sm-next">Next →</button></div></div></div>`;
   document.querySelector("#content > footer").before(section);
   $("sm-tabs").onclick = (e) => {
     const b = e.target.closest("[data-tab]");
@@ -5494,8 +5497,8 @@ async function loadSmart() {
     $("sm-next").disabled = r.page + 1 >= r.pages;
     $("sm-clear-run").classList.toggle("hidden", !smartRun && !smartDay);
     $("sm-clear-run").textContent = smartDay ? `Clear ${smartDay} filter` : 'Clear scrape filter';
-    for (const fmt of ["csv", "xlsx"]) {
-      $("sm-" + fmt).href =
+    for (const fmt of ["csv", "xlsx", "csv-simple"]) {
+      $(fmt === "csv-simple" ? "sm-simple-csv" : "sm-" + fmt).href =
         "/api/export?format=" +
         fmt +
         "&catalog=" +

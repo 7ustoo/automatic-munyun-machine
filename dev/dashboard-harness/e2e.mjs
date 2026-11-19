@@ -1,4 +1,6 @@
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
+import { parseCsv } from '../../scripts/job-import.mjs';
 import { verifyEmployerExtraction } from './check-employer.mjs';
 import { pathToFileURL } from 'node:url';
 
@@ -17,6 +19,14 @@ page.on('response', r => { if (r.status() >= 400) errors.push(`${r.status()} ${r
 await page.goto('http://127.0.0.1:8765/#jobs', { waitUntil: 'networkidle' });
 await page.waitForSelector('tr.job-row');
 if (await page.locator('tr.job-row').count() < 20) throw new Error('jobs did not render');
+await page.locator('#export-menu summary').click();
+let simpleDownloadPromise=page.waitForEvent('download');
+await page.locator('[data-batch-export="csv-simple"]').click();
+let simpleDownload=await simpleDownloadPromise;
+let simpleRows=parseCsv(readFileSync(await simpleDownload.path(),'utf8'));
+if(simpleRows.length!==28||simpleRows[0].join('|')!=='Job Title|Company|Direct Apply Link|Keyword'||simpleRows[1][3]!=='iam') throw new Error('Simple CSV download lost rows, columns or keyword');
+if(!simpleDownload.suggestedFilename().endsWith('.csv'))throw new Error('Simple CSV downloaded with the wrong extension');
+await page.keyboard.press('Escape');
 // v11.3: the active profile's scheduled scrape can be disabled directly from
 // Ranked jobs without disabling the manual Scrape now action.
 if (!(await page.locator('#auto-scrape').isChecked())) throw new Error('active profile auto scrape should load as on');
@@ -103,6 +113,14 @@ if (await page.locator('tr.job-row').count() < 20) throw new Error('archived job
 if (!(await page.locator('#st-funnel').textContent()).includes('640 raw')) throw new Error('archived funnel did not render');
 const historicalExport = await page.locator('[data-batch-export="xlsx"]').getAttribute('href');
 if (!historicalExport.endsWith('&archive=batch-2026-07-06T14-30-00')) throw new Error('ranked dashboard export is not archive-scoped: ' + historicalExport);
+await page.locator('#export-menu summary').click();
+simpleDownloadPromise=page.waitForEvent('download');
+await page.locator('[data-batch-export="csv-simple"]').click();
+simpleDownload=await simpleDownloadPromise;
+simpleRows=parseCsv(readFileSync(await simpleDownload.path(),'utf8'));
+if(simpleRows.length!==43||!simpleDownload.suggestedFilename().includes('batch-2026-07-06T14-30-00'))throw new Error('Simple CSV exported the current batch instead of the older scrape');
+if(simpleRows.some(row=>row.length!==4))throw new Error('Descriptions leaked into the simple archived CSV');
+await page.keyboard.press('Escape');
 if (await page.locator('#open-jobs-menu').getAttribute('aria-disabled') !== 'false') throw new Error('historical Open jobs should be available');
 await page.click('#open-jobs-btn');
 await page.click('button[data-open-count="50"]');
@@ -216,6 +234,7 @@ await page.waitForFunction(()=>document.querySelector('#sm-list-count').textCont
 await page.click('#sm-tabs [data-tab="results"]');
 await page.waitForSelector('#sm-jobs [data-job-action="applied"]');
 if(!(await page.locator('#sm-xlsx').getAttribute('href')).includes('catalog=results'))throw new Error('Smart Match export is not scoped to the selected view');
+if(!(await page.locator('#sm-simple-csv').getAttribute('href')).includes('format=csv-simple&catalog=results'))throw new Error('Simple Smart Match CSV lost its selected view');
 await page.click('#sm-jobs [data-job-action="applied"]');
 await page.waitForFunction(()=>document.querySelector('#sm-list-count').textContent==='0 jobs');
 await page.click('#sm-tabs [data-tab="overview"]');
